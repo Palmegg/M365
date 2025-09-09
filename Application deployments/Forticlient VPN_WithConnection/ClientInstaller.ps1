@@ -1,13 +1,6 @@
 
 #region ---------------------------------------------------[Script parameters]-----------------------------------------------------
-param(
-    [Parameter(Mandatory=$true)]
-    [string]$CustomerPrefix,
-    [Parameter(Mandatory=$true)]
-    [string]$CustomerVPNConnectionName,
-    [Parameter(Mandatory=$true)]
-    [string]$CustomerVPNConfFileName
-)
+
 #endregion
 
 #region ---------------------------------------------------[Modifiable Parameters and defaults]------------------------------------
