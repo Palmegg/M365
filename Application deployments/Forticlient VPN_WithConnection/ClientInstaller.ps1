@@ -37,10 +37,10 @@ function Write-ToLog {
 
     #If header requested
     if ($IsHeader) {
-        $Log = "################################################################`n         $(Get-Date -Format (Get-culture).DateTimeFormat.ShortDatePattern) $(Get-Date -UFormat \"%T\")  $LogMsg`n################################################################"
+        $Log = "################################################################`n         $(Get-Date -Format (Get-culture).DateTimeFormat.ShortDatePattern) $(Get-Date -UFormat "%T")  $LogMsg`n################################################################"
     }
     else {
-        $Log = "$(Get-Date -UFormat \"%T\") - $LogMsg"
+        $Log = "$(Get-Date -UFormat "%T") - $LogMsg"
     }
 
     #Echo log
