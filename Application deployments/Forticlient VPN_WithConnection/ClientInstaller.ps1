@@ -1,16 +1,17 @@
 #region ---------------------------------------------------[Script parameters]-----------------------------------------------------
 param(
-[Parameter(Mandatory=$false)][string]$CustomerPrefix,
-[Parameter(Mandatory=$false)][string]$CustomerVPNConnectionName,
-[Parameter(Mandatory=$false)][string]$CustomerVPNConfFileName
+[Parameter(Mandatory=$false)][string]$Prefix,
+[Parameter(Mandatory=$false)][string]$VpnConnectionDescription,
+[Parameter(Mandatory=$false)][string]$VpnConfFileName,
+[Parameter(Mandatory=$false)][string]$Endpoint
 )
 
 #endregion
 
 #region ---------------------------------------------------[Modifiable Parameters and defaults]------------------------------------
 [string]$CorpDataPath                 = "C:\ProgramData\Microsoft\IntuneManagementExtension\Logs"
-[string]$ApplicationLogName           = "#${CustomerPrefix}_ForticlientInstaller"
-[string]$CustomerVPNConfFileName      = "$CustomerVPNConfFileName.reg"
+[string]$ApplicationLogName           = "#${Prefix}_ForticlientInstaller"
+[string]$VpnConfFileName              = "$VpnConfFileName.reg"
 #endregion
 
 #region ---------------------------------------------------[Static Variables]------------------------------------------------------
@@ -102,14 +103,49 @@ function Test-FortiClientInstallation {
 
 function Test-VPNConnectionRegistry {
     param (
-        [string]$ConnectionName
+        [string]$ConnectionName,
+        [string]$Endpoint
     )
     $RegPath = "HKLM:\SOFTWARE\Fortinet\FortiClient\Sslvpn\Tunnels\$ConnectionName"
     if (Test-Path -LiteralPath $RegPath) {
-        Write-ToLog "Registry check: VPN tunnel configuration found: $ConnectionName"
-        return $true
+        try {
+            $serverValue = (Get-ItemProperty -Path $RegPath -Name 'server' -ErrorAction SilentlyContinue).server
+            if ($serverValue -and $serverValue -eq $Endpoint) {
+                Write-ToLog "Registry check: VPN tunnel '$ConnectionName' found and server matches endpoint '$Endpoint'"
+                return $true
+            } else {
+                Write-ToLog "Registry check: VPN tunnel '$ConnectionName' found but server does not match endpoint ('$serverValue' vs '$Endpoint')" "Yellow"
+                return $false
+            }
+        } catch {
+            Write-ToLog "Registry check: Error reading server value for '$ConnectionName': $($_.Exception.Message)" "Red"
+            return $false
+        }
     } else {
         Write-ToLog "Registry check: VPN tunnel configuration not found: $ConnectionName" "Yellow"
+        return $false
+    }
+}
+function Test-RegistryValue {
+    param (
+        [Parameter(Mandatory=$true)]
+        [ValidateNotNullOrEmpty()]$ConnectionName,
+        [Parameter(Mandatory=$true)]
+        [ValidateNotNullOrEmpty()]$Endpoint
+    )
+    $RegPath = "HKLM:\SOFTWARE\Fortinet\FortiClient\Sslvpn\Tunnels\$ConnectionName"
+    try {
+        $serverValue = (Get-ItemProperty -Path $RegPath -Name 'server' -ErrorAction Stop).server
+        if ($serverValue -and $serverValue -eq $Endpoint) {
+            Write-ToLog "Registry check: VPN tunnel '$ConnectionName' found and server matches endpoint '$Endpoint'"
+            return $true
+        } else {
+            Write-ToLog "Registry check: VPN tunnel '$ConnectionName' found but server does not match endpoint ('$serverValue' vs '$Endpoint')" "Yellow"
+            return $false
+        }
+    }
+    catch {
+        Write-ToLog "Registry check: Error reading server value for '$ConnectionName': $($_.Exception.Message)" "Red"
         return $false
     }
 }
@@ -153,12 +189,13 @@ if ([string]::IsNullOrWhiteSpace($PSScriptRoot)) {
 
 if (Test-FortiClientInstallation) {
     Write-ToLog "FortiClient is already installed. Checking for customer VPN connection..."
-    if (Test-VPNConnectionRegistry -ConnectionName $CustomerVPNConnectionName) {
-        Write-ToLog "Customer VPN connection '$CustomerVPNConnectionName' is already present in registry. No installation needed." "Green"
+    # NEW
+    if (Test-RegistryValue -ConnectionName -Value "server") {
+        Write-ToLog "Customer VPN connection '$Endpoint' is already present in registry. No installation needed." "Green"
         Write-ToLog "Ending installation script" -IsHeader
         exit 0
     } else {
-        Write-ToLog "FortiClient is installed, but customer VPN connection '$CustomerVPNConnectionName' is missing. Proceeding with configuration..." "Yellow"
+        Write-ToLog "FortiClient is installed, but VPN connection '$Endpoint' is missing. Proceeding with configuration..." "Yellow"
         # Continue to configuration steps below (skip MSI install)
         $SkipMsiInstall = $true
     }
