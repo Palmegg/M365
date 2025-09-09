@@ -1,15 +1,15 @@
 #####
-# Customer variables – adjust these values to your environment:
-# Location of the Fortinet VPN client
+# Kundevariabler – tilpas disse værdier til miljøet:
+# Placeringen af Fortinet VPN-klienten
 $FortinetClientPath = "C:\Program Files\Fortinet\FortiClient\FortiClient.exe"
 
-# Registry path to the desired VPN profile (HKLM)
+# Registry-stien til den ønskede VPN-profil (HKLM)
 $VPNRegKey = "HKLM:\SOFTWARE\Fortinet\FortiClient\Sslvpn\Tunnels\DanskErhvervsfinansieringVPN"
 
-# Registry property checked to validate the VPN profile (e.g., "Description")
+# Registry property som tjekkes for at validere VPN-profilen (fx "Description")
 $VPNRegProperty = "Description"
 
-# Expected value for registry property "Server"
+# Forventet værdi for registry property "Server"
 $ExpectedVPNServer = "vpn.dansk-erhvervsfinansiering.dk:443"
 #####
 
@@ -47,10 +47,10 @@ function Write-ToLog {
         [Parameter()] [Switch] $IsHeader = $false
     )
     
-    # Create the log file if it does not exist
+    # Opret logfilen, hvis den ikke findes
     if (!(Test-Path $LogFile)) {
         New-Item -ItemType File -Path $LogFile -Force | Out-Null
-        # Set ACL for users on the log file
+        # Sæt ACL for brugere på logfilen
         $NewAcl = Get-Acl -Path $LogFile
         $identity = New-Object System.Security.Principal.SecurityIdentifier S-1-5-11
         $fileSystemRights = "Modify"
@@ -72,15 +72,15 @@ function Write-ToLog {
     $Log | Out-File -FilePath $LogFile -Append
 }
 
-# Configure console output encoding
+# Konfigurer konsolens output encoding
 $null = cmd /c '' # Tip for ISE
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 $Script:ProgressPreference = 'SilentlyContinue'
 
 ###############################################################################
-# Log folder and file initialization
+# Log mappe og filinitialisering
 ###############################################################################
-$LogPath = "C:\NetIP"    # Adjust the path if necessary
+$LogPath = "C:\NetIP"    # Tilpas stien, hvis nødvendigt
 if (!(Test-Path $LogPath)) {
     New-Item -ItemType Directory -Force -Path $LogPath | Out-Null
 }
@@ -88,10 +88,10 @@ $Script:LogFile = "$LogPath\#FortinetVPN_Detection.log"
 
 $ReadMeFile = "$LogPath\README.txt"
 $ReadMeContent = @"
-This folder is used by NetIP to manage installations and updates.
+Denne mappe anvendes af NetIP til at styre installationer og opdateringer.
 
 ##############################################
-Do not delete under any circumstances.
+Må ikke slettes under nogen omstændigheder.
 ##############################################
 "@
 if (!(Test-Path $ReadMeFile)) {
@@ -102,44 +102,44 @@ Write-ToLog "Starting Fortinet VPN detection script" -IsHeader
 Write-ToLog "-> Running as: $env:UserName"
 
 ###############################################################################
-# Check if Fortinet VPN client is installed
+# Test om Fortinet VPN-klienten er installeret
 ###############################################################################
 if (Test-Path -Path $FortinetClientPath) {
-    Write-ToLog "Fortinet VPN client found at: $FortinetClientPath" "Green"
+    Write-ToLog "Fortinet VPN klient fundet på: $FortinetClientPath" "Green"
 } else {
-    Write-ToLog "Fortinet VPN client not found at: $FortinetClientPath" "Red"
+    Write-ToLog "Fortinet VPN klient ikke fundet på: $FortinetClientPath" "Red"
     Write-ToLog "Ending detection script" -IsHeader
     ApplicationNotDetected
 }
 
 ###############################################################################
-# Check if the correct VPN profile exists in the registry (HKLM)
+# Test om den korrekte VPN profil findes i registry (HKLM)
 ###############################################################################
 if (Test-RegistryValue -Path $VPNRegKey -Value $VPNRegProperty) {
-    Write-ToLog "VPN profile found in registry: $VPNRegKey" "Green"
+    Write-ToLog "VPN profil fundet i registreringsdatabasen: $VPNRegKey" "Green"
 
-    # Check if the registry value "Server" is correct
+    # Tjek om registry-værdien "Server" er korrekt
     try {
         $ActualServer = (Get-ItemProperty -Path $VPNRegKey -Name "Server" -ErrorAction Stop).Server
         if ($ActualServer -eq $ExpectedVPNServer) {
-            Write-ToLog "Registry check: Server value is correct: $ActualServer" "Green"
+            Write-ToLog "Registry tjek: Server-værdien er korrekt: $ActualServer" "Green"
             Write-ToLog "Ending detection script" -IsHeader
             ApplicationDetected
         }
         else {
-            Write-ToLog "Registry check: Server value is incorrect. Expected: $ExpectedVPNServer, found: $ActualServer" "Red"
+            Write-ToLog "Registry tjek: Server-værdien er forkert. Forventet: $ExpectedVPNServer, fundet: $ActualServer" "Red"
             Write-ToLog "Ending detection script" -IsHeader
             ApplicationNotDetected
         }
     }
     catch {
-        Write-ToLog "Error reading Server value: $($_.Exception.Message)" "Red"
+        Write-ToLog "Fejl under aflæsning af Server-værdien: $($_.Exception.Message)" "Red"
         Write-ToLog "Ending detection script" -IsHeader
         ApplicationNotDetected
     }
 }
 else {
-    Write-ToLog "VPN profile not found in registry: $VPNRegKey" "Red"
+    Write-ToLog "VPN profil ikke fundet i registreringsdatabasen: $VPNRegKey" "Red"
     Write-ToLog "Ending detection script" -IsHeader
     ApplicationNotDetected
 }
