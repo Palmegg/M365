@@ -107,7 +107,7 @@
       // Package definitions
       const packages = {
         forticlient: {
-          title: "FortiClient VPN – script-generator",
+          title: "FortiClient VPN Configurator",
           fields: [
             {
               id: "CustomerPrefix",
@@ -120,13 +120,13 @@
               id: "CustomerVPNConnectionDescription",
               label: "VPN Description",
               placeholder:
-                "fx 'This VPN is used by internal users at Crop A/S'",
+                "This VPN is used by internal users at Crop A/S",
               required: true,
             },
             {
               id: "CustomerVPNConfFileName",
               label: "Name of VPN config file (without .reg)",
-              placeholder: "fx 'Crop A/SCrop VPN'",
+              placeholder: "Crop A/S or Crop VPN",
               required: true,
             },
           ],
