@@ -1,5 +1,9 @@
-
 #region ---------------------------------------------------[Script parameters]-----------------------------------------------------
+param(
+[Parameter(Mandatory=$false)][string]$CustomerPrefix,
+[Parameter(Mandatory=$false)][string]$CustomerVPNConnectionName,
+[Parameter(Mandatory=$false)][string]$CustomerVPNConfFileName
+)
 
 #endregion
 
@@ -75,6 +79,40 @@ function Set-RegistryKey {
         exit 1
     }
 }
+
+function Test-FortiClientInstallation {
+    param (
+        [string]$InstalledFile = "C:\Program Files\Fortinet\FortiClient\FortiClient.exe"
+    )
+    try {
+        if (Test-Path $InstalledFile) {
+            Write-ToLog "Verification: Installed file found: $InstalledFile"
+            return $true
+        }
+        else {
+            Write-ToLog "Verification failed: Installed file not found: $InstalledFile" "Red"
+            return $false
+        }
+    }
+    catch {
+        Write-ToLog "Error during installation verification: $($_.Exception.Message)" "Red"
+        return $false
+    }
+}
+
+function Test-VPNConnectionRegistry {
+    param (
+        [string]$ConnectionName
+    )
+    $RegPath = "HKLM:\SOFTWARE\Fortinet\FortiClient\Sslvpn\Tunnels\$ConnectionName"
+    if (Test-Path -LiteralPath $RegPath) {
+        Write-ToLog "Registry check: VPN tunnel configuration found: $ConnectionName"
+        return $true
+    } else {
+        Write-ToLog "Registry check: VPN tunnel configuration not found: $ConnectionName" "Yellow"
+        return $false
+    }
+}
 #endregion
 
 #region ---------------------------------------------------[Script Execution]------------------------------------------------------
@@ -111,6 +149,24 @@ if ([string]::IsNullOrWhiteSpace($PSScriptRoot)) {
     Write-ToLog "PSScriptRoot is set to: $ScriptRoot"
 }
 
+# Pre-installation check for FortiClient and customer VPN connection
+
+if (Test-FortiClientInstallation) {
+    Write-ToLog "FortiClient is already installed. Checking for customer VPN connection..."
+    if (Test-VPNConnectionRegistry -ConnectionName $CustomerVPNConnectionName) {
+        Write-ToLog "Customer VPN connection '$CustomerVPNConnectionName' is already present in registry. No installation needed." "Green"
+        Write-ToLog "Ending installation script" -IsHeader
+        exit 0
+    } else {
+        Write-ToLog "FortiClient is installed, but customer VPN connection '$CustomerVPNConnectionName' is missing. Proceeding with configuration..." "Yellow"
+        # Continue to configuration steps below (skip MSI install)
+        $SkipMsiInstall = $true
+    }
+} else {
+    Write-ToLog "FortiClient is not installed. Proceeding with MSI installation..."
+    $SkipMsiInstall = $false
+}
+
 # Define path to MSI file (assume MSI is in same folder as script)
 $MsiPath = Join-Path -Path $ScriptRoot -ChildPath "FortiClient.msi"
 if (-Not (Test-Path $MsiPath)) {
@@ -119,42 +175,33 @@ if (-Not (Test-Path $MsiPath)) {
 }
 
 # Install MSI file via msiexec
-try {
-    Write-ToLog "Starting MSI installation: $MsiPath"
-    $Arguments = '/i "FortiClient.msi" /qn /norestart'
-    $process = Start-Process -FilePath "msiexec.exe" -ArgumentList $Arguments -Wait -PassThru -ErrorAction Stop
+if (-not $SkipMsiInstall) {
+    try {
+        Write-ToLog "Starting MSI installation: $MsiPath"
+        $Arguments = '/i "FortiClient.msi" /qn /norestart'
+        $process = Start-Process -FilePath "msiexec.exe" -ArgumentList $Arguments -Wait -PassThru -ErrorAction Stop
 
-    if ($process.ExitCode -ne 0) {
-        Write-ToLog "Installation failed with exit code: $($process.ExitCode)" "Red"
-        exit $process.ExitCode
+        if ($process.ExitCode -ne 0) {
+            Write-ToLog "Installation failed with exit code: $($process.ExitCode)" "Red"
+            exit $process.ExitCode
+        }
+        else {
+            Write-ToLog "MSI installation completed with exit code: $($process.ExitCode)"
+        }
     }
-    else {
-        Write-ToLog "MSI installation completed with exit code: $($process.ExitCode)"
-    }
-}
-catch {
-    Write-ToLog "Error during MSI installation: $($_.Exception.Message)" "Red"
-    exit 1
-}
-
-# Verify installation
-try {
-    # Verification: check if a known file exists
-    $InstalledFile = "C:\Program Files\Fortinet\FortiClient\FortiClient.exe"
-    if (Test-Path $InstalledFile) {
-        Write-ToLog "Verification: Installed file found: $InstalledFile"
-    }
-    else {
-        Write-ToLog "Verification failed: Installed file not found: $InstalledFile" "Red"
+    catch {
+        Write-ToLog "Error during MSI installation: $($_.Exception.Message)" "Red"
         exit 1
     }
-}
-catch {
-    Write-ToLog "Error during installation verification: $($_.Exception.Message)" "Red"
-    exit 1
-}
 
-Write-ToLog "Installation and verification completed successfully"
+    # Verify installation
+    if (-not (Test-FortiClientInstallation)) {
+        exit 1
+    }
+    else {
+        Write-ToLog "FortiClient installation verified successfully."
+    }
+}
 
 Write-ToLog "Disabling default welcome message"
 # Disable VPN welcome message
@@ -167,7 +214,6 @@ catch {
 }
 
 # Import VPN configuration from customer .reg file
-
 try {
     # Define path to .reg (assume file is in same folder as script)
     $regFile = Join-Path -Path $ScriptRoot -ChildPath $CustomerVPNConfFileName
@@ -194,19 +240,8 @@ catch {
 }
 
 # Check registry for VPN tunnel configuration
-try {
-    # Check for expected registry key created via .reg file
-    $RegPath = "HKLM:\SOFTWARE\Fortinet\FortiClient\Sslvpn\Tunnels\$CustomerVPNConnectionName"
-    if (Test-Path -LiteralPath $RegPath) {
-        Write-ToLog "Registry check: VPN tunnel configuration found: $CustomerVPNConnectionName"
-    }
-    else {
-        Write-ToLog "Registry check failed: VPN tunnel configuration not found: $CustomerVPNConnectionName" "Red"
-        exit 1
-    }
-}
-catch {
-    Write-ToLog "Error during registry check: $($_.Exception.Message)" "Red"
+if (-not (Test-VPNConnectionRegistry -ConnectionName $CustomerVPNConnectionName)) {
+    Write-ToLog "Registry check failed: VPN tunnel configuration not found: $CustomerVPNConnectionName" "Red"
     exit 1
 }
 
