@@ -110,21 +110,20 @@
           title: "FortiClient VPN Configurator",
           fields: [
             {
-              id: "CustomerPrefix",
+              id: "Prefix",
               label: "Customer prefix",
               placeholder:
                 "Crop A/S or CRP - This will be shown in registry path",
               required: true,
             },
             {
-              id: "CustomerVPNConnectionDescription",
+              id: "VpnConnectionDescription",
               label: "VPN Description",
-              placeholder:
-                "This VPN is used by internal users at Crop A/S",
+              placeholder: "This VPN is used by internal users at Crop A/S",
               required: true,
             },
             {
-              id: "CustomerVPNConfFileName",
+              id: "VpnConfFileName",
               label: "Name of VPN config file (without .reg)",
               placeholder: "Crop A/S or Crop VPN",
               required: true,
@@ -135,17 +134,17 @@
           title: "DeviceRenamer – script-generator",
           fields: [
             {
-              id: "customerPrefix",
+              id: "Prefix",
               label: "Kunde prefix",
               placeholder: "fx Crop A/S",
               required: true,
             },
           ],
-          template: ({ customerPrefix }) => {
+          template: ({ Prefix }) => {
             return `
 [CmdletBinding()]
 param(
-  [Parameter(Mandatory=$true)][string]$CustomerPrefix = '${customerPrefix}'
+  [Parameter(Mandatory=$true)][string]$Prefix = '${Prefix}'
 )
 
 $Serial = (Get-WmiObject Win32_BIOS).SerialNumber
@@ -153,7 +152,7 @@ $CurrentDeviceName = $env:COMPUTERNAME
 if ($Serial.Length -gt 8) {
   $Serial = $Serial.Substring(0, 8)
 }
-$NewDeviceName = "$CustomerPrefix-$Serial"
+$NewDeviceName = "$Prefix-$Serial"
 Rename-Computer -NewName $NewDeviceName
 Write-Host "Device renamed to $NewDeviceName"
 `.trim();
@@ -214,11 +213,7 @@ Write-Host "Device renamed to $NewDeviceName"
 
       // Unified naming helper
       function getNaming(values) {
-        const prefix = (
-          values.CustomerPrefix ||
-          values.customerPrefix ||
-          "Script"
-        )
+        const prefix = (values.Prefix || values.Prefix || "Script")
           .trim()
           .replace(/\s+/g, "_");
         const pkg = currentPackage;
@@ -226,8 +221,8 @@ Write-Host "Device renamed to $NewDeviceName"
         const zip = `${prefix}-${pkg}.zip`;
         // Use explicit VPN config filename if provided (without .reg expected)
         const regBase = (
-          values.CustomerVPNConfFileName ||
-          values.CustomerVPNConnectionDescription ||
+          values.VpnConfFileName ||
+          values.VpnConnectionDescription ||
           prefix
         )
           .trim()
@@ -266,7 +261,11 @@ Write-Host "Device renamed to $NewDeviceName"
             // Inject after Modifiable Parameters region header
             const modRegionHeader =
               /(\#region[^\n]*\[Modifiable Parameters and defaults\][^\n]*\n)/i;
-            const injected = `# Injected values by generator (can be changed)\n$CustomerPrefix = "${values.CustomerPrefix}"\n$CustomerVPNConnectionDescription = "${values.CustomerVPNConnectionDescription}"\n$CustomerVPNConfFileName = "${values.CustomerVPNConfFileName}"\n`;
+            const injected =
+              `# Injected values by generator (can be changed)\n` +
+              `[string]$Prefix                       = "${values.Prefix}"\n` +
+              `[string]$VpnConnectionDescription     = "${values.VpnConnectionDescription}"\n` +
+              `[string]$VpnConfFileName              = "${values.VpnConfFileName}"\n`;
             if (modRegionHeader.test(script)) {
               script = script.replace(modRegionHeader, (m) => m + injected);
             } else {
@@ -312,8 +311,8 @@ Write-Host "Device renamed to $NewDeviceName"
           zip.file(
             names.reg,
             regTemplate({
-              customerPrefix: values.CustomerPrefix,
-              vpnDescription: values.CustomerVPNConnectionDescription,
+              Prefix: values.Prefix,
+              vpnDescription: values.VpnConnectionDescription,
               server,
             })
           );
@@ -339,8 +338,8 @@ Write-Host "Device renamed to $NewDeviceName"
         });
 
       // Registry file template
-      function regTemplate({ customerPrefix, vpnDescription, server }) {
-        return `Windows Registry Editor Version 5.00\n\n[HKEY_LOCAL_MACHINE\\SOFTWARE\\Fortinet\\FortiClient\\Sslvpn\\Tunnels\\${customerPrefix}]\n"Description"="${vpnDescription}"\n"Server"="${server}"\n"promptusername"=dword:00000000\n"promptcertificate"=dword:00000000\n"ServerCert"="1"\n"DATA3"=""\n"dual_stack"=dword:00000000\n"sso_enabled"=dword:00000001\n"use_external_browser"=dword:00000000\n"azure_auto_login"=dword:00000000`;
+      function regTemplate({ Prefix, vpnDescription, server }) {
+        return `Windows Registry Editor Version 5.00\n\n[HKEY_LOCAL_MACHINE\\SOFTWARE\\Fortinet\\FortiClient\\Sslvpn\\Tunnels\\${Prefix}]\n"Description"="${vpnDescription}"\n"Server"="${server}"\n"promptusername"=dword:00000000\n"promptcertificate"=dword:00000000\n"ServerCert"="1"\n"DATA3"=""\n"dual_stack"=dword:00000000\n"sso_enabled"=dword:00000001\n"use_external_browser"=dword:00000000\n"azure_auto_login"=dword:00000000`;
       }
 
       // Initial render

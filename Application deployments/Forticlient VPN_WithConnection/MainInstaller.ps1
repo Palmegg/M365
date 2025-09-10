@@ -129,18 +129,16 @@ function Test-VPNConnectionRegistry {
 function Test-RegistryValue {
     param (
         [Parameter(Mandatory=$true)]
-        [ValidateNotNullOrEmpty()]$ConnectionName,
-        [Parameter(Mandatory=$true)]
         [ValidateNotNullOrEmpty()]$Endpoint
     )
-    $RegPath = "HKLM:\SOFTWARE\Fortinet\FortiClient\Sslvpn\Tunnels\$ConnectionName"
+    $RegPath = "HKLM:\SOFTWARE\Fortinet\FortiClient\Sslvpn\Tunnels\$Prefix"
     try {
         $serverValue = (Get-ItemProperty -Path $RegPath -Name 'server' -ErrorAction Stop).server
-        if ($serverValue -and $serverValue -eq $Endpoint) {
-            Write-ToLog "Registry check: VPN tunnel '$ConnectionName' found and server matches endpoint '$Endpoint'"
+        if ($serverValue -eq $Endpoint) {
+            Write-ToLog "Registry check: VPN tunnel '$Endpoint' found and server matches endpoint '$Endpoint'"
             return $true
         } else {
-            Write-ToLog "Registry check: VPN tunnel '$ConnectionName' found but server does not match endpoint ('$serverValue' vs '$Endpoint')" "Yellow"
+            Write-ToLog "Registry check: VPN tunnel '$Endpoint' found but server does not match endpoint ('$serverValue' vs '$Endpoint')" "Yellow"
             return $false
         }
     }
@@ -190,12 +188,12 @@ if ([string]::IsNullOrWhiteSpace($PSScriptRoot)) {
 if (Test-FortiClientInstallation) {
     Write-ToLog "FortiClient is already installed. Checking for customer VPN connection..."
     # NEW
-    if (Test-RegistryValue -ConnectionName -Value "server") {
-        Write-ToLog "Customer VPN connection '$Endpoint' is already present in registry. No installation needed." "Green"
+    if (Test-RegistryValue -Endpoint $Endpoint) {
+        Write-ToLog "VPN connection '$Endpoint' is already present in registry. No installation needed." "Green"
         Write-ToLog "Ending installation script" -IsHeader
         exit 0
     } else {
-        Write-ToLog "FortiClient is installed, but VPN connection '$Endpoint' is missing. Proceeding with configuration..." "Yellow"
+        Write-ToLog "VPN connection '$Endpoint' is missing. Proceeding with configuration..." "Yellow"
         # Continue to configuration steps below (skip MSI install)
         $SkipMsiInstall = $true
     }
@@ -253,7 +251,7 @@ catch {
 # Import VPN configuration from customer .reg file
 try {
     # Define path to .reg (assume file is in same folder as script)
-    $regFile = Join-Path -Path $ScriptRoot -ChildPath $CustomerVPNConfFileName
+    $regFile = Join-Path -Path $ScriptRoot -ChildPath $VpnConfFileName
     if (-not (Test-Path -LiteralPath $regFile)) {
         Write-ToLog "Reg file not found: $regFile" "Red"
         exit 1
@@ -277,10 +275,13 @@ catch {
 }
 
 # Check registry for VPN tunnel configuration
-if (-not (Test-VPNConnectionRegistry -ConnectionName $CustomerVPNConnectionName)) {
-    Write-ToLog "Registry check failed: VPN tunnel configuration not found: $CustomerVPNConnectionName" "Red"
-    exit 1
-}
-
-Write-ToLog "Ending installation script" -IsHeader
+ if (Test-RegistryValue -Endpoint $Endpoint) {
+        Write-ToLog "VPN connection '$Endpoint' found" "Green"
+        Write-ToLog "Ending installation script" -IsHeader
+        exit 0
+    } else {
+        Write-ToLog "Registry check failed: VPN tunnel configuration not found: '$Endpoint' is missing." "Red"
+        Write-ToLog "Ending installation script" -IsHeader
+        exit 1
+    }
 #endregion
