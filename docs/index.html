@@ -66,24 +66,6 @@
       <h1 id="pageTitle">FortiClient VPN – script-generator</h1>
       <form id="form" class="mb-4">
         <div id="formFields"></div>
-        <div class="form-check mb-3">
-          <input class="form-check-input" type="checkbox" id="genRegFile" />
-          <label class="form-check-label" for="genRegFile">
-            Do you want me to generate your .registry file containing VPN
-            connection information?
-          </label>
-        </div>
-        <div id="regFields" style="display: none">
-          <div class="mb-3">
-            <label class="form-label">Endpoint to connect to:</label>
-            <input
-              type="text"
-              class="form-control"
-              id="Endpoint"
-              placeholder="vpn.example.com:443"
-            />
-          </div>
-        </div>
         <button type="button" class="btn btn-success" id="btnGen">
           Generate
         </button>
@@ -126,6 +108,12 @@
               id: "VpnConfFileName",
               label: "Name of VPN config file (without .reg)",
               placeholder: "Crop A/S or Crop VPN",
+              required: true,
+            },
+            {
+              id: "Endpoint",
+              label: "Endpoint to connect to:",
+              placeholder: "vpn.example.com:443",
               required: true,
             },
           ],
@@ -265,7 +253,8 @@ Write-Host "Device renamed to $NewDeviceName"
               `# Injected values by generator (can be changed)\n` +
               `[string]$Prefix                       = "${values.Prefix}"\n` +
               `[string]$VpnConnectionDescription     = "${values.VpnConnectionDescription}"\n` +
-              `[string]$VpnConfFileName              = "${values.VpnConfFileName}"\n`;
+              `[string]$VpnConfFileName              = "${values.VpnConfFileName}"\n` +
+              `[string]$Endpoint                     = "${values.Endpoint}"\n`;
             if (modRegionHeader.test(script)) {
               script = script.replace(modRegionHeader, (m) => m + injected);
             } else {
@@ -306,17 +295,6 @@ Write-Host "Device renamed to $NewDeviceName"
         const names = getNaming(values);
         const zip = new JSZip();
         zip.file(names.script, window.latestScript);
-        if (document.getElementById("genRegFile").checked) {
-          const server = document.getElementById("Endpoint").value.trim();
-          zip.file(
-            names.reg,
-            regTemplate({
-              Prefix: values.Prefix,
-              vpnDescription: values.VpnConnectionDescription,
-              server,
-            })
-          );
-        }
         const blob = await zip.generateAsync({ type: "blob" });
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
@@ -327,20 +305,6 @@ Write-Host "Device renamed to $NewDeviceName"
         a.remove();
         URL.revokeObjectURL(url);
       });
-
-      // Show/hide registry fields
-      document
-        .getElementById("genRegFile")
-        .addEventListener("change", function () {
-          document.getElementById("regFields").style.display = this.checked
-            ? ""
-            : "none";
-        });
-
-      // Registry file template
-      function regTemplate({ Prefix, vpnDescription, server }) {
-        return `Windows Registry Editor Version 5.00\n\n[HKEY_LOCAL_MACHINE\\SOFTWARE\\Fortinet\\FortiClient\\Sslvpn\\Tunnels\\${Prefix}]\n"Description"="${vpnDescription}"\n"Server"="${server}"\n"promptusername"=dword:00000000\n"promptcertificate"=dword:00000000\n"ServerCert"="1"\n"DATA3"=""\n"dual_stack"=dword:00000000\n"sso_enabled"=dword:00000001\n"use_external_browser"=dword:00000000\n"azure_auto_login"=dword:00000000`;
-      }
 
       // Initial render
       renderFormFields();

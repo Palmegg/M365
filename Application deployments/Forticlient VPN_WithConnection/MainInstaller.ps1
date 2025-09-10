@@ -100,32 +100,6 @@ function Test-FortiClientInstallation {
         return $false
     }
 }
-
-function Test-VPNConnectionRegistry {
-    param (
-        [string]$ConnectionName,
-        [string]$Endpoint
-    )
-    $RegPath = "HKLM:\SOFTWARE\Fortinet\FortiClient\Sslvpn\Tunnels\$ConnectionName"
-    if (Test-Path -LiteralPath $RegPath) {
-        try {
-            $serverValue = (Get-ItemProperty -Path $RegPath -Name 'server' -ErrorAction SilentlyContinue).server
-            if ($serverValue -and $serverValue -eq $Endpoint) {
-                Write-ToLog "Registry check: VPN tunnel '$ConnectionName' found and server matches endpoint '$Endpoint'"
-                return $true
-            } else {
-                Write-ToLog "Registry check: VPN tunnel '$ConnectionName' found but server does not match endpoint ('$serverValue' vs '$Endpoint')" "Yellow"
-                return $false
-            }
-        } catch {
-            Write-ToLog "Registry check: Error reading server value for '$ConnectionName': $($_.Exception.Message)" "Red"
-            return $false
-        }
-    } else {
-        Write-ToLog "Registry check: VPN tunnel configuration not found: $ConnectionName" "Yellow"
-        return $false
-    }
-}
 function Test-RegistryValue {
     param (
         [Parameter(Mandatory=$true)]
