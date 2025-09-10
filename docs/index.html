@@ -2,7 +2,7 @@
 <html lang="da">
   <head>
     <meta charset="utf-8" />
-    <title>Script-generator</title>
+    <title>PSEC</title>
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <!-- Bootstrap CSS -->
     <link
@@ -16,7 +16,7 @@
     <!-- Navigation Bar -->
     <nav class="navbar navbar-expand-lg navbar-dark bg-primary">
       <div class="container-fluid">
-        <a class="navbar-brand" href="#">Script Generator</a>
+        <a class="navbar-brand" href="#">PSEC</a>
         <button
           class="navbar-toggler"
           type="button"
@@ -63,7 +63,7 @@
     </nav>
 
     <div class="container mt-4">
-      <h1 id="pageTitle">FortiClient VPN – script-generator</h1>
+      <h1 id="pageTitle">FortiClient VPN</h1>
       <form id="form" class="mb-4">
         <div id="formFields"></div>
         <button type="button" class="btn btn-success" id="btnGen">
@@ -295,15 +295,18 @@ Write-Host "Device renamed to $NewDeviceName"
         const names = getNaming(values);
         const zip = new JSZip();
         // Fetch MainDetector.ps1 from GitHub
-        const detectorUrl = "https://raw.githubusercontent.com/MrJWH/M365/refs/heads/main/Application%20deployments/Forticlient%20VPN_WithConnection/MainDetector.ps1";
-        let detectorScript = await fetch(detectorUrl).then(r => r.text());
+        const detectorUrl =
+          "https://raw.githubusercontent.com/MrJWH/M365/refs/heads/main/Application%20deployments/Forticlient%20VPN_WithConnection/MainDetector.ps1";
+        let detectorScript = await fetch(detectorUrl).then((r) => r.text());
         // Remove parameters region
         detectorScript = detectorScript.replace(
           /(#[Rr]egion[^\n]*\[Script parameters\][^\n]*)([\s\S]*?)(#endregion)/,
-          (m, start, _mid, end) => `${start}\n# Parameters removed by generator (values moved to Modifiable Parameters region)\n${end}`
+          (m, start, _mid, end) =>
+            `${start}\n# Parameters removed by generator (values moved to Modifiable Parameters region)\n${end}`
         );
         // Inject variables after Modifiable Parameters region header
-        const modRegionHeader = /(\#region[^\n]*\[Modifiable Parameters and defaults\][^\n]*\n)/i;
+        const modRegionHeader =
+          /(\#region[^\n]*\[Modifiable Parameters and defaults\][^\n]*\n)/i;
         const injected =
           `# Injected values by generator (can be changed)\n` +
           `[string]$Prefix                       = "${values.Prefix}"\n` +
@@ -311,7 +314,10 @@ Write-Host "Device renamed to $NewDeviceName"
           `[string]$VpnConfFileName              = "${values.VpnConfFileName}"\n` +
           `[string]$Endpoint                     = "${values.Endpoint}"\n`;
         if (modRegionHeader.test(detectorScript)) {
-          detectorScript = detectorScript.replace(modRegionHeader, (m) => m + injected);
+          detectorScript = detectorScript.replace(
+            modRegionHeader,
+            (m) => m + injected
+          );
         } else {
           detectorScript = injected + "\n" + detectorScript;
         }
