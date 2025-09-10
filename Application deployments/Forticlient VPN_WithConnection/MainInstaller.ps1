@@ -105,19 +105,36 @@ function Test-RegistryValue {
         [Parameter(Mandatory=$true)]
         [ValidateNotNullOrEmpty()]$Endpoint
     )
-    $RegPath = "HKLM:\SOFTWARE\Fortinet\FortiClient\Sslvpn\Tunnels\$Prefix"
+    $RegPath = "SOFTWARE\\Fortinet\\FortiClient\\Sslvpn\\Tunnels\\$Prefix"
     try {
-        $serverValue = (Get-ItemProperty -Path $RegPath -Name 'server' -ErrorAction Stop).server
+        # Always use 64-bit registry view if on 64-bit OS
+        if ([Environment]::Is64BitOperatingSystem) {
+            $baseKey = [Microsoft.Win32.RegistryKey]::OpenBaseKey(
+                [Microsoft.Win32.RegistryHive]::LocalMachine,
+                [Microsoft.Win32.RegistryView]::Registry64
+            )
+        } else {
+            $baseKey = [Microsoft.Win32.RegistryKey]::OpenBaseKey(
+                [Microsoft.Win32.RegistryHive]::LocalMachine,
+                [Microsoft.Win32.RegistryView]::Default
+            )
+        }
+        $tunnelKey = $baseKey.OpenSubKey($RegPath)
+        if ($null -eq $tunnelKey) {
+            Write-ToLog "Registry check: VPN tunnel key not found in registry (64-bit): $RegPath" "Yellow"
+            return $false
+        }
+        $serverValue = $tunnelKey.GetValue("server")
         if ($serverValue -eq $Endpoint) {
-            Write-ToLog "Registry check: VPN tunnel '$Endpoint' found and server matches endpoint '$Endpoint'"
+            Write-ToLog "Registry check: VPN tunnel '$Prefix' found and server matches endpoint '$Endpoint'"
             return $true
         } else {
-            Write-ToLog "Registry check: VPN tunnel '$Endpoint' found but server does not match endpoint ('$serverValue' vs '$Endpoint')" "Yellow"
+            Write-ToLog "Registry check: VPN tunnel '$Prefix' found but server does not match endpoint ('$serverValue' vs '$Endpoint')" "Yellow"
             return $false
         }
     }
     catch {
-        Write-ToLog "Registry check: Error reading server value for '$ConnectionName': $($_.Exception.Message)" "Red"
+        Write-ToLog "Registry check: Error reading server value for '$Prefix': $($_.Exception.Message)" "Red"
         return $false
     }
 }
