@@ -1,7 +1,6 @@
 #region ---------------------------------------------------[Script parameters]-----------------------------------------------------
 param(
 [Parameter(Mandatory=$false)][string]$Prefix,
-[Parameter(Mandatory=$false)][string]$VpnConnectionDescription,
 [Parameter(Mandatory=$false)][string]$VpnConfFileName,
 [Parameter(Mandatory=$false)][string]$Endpoint
 )
@@ -282,14 +281,4 @@ if (-not $base64.OpenSubKey($tunnelKeyPath)) {
 }
 # ---------------------------------------------------------------------------
 
-# Check registry for VPN tunnel configuration (server value equals endpoint)
-if (Test-RegistryValue -Endpoint $Endpoint) {
-    Write-ToLog "VPN connection '$Endpoint' found" "Green"
-    Write-ToLog "Ending installation script" -IsHeader
-    exit 0
-} else {
-    Write-ToLog "Registry check failed: VPN tunnel configuration not found: '$Endpoint' is missing." "Red"
-    Write-ToLog "Ending installation script" -IsHeader
-    exit 1
-}
 #endregion

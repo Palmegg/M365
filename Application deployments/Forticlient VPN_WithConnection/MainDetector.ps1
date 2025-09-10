@@ -117,7 +117,7 @@ function Test-RegistryValue {
         }
     }
     catch {
-        Write-ToLog "Registry check: Error reading server value for '$ConnectionName': $($_.Exception.Message)" "Red"
+        Write-ToLog "Registry check: Error reading server value for '$Prefix': $($_.Exception.Message)" "Red"
         return $false
     }
 }
@@ -175,54 +175,6 @@ if (Test-FortiClientInstallation) {
 }
 else {
     Write-ToLog "FortiClient is not installed." "Red"
-    Write-ToLog "Ending detection script" -IsHeader
-    ApplicationNotDetected
-}
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-###############################################################################
-# Test om den korrekte VPN profil findes i registry (HKLM)
-###############################################################################
-if (Test-RegistryValue -Path $VPNRegKey -Value $VPNRegProperty) {
-    Write-ToLog "VPN profil fundet i registreringsdatabasen: $VPNRegKey" "Green"
-
-    # Tjek om registry-værdien "Server" er korrekt
-    try {
-        $ActualServer = (Get-ItemProperty -Path $VPNRegKey -Name "Server" -ErrorAction Stop).Server
-        if ($ActualServer -eq $ExpectedVPNServer) {
-            Write-ToLog "Registry tjek: Server-værdien er korrekt: $ActualServer" "Green"
-            Write-ToLog "Ending detection script" -IsHeader
-            ApplicationDetected
-        }
-        else {
-            Write-ToLog "Registry tjek: Server-værdien er forkert. Forventet: $ExpectedVPNServer, fundet: $ActualServer" "Red"
-            Write-ToLog "Ending detection script" -IsHeader
-            ApplicationNotDetected
-        }
-    }
-    catch {
-        Write-ToLog "Fejl under aflæsning af Server-værdien: $($_.Exception.Message)" "Red"
-        Write-ToLog "Ending detection script" -IsHeader
-        ApplicationNotDetected
-    }
-}
-else {
-    Write-ToLog "VPN profil ikke fundet i registreringsdatabasen: $VPNRegKey" "Red"
     Write-ToLog "Ending detection script" -IsHeader
     ApplicationNotDetected
 }
