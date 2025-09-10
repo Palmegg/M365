@@ -232,13 +232,14 @@ try {
     }
     Write-ToLog "Starting import of reg file: $regFile"
 
-    # Determine path to 64-bit reg.exe
-    $regExe = "$env:windir\system32\reg.exe"
-    if (-not (Test-Path $regExe)) {
-        # If running in 32-bit context, use sysnative to access 64-bit reg.exe
+    # ----------------------- 64-bit reg.exe enforcement -----------------------
+    # Force 64-bit reg.exe when the process is 32-bit on a 64-bit OS
+    $regExe = "$env:windir\reg.exe"
+    if ([Environment]::Is64BitOperatingSystem -and -not [Environment]::Is64BitProcess) {
         $regExe = "$env:windir\sysnative\reg.exe"
     }
     Write-ToLog "Using reg.exe at: $regExe for import of .reg file"
+    # -------------------------------------------------------------------------
 
     Start-Process -FilePath $regExe -ArgumentList "import", "`"$regFile`"" -Wait -NoNewWindow -ErrorAction Stop
     Write-ToLog "Reg file '$regFile' imported successfully."
@@ -248,8 +249,23 @@ catch {
     exit 1
 }
 
-# Check registry for VPN tunnel configuration
- if (Test-RegistryValue -Endpoint $Endpoint) {
+# ----------------------- 64-bit registry verification -----------------------
+$base64 = [Microsoft.Win32.RegistryKey]::OpenBaseKey(
+    [Microsoft.Win32.RegistryHive]::LocalMachine,
+    [Microsoft.Win32.RegistryView]::Registry64
+)
+$tunnelKeyPath = "SOFTWARE\Fortinet\FortiClient\Sslvpn\Tunnels\$Prefix"
+if (-not $base64.OpenSubKey($tunnelKeyPath)) {
+    Write-ToLog "Registry check (64-bit) failed: $tunnelKeyPath" -LogColor Red
+    Write-ToLog "Ending installation script" -IsHeader
+    exit 1
+} else {
+    Write-ToLog "Registry check (64-bit) succeeded: $tunnelKeyPath"
+}
+# ---------------------------------------------------------------------------
+
+# Check registry for VPN tunnel configuration (server value equals endpoint)
+if (Test-RegistryValue -Endpoint $Endpoint) {
     Write-ToLog "VPN connection '$Endpoint' found" "Green"
     Write-ToLog "Ending installation script" -IsHeader
     exit 0
