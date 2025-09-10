@@ -121,6 +121,15 @@ function Test-RegistryValue {
         return $false
     }
 }
+
+function ApplicationDetected {
+    Write-Host "Fortinet VPN klient med korrekt VPN profil er installeret."
+    exit 0
+}
+
+function ApplicationNotDetected {
+    exit 1
+}
 #endregion
 
 #region ---------------------------------------------------[Script Execution]------------------------------------------------------
@@ -145,117 +154,75 @@ if (!(Test-Path $ReadMeFile)) {
     $ReadMeContent | Out-File -FilePath $ReadMeFile
 }
 
-Write-ToLog "Starting installation script" -IsHeader
+Write-ToLog "Starting detection script" -IsHeader
 Write-ToLog "Running as: $env:UserName"
 
-# If $PSScriptRoot is not defined (e.g. interactive run), use current folder
-if ([string]::IsNullOrWhiteSpace($PSScriptRoot)) {
-    $ScriptRoot = Get-Location
-    Write-ToLog "PSScriptRoot was empty, set to current folder: $ScriptRoot"
-} else {
-    $ScriptRoot = $PSScriptRoot
-    Write-ToLog "PSScriptRoot is set to: $ScriptRoot"
-}
-
-# Pre-installation check for FortiClient and customer VPN connection
-
+###############################################################################
+# Test om Fortinet VPN-klienten er installeret
+###############################################################################
 if (Test-FortiClientInstallation) {
-    Write-ToLog "FortiClient is already installed. Checking for customer VPN connection..."
-    # NEW
+
+    Write-ToLog "FortiClient is installed. Checking for VPN profile..."
     if (Test-RegistryValue -Endpoint $Endpoint) {
-        Write-ToLog "VPN connection '$Endpoint' is already present in registry. No installation needed." "Green"
-        Write-ToLog "Ending installation script" -IsHeader
-        exit 0
+    Write-ToLog "VPN connection '$Endpoint' found" "Green"
+    Write-ToLog "Ending detection script" -IsHeader
+    ApplicationDetected
     } else {
-        Write-ToLog "VPN connection '$Endpoint' is missing. Proceeding with configuration..." "Yellow"
-        # Continue to configuration steps below (skip MSI install)
-        $SkipMsiInstall = $true
-    }
-} else {
-    Write-ToLog "FortiClient is not installed. Proceeding with MSI installation..."
-    $SkipMsiInstall = $false
+    Write-ToLog "Registry check failed: VPN tunnel configuration not found: '$Endpoint' is missing." "Red"
+    Write-ToLog "Ending detection script" -IsHeader
+    ApplicationNotDetected
+}
+}
+else {
+    Write-ToLog "FortiClient is not installed." "Red"
+    Write-ToLog "Ending detection script" -IsHeader
+    ApplicationNotDetected
 }
 
-# Define path to MSI file (assume MSI is in same folder as script)
-$MsiPath = Join-Path -Path $ScriptRoot -ChildPath "FortiClient.msi"
-if (-Not (Test-Path $MsiPath)) {
-    Write-ToLog "MSI file not found: $MsiPath" "Red"
-    exit 1
-}
 
-# Install MSI file via msiexec
-if (-not $SkipMsiInstall) {
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+###############################################################################
+# Test om den korrekte VPN profil findes i registry (HKLM)
+###############################################################################
+if (Test-RegistryValue -Path $VPNRegKey -Value $VPNRegProperty) {
+    Write-ToLog "VPN profil fundet i registreringsdatabasen: $VPNRegKey" "Green"
+
+    # Tjek om registry-værdien "Server" er korrekt
     try {
-        Write-ToLog "Starting MSI installation: $MsiPath"
-        $Arguments = '/i "FortiClient.msi" /qn /norestart'
-        $process = Start-Process -FilePath "msiexec.exe" -ArgumentList $Arguments -Wait -PassThru -ErrorAction Stop
-
-        if ($process.ExitCode -ne 0) {
-            Write-ToLog "Installation failed with exit code: $($process.ExitCode)" "Red"
-            exit $process.ExitCode
+        $ActualServer = (Get-ItemProperty -Path $VPNRegKey -Name "Server" -ErrorAction Stop).Server
+        if ($ActualServer -eq $ExpectedVPNServer) {
+            Write-ToLog "Registry tjek: Server-værdien er korrekt: $ActualServer" "Green"
+            Write-ToLog "Ending detection script" -IsHeader
+            ApplicationDetected
         }
         else {
-            Write-ToLog "MSI installation completed with exit code: $($process.ExitCode)"
+            Write-ToLog "Registry tjek: Server-værdien er forkert. Forventet: $ExpectedVPNServer, fundet: $ActualServer" "Red"
+            Write-ToLog "Ending detection script" -IsHeader
+            ApplicationNotDetected
         }
     }
     catch {
-        Write-ToLog "Error during MSI installation: $($_.Exception.Message)" "Red"
-        exit 1
-    }
-
-    # Verify installation
-    if (-not (Test-FortiClientInstallation)) {
-        exit 1
-    }
-    else {
-        Write-ToLog "FortiClient installation verified successfully."
+        Write-ToLog "Fejl under aflæsning af Server-værdien: $($_.Exception.Message)" "Red"
+        Write-ToLog "Ending detection script" -IsHeader
+        ApplicationNotDetected
     }
 }
-
-Write-ToLog "Disabling default welcome message"
-# Disable VPN welcome message
-try {
-    Set-RegistryKey -Key 'HKEY_LOCAL_MACHINE\SOFTWARE\Fortinet\FortiClient\Sslvpn' -Name 'show_vpn_welcome' -Type DWord -Value 0
+else {
+    Write-ToLog "VPN profil ikke fundet i registreringsdatabasen: $VPNRegKey" "Red"
+    Write-ToLog "Ending detection script" -IsHeader
+    ApplicationNotDetected
 }
-catch {
-    Write-ToLog "Error disabling VPN welcome message: $($_.Exception.Message)" "Red"
-    exit 1
-}
-
-# Import VPN configuration from customer .reg file
-try {
-    # Define path to .reg (assume file is in same folder as script)
-    $regFile = Join-Path -Path $ScriptRoot -ChildPath $VpnConfFileName
-    if (-not (Test-Path -LiteralPath $regFile)) {
-        Write-ToLog "Reg file not found: $regFile" "Red"
-        exit 1
-    }
-    Write-ToLog "Starting import of reg file: $regFile"
-
-    # Determine path to 64-bit reg.exe
-    $regExe = "$env:windir\system32\reg.exe"
-    if (-not (Test-Path $regExe)) {
-        # If running in 32-bit context, use sysnative to access 64-bit reg.exe
-        $regExe = "$env:windir\sysnative\reg.exe"
-    }
-    Write-ToLog "Using reg.exe at: $regExe for import of .reg file"
-
-    Start-Process -FilePath $regExe -ArgumentList "import", "`"$regFile`"" -Wait -NoNewWindow -ErrorAction Stop
-    Write-ToLog "Reg file '$regFile' imported successfully."
-}
-catch {
-    Write-ToLog "Error during reg file import: $($_.Exception.Message)" "Red"
-    exit 1
-}
-
-# Check registry for VPN tunnel configuration
- if (Test-RegistryValue -Endpoint $Endpoint) {
-    Write-ToLog "VPN connection '$Endpoint' found" "Green"
-    Write-ToLog "Ending installation script" -IsHeader
-    exit 0
-} else {
-    Write-ToLog "Registry check failed: VPN tunnel configuration not found: '$Endpoint' is missing." "Red"
-    Write-ToLog "Ending installation script" -IsHeader
-    exit 1
-}
-#endregion
