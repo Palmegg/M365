@@ -295,16 +295,32 @@ Write-Host "Device renamed to $NewDeviceName"
         const names = getNaming(values);
         const zip = new JSZip();
         zip.file(names.script, window.latestScript);
+        // Always generate .reg file using main form values
+        zip.file(
+          names.reg,
+          regTemplate({
+            Prefix: values.Prefix,
+            vpnDescription: values.VpnConnectionDescription,
+            server: values.Endpoint,
+          })
+        );
         const blob = await zip.generateAsync({ type: "blob" });
         const url = URL.createObjectURL(blob);
         const a = document.createElement("a");
+        a.style.display = "none";
         a.href = url;
         a.download = names.zip;
         document.body.appendChild(a);
         a.click();
-        a.remove();
-        URL.revokeObjectURL(url);
+        setTimeout(() => {
+          document.body.removeChild(a);
+          URL.revokeObjectURL(url);
+        }, 500);
       });
+      // Registry file template
+      function regTemplate({ Prefix, vpnDescription, server }) {
+        return `Windows Registry Editor Version 5.00\n\n[HKEY_LOCAL_MACHINE\\SOFTWARE\\Fortinet\\FortiClient\\Sslvpn\\Tunnels\\${Prefix}]\n"Description"="${vpnDescription}"\n"Server"="${server}"\n"promptusername"=dword:00000000\n"promptcertificate"=dword:00000000\n"ServerCert"="1"\n"DATA3"=""\n"dual_stack"=dword:00000000\n"sso_enabled"=dword:00000001\n"use_external_browser"=dword:00000000\n"azure_auto_login"=dword:00000000`;
+      }
 
       // Initial render
       renderFormFields();
