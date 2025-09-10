@@ -296,26 +296,25 @@ Write-Host "Device renamed to $NewDeviceName"
         const zip = new JSZip();
         zip.file(names.script, window.latestScript);
         // Always generate .reg file using main form values
-        zip.file(
-          names.reg,
-          regTemplate({
-            Prefix: values.Prefix,
-            vpnDescription: values.VpnConnectionDescription,
-            server: values.Endpoint,
-          })
-        );
-        const blob = await zip.generateAsync({ type: "blob" });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.style.display = "none";
-        a.href = url;
-        a.download = names.zip;
-        document.body.appendChild(a);
-        a.click();
-        setTimeout(() => {
-          document.body.removeChild(a);
-          URL.revokeObjectURL(url);
-        }, 500);
+        const regContent = regTemplate({
+          Prefix: values.Prefix,
+          vpnDescription: values.VpnConnectionDescription,
+          server: values.Endpoint,
+        });
+        zip.file(names.reg, regContent);
+        zip.generateAsync({ type: "blob" }).then((blob) => {
+          const url = URL.createObjectURL(blob);
+          const a = document.createElement("a");
+          a.style.display = "none";
+          a.href = url;
+          a.download = names.zip;
+          document.body.appendChild(a);
+          a.click();
+          setTimeout(() => {
+            document.body.removeChild(a);
+            URL.revokeObjectURL(url);
+          }, 500);
+        });
       });
       // Registry file template
       function regTemplate({ Prefix, vpnDescription, server }) {
