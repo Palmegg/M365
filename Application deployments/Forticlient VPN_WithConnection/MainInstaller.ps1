@@ -1,13 +1,14 @@
 #region ---------------------------------------------------[Script parameters]-----------------------------------------------------
-# Parameters removed by generator (values moved to Modifiable Parameters region)
+param(
+[Parameter(Mandatory=$false)][string]$Prefix,
+[Parameter(Mandatory=$false)][string]$VpnConnectionDescription,
+[Parameter(Mandatory=$false)][string]$VpnConfFileName,
+[Parameter(Mandatory=$false)][string]$Endpoint
+)
+
 #endregion
 
 #region ---------------------------------------------------[Modifiable Parameters and defaults]------------------------------------
-# Injected values by generator (can be changed)
-[string]$Prefix                       = "Ronald VPN"
-[string]$VpnConnectionDescription     = "Description"
-[string]$VpnConfFileName              = "RonaldTunnel"
-[string]$Endpoint                     = "vpn.ronald.dk:443"
 [string]$CorpDataPath                 = "C:\ProgramData\Microsoft\IntuneManagementExtension\Logs"
 [string]$ApplicationLogName           = "#${Prefix}_ForticlientInstaller"
 [string]$VpnConfFileName              = "$VpnConfFileName.reg"
