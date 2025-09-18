@@ -1,0 +1,180 @@
+/* --- Lofi Theme Colors --- */
+:root {
+  /* Lofi Night Theme Colors (for dark mode only) */
+  --lofi-bg: #23243a;
+  --lofi-bg-dark: #18192b;
+  --lofi-card: #292a3e;
+  --lofi-primary: #7e7ff2;
+  --lofi-accent: #a7b3f7;
+  --lofi-btn: #7e7ff2;
+  --lofi-btn-hover: #a7b3f7;
+  --lofi-success: #3ecf8e;
+  --lofi-text: #f4f6fb;
+  --lofi-text-muted: #bfc2d5;
+  --lofi-border: #35365a;
+}
+
+/* Light theme: Use standard Bootstrap/white look */
+body.light-theme {
+  background: #fff;
+  color: #212529;
+}
+body.light-theme .navbar {
+  background-color: #3ecf8e !important;
+}
+body.light-theme .navbar-brand,
+body.light-theme .nav-link,
+body.light-theme .dropdown-item {
+  color: #212529 !important;
+}
+body.light-theme .bg-light,
+body.light-theme pre.bg-light {
+  background-color: #f8f9fa !important;
+  color: #212529 !important;
+}
+body.light-theme .btn-success,
+body.light-theme .btn-primary,
+body.light-theme .btn-secondary {
+  background-color: #0d6efd;
+  border-color: #0d6efd;
+  color: #fff;
+}
+body.light-theme .btn-success:hover,
+body.light-theme .btn-primary:hover,
+body.light-theme .btn-secondary:hover {
+  background-color: #0b5ed7;
+  color: #fff;
+}
+body.light-theme input.form-control {
+  background: #fff;
+  border-color: #ced4da;
+  color: #212529;
+}
+body.light-theme .form-label {
+  color: #212529;
+}
+body.light-theme .container {
+  background: #fff;
+  border-radius: 18px;
+  box-shadow: 0 4px 32px 0 #e9ecef;
+  padding: 2rem 2.5rem;
+  margin-top: 2.5rem;
+}
+
+/* Dark theme: Use lofi colors */
+body.dark-theme {
+  background: var(--lofi-bg-dark);
+  color: var(--lofi-text);
+}
+body.dark-theme .navbar {
+  background-color: var(--lofi-card) !important;
+}
+body.dark-theme .navbar-brand,
+body.dark-theme .nav-link,
+body.dark-theme .dropdown-item {
+  color: var(--lofi-text) !important;
+}
+body.dark-theme .bg-light,
+body.dark-theme pre.bg-light {
+  background-color: var(--lofi-card) !important;
+  color: var(--lofi-text) !important;
+}
+body.dark-theme .btn-success,
+body.dark-theme .btn-primary,
+body.dark-theme .btn-secondary {
+  background-color: var(--lofi-btn);
+  border-color: var(--lofi-border);
+  color: var(--lofi-text);
+}
+body.dark-theme .btn-success:hover,
+body.dark-theme .btn-primary:hover,
+body.dark-theme .btn-secondary:hover {
+  background-color: var(--lofi-btn-hover);
+  color: var(--lofi-bg-dark);
+}
+body.dark-theme input.form-control {
+  background: var(--lofi-bg);
+  border-color: var(--lofi-border);
+  color: var(--lofi-text);
+}
+body.dark-theme input.form-control::placeholder {
+  color: #f4f6fb !important;
+  opacity: 1;
+}
+body.dark-theme .form-label {
+  color: var(--lofi-text-muted);
+}
+body.dark-theme .container {
+  background: var(--lofi-card);
+  border-radius: 18px;
+  box-shadow: 0 4px 32px 0 #18192b44;
+  padding: 2rem 2.5rem;
+  margin-top: 2.5rem;
+}
+body.dark-theme .dropdown-menu {
+  background-color: var(--lofi-card);
+  color: var(--lofi-text);
+}
+body.dark-theme .dropdown-item {
+  color: var(--lofi-text) !important;
+}
+body.dark-theme .dropdown-item:hover,
+body.dark-theme .dropdown-item:focus {
+  background-color: var(--lofi-btn-hover);
+  color: var(--lofi-bg-dark) !important;
+}
+
+/* Card style for container */
+.container {
+  background: var(--lofi-card);
+  border-radius: 18px;
+  box-shadow: 0 4px 32px 0 #18192b44;
+  padding: 2rem 2.5rem;
+  margin-top: 2.5rem;
+}
+
+/* Theme toggle styles (unchanged) */
+.theme-toggle {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  user-select: none;
+}
+.theme-icon {
+  font-size: 1.2rem;
+  color: #ffd700;
+  transition: color 0.2s;
+}
+#moon { color: #6c757d; }
+.switch {
+  position: relative;
+  display: inline-block;
+  width: 44px;
+  height: 24px;
+  margin: 0 4px;
+}
+.switch input { opacity: 0; width: 0; height: 0; }
+.slider {
+  position: absolute;
+  cursor: pointer;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background-color: #ccc;
+  transition: .4s;
+  border-radius: 24px;
+}
+.slider:before {
+  position: absolute;
+  content: "";
+  height: 18px; width: 18px;
+  left: 3px; bottom: 3px;
+  background-color: white;
+  transition: .4s;
+  border-radius: 50%;
+}
+input:checked + .slider {
+  background-color: #343a40;
+}
+input:checked + .slider:before {
+  transform: translateX(20px);
+}
+/* End lofi theme */

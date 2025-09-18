@@ -1,0 +1,276 @@
+// Raw GitHub source for FortiClient installer script (update if repo path changes)
+const githubRawUrl =
+  "https://raw.githubusercontent.com/MrJWH/M365/refs/heads/main/Application%20deployments/Forticlient%20VPN_WithConnection/MainInstaller.ps1";
+// Package definitions
+const packages = {
+  forticlient: {
+    title: "FortiClient VPN",
+    fields: [
+      {
+        id: "Prefix",
+        label: "Customer prefix",
+        placeholder:
+          "Crop A/S or CRP - This will be shown in registry path",
+        required: true,
+      },
+      {
+        id: "VpnConnectionDescription",
+        label: "VPN Description",
+        placeholder: "This VPN is used by internal users at Crop A/S",
+        required: true,
+      },
+      {
+        id: "VpnConfFileName",
+        label: "Name of VPN config file (without .reg)",
+        placeholder: "Crop A/S or Crop VPN",
+        required: true,
+      },
+      {
+        id: "Endpoint",
+        label: "Endpoint to connect to:",
+        placeholder: "vpn.example.com:443",
+        required: true,
+      },
+    ],
+  },
+  devicerenamer: {
+    title: "DeviceRenamer – script-generator",
+    fields: [
+      {
+        id: "Prefix",
+        label: "Kunde prefix",
+        placeholder: "fx Crop A/S",
+        required: true,
+      },
+    ],
+    template: ({ Prefix }) => {
+      return `
+[CmdletBinding()]
+param(
+  [Parameter(Mandatory=$true)][string]$Prefix = '${Prefix}'
+)
+
+$Serial = (Get-WmiObject Win32_BIOS).SerialNumber
+$CurrentDeviceName = $env:COMPUTERNAME
+if ($Serial.Length -gt 8) {
+  $Serial = $Serial.Substring(0, 8)
+}
+$NewDeviceName = "$Prefix-$Serial"
+Rename-Computer -NewName $NewDeviceName
+Write-Host "Device renamed to $NewDeviceName"
+`.trim();
+    },
+  },
+  // Add more packages here
+};
+
+let currentPackage = "forticlient";
+
+function selectPackage(pkg) {
+  currentPackage = pkg;
+  document.getElementById("pageTitle").textContent = packages[pkg].title;
+  renderFormFields();
+  document.getElementById("preview").textContent = "";
+  document.getElementById("btnPs1").disabled = true;
+  document.getElementById("btnZip").disabled = true;
+
+  // Ensure theme is reapplied after package change
+  let theme = localStorage.getItem('theme');
+  if (!theme) {
+    theme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+  }
+  document.body.classList.remove('light-theme', 'dark-theme');
+  document.body.classList.add(theme + '-theme');
+}
+
+function renderFormFields() {
+  const fields = packages[currentPackage].fields;
+  const formFields = fields
+    .map(
+      (f) =>
+        `<div class="mb-3">
+      <label class="form-label">${f.label}:</label>
+      <input type="text" class="form-control" id="${f.id}" placeholder="${
+          f.placeholder
+        }" ${f.required ? "required" : ""}>
+    </div>`
+    )
+    .join("");
+  document.getElementById("formFields").innerHTML = formFields;
+}
+
+function getFormValues() {
+  const fields = packages[currentPackage].fields;
+  const values = {};
+  fields.forEach((f) => {
+    values[f.id] = document.getElementById(f.id).value.trim();
+  });
+  return values;
+}
+
+function download(filename, content, mime) {
+  const blob = new Blob([content], {
+    type: mime || "application/octet-stream",
+  });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+// Unified naming helper
+function getNaming(values) {
+  const prefix = (values.Prefix || values.Prefix || "Script")
+    .trim()
+    .replace(/\s+/g, "_");
+  const pkg = currentPackage;
+  const script = `${prefix}-${pkg}.ps1`;
+  const zip = `${prefix}-${pkg}.zip`;
+  // Use explicit VPN config filename if provided (without .reg expected)
+  const regBase = (
+    values.VpnConfFileName ||
+    values.VpnConnectionDescription ||
+    prefix
+  )
+    .trim()
+    .replace(/\s+/g, "_")
+    .replace(/\.reg$/i, "");
+  const reg = `${regBase}.reg`;
+  return { prefix, script, zip, reg };
+}
+
+document.getElementById("btnGen").addEventListener("click", async () => {
+  const values = getFormValues();
+  if (Object.values(values).some((v) => !v)) return;
+
+  if (currentPackage === "forticlient") {
+    try {
+      // Cache-busting: append timestamp and disable HTTP cache to always get latest GitHub raw content
+      const resp = await fetch(`${githubRawUrl}?cb=${Date.now()}`, {
+        cache: "no-store",
+      });
+      if (!resp.ok) throw new Error("Could not fetch script from GitHub");
+      let script = await resp.text();
+
+      // Remove any previous injected variable block (idempotent regen)
+      script = script.replace(
+        /# Injected values by generator \(can be changed\)[\s\S]*?\n(?=\$|#|function|region|$)/i,
+        ""
+      );
+
+      // Collapse the entire Script parameters region to a placeholder comment (keep header & #endregion)
+      script = script.replace(
+        /(#[Rr]egion[^\n]*\[Script parameters\][^\n]*)([\s\S]*?)(#endregion)/,
+        (m, start, _mid, end) =>
+          `${start}\n# Parameters removed by generator (values moved to Modifiable Parameters region)\n${end}`
+      );
+
+      // Inject after Modifiable Parameters region header
+      const modRegionHeader =
+        /(\#region[^\n]*\[Modifiable Parameters and defaults\][^\n]*\n)/i;
+      const injected =
+        `# Injected values by generator (can be changed)\n` +
+        `[string]$Prefix                       = "${values.Prefix}"\n` +
+        `[string]$VpnConnectionDescription     = "${values.VpnConnectionDescription}"\n` +
+        `[string]$VpnConfFileName              = "${values.VpnConfFileName}"\n` +
+        `[string]$Endpoint                     = "${values.Endpoint}"\n`;
+      if (modRegionHeader.test(script)) {
+        script = script.replace(modRegionHeader, (m) => m + injected);
+      } else {
+        // Fallback: prepend if region not found
+        script = injected + "\n" + script;
+      }
+
+      document.getElementById("preview").textContent = script;
+      window.latestScript = script;
+      document.getElementById("btnPs1").disabled = false;
+      document.getElementById("btnZip").disabled = false;
+    } catch (e) {
+      document.getElementById("preview").textContent =
+        "Error: " + e.message;
+      window.latestScript = null;
+      document.getElementById("btnPs1").disabled = true;
+      document.getElementById("btnZip").disabled = true;
+    }
+  } else {
+    const script = packages[currentPackage].template(values);
+    document.getElementById("preview").textContent = script;
+    window.latestScript = script;
+    document.getElementById("btnPs1").disabled = false;
+    document.getElementById("btnZip").disabled = false;
+  }
+});
+
+document.getElementById("btnPs1").addEventListener("click", () => {
+  if (!window.latestScript) return;
+  const values = getFormValues();
+  const names = getNaming(values);
+  download(names.script, window.latestScript, "text/plain");
+});
+
+document.getElementById("btnZip").addEventListener("click", async () => {
+  if (!window.latestScript) return;
+  const values = getFormValues();
+  const names = getNaming(values);
+  const zip = new JSZip();
+  // Fetch MainDetector.ps1 from GitHub
+  const detectorUrl =
+    "https://raw.githubusercontent.com/MrJWH/M365/refs/heads/main/Application%20deployments/Forticlient%20VPN_WithConnection/MainDetector.ps1";
+  let detectorScript = await fetch(detectorUrl).then((r) => r.text());
+  // Remove parameters region
+  detectorScript = detectorScript.replace(
+    /(#[Rr]egion[^\n]*\[Script parameters\][^\n]*)([\s\S]*?)(#endregion)/,
+    (m, start, _mid, end) =>
+      `${start}\n# Parameters removed by generator (values moved to Modifiable Parameters region)\n${end}`
+  );
+  // Inject variables after Modifiable Parameters region header
+  const modRegionHeader =
+    /(\#region[^\n]*\[Modifiable Parameters and defaults\][^\n]*\n)/i;
+  const injected =
+    `# Injected values by generator (can be changed)\n` +
+    `[string]$Prefix                       = "${values.Prefix}"\n` +
+    `[string]$VpnConnectionDescription     = "${values.VpnConnectionDescription}"\n` +
+    `[string]$VpnConfFileName              = "${values.VpnConfFileName}"\n` +
+    `[string]$Endpoint                     = "${values.Endpoint}"\n`;
+  if (modRegionHeader.test(detectorScript)) {
+    detectorScript = detectorScript.replace(
+      modRegionHeader,
+      (m) => m + injected
+    );
+  } else {
+    detectorScript = injected + "\n" + detectorScript;
+  }
+  zip.file(names.script, window.latestScript);
+  zip.file("MainDetector.ps1", detectorScript);
+  // Always generate .reg file using main form values
+  const regContent = regTemplate({
+    Prefix: values.Prefix,
+    vpnDescription: values.VpnConnectionDescription,
+    server: values.Endpoint,
+  });
+  zip.file(names.reg, regContent);
+  zip.generateAsync({ type: "blob" }).then((blob) => {
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.style.display = "none";
+    a.href = url;
+    a.download = names.zip;
+    document.body.appendChild(a);
+    a.click();
+    setTimeout(() => {
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    }, 500);
+  });
+});
+// Registry file template
+function regTemplate({ Prefix, vpnDescription, server }) {
+  return `Windows Registry Editor Version 5.00\n\n[HKEY_LOCAL_MACHINE\\SOFTWARE\\Fortinet\\FortiClient\\Sslvpn\\Tunnels\\${Prefix}]\n"Description"="${vpnDescription}"\n"Server"="${server}"\n"promptusername"=dword:00000000\n"promptcertificate"=dword:00000000\n"ServerCert"="1"\n"DATA3"=""\n"dual_stack"=dword:00000000\n"sso_enabled"=dword:00000001\n"use_external_browser"=dword:00000000\n"azure_auto_login"=dword:00000000`;
+}
+
+// Initial render
+renderFormFields();
