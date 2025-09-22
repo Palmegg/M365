@@ -1,7 +1,8 @@
 #region ---------------------------------------------------[Script parameters]-----------------------------------------------------
 param(
     [Parameter(Mandatory=$false)][string]$Prefix,
-    [Parameter(Mandatory=$false)][string]$ExpectedVersion = "1.0"
+    [Parameter(Mandatory=$false)][string]$ExpectedVpnVersion,
+    [Parameter(Mandatory=$false)][string]$ExpectedClientVersion
 )
 #endregion
 
@@ -48,11 +49,11 @@ function Test-FortiClientInstallation {
     )
     try {
         if (Test-Path $InstalledFile) {
-            Write-ToLog "Verification: Installed file found: $InstalledFile"
+            Write-ToLog "Successfully found: $InstalledFile"
             return $true
         }
         else {
-            Write-ToLog "Verification failed: Installed file not found: $InstalledFile" "Red"
+            Write-ToLog "Forticlient not found: $InstalledFile" "Red"
             return $false
         }
     }
@@ -63,7 +64,6 @@ function Test-FortiClientInstallation {
 }
 
 function ApplicationDetected {
-    Write-Host "Fortinet VPN client with correct VPN profile is installed."
     exit 0
 }
 
@@ -98,22 +98,49 @@ Write-ToLog "Running as: $env:UserName"
 # Detection logic: Check FortiClient and InstalledVersion in registry
 ###############################################################################
 if (Test-FortiClientInstallation) {
-    Write-ToLog "FortiClient is installed. Checking for VPN tunnel version..."
+    Write-ToLog "FortiClient is installed. Checking for VPN tunnel version and client version..."
 
+    # --- VPN Tunnel Version Detection ---
     $TunnelRegPath = "HKLM:\SOFTWARE\Fortinet\FortiClient\Sslvpn\Tunnels\$Prefix"
     try {
-        $installedVersion = (Get-ItemProperty -Path $TunnelRegPath -Name "InstalledVersion" -ErrorAction Stop).InstalledVersion
-        if ($installedVersion -eq $ExpectedVersion) {
-            Write-ToLog "InstalledVersion matches ExpectedVersion ($ExpectedVersion)." "Green"
-            Write-ToLog "Ending detection script" -IsHeader
-            ApplicationDetected
+        $installedVpnVersion = (Get-ItemProperty -Path $TunnelRegPath -Name "InstalledVersion" -ErrorAction Stop).InstalledVersion
+        Write-ToLog "Detected VPN tunnel InstalledVersion: $installedVpnVersion"
+    } catch {
+        Write-ToLog "Could not read InstalledVersion from registry: $($_.Exception.Message)" "Red"
+        Write-ToLog "Ending detection script" -IsHeader
+        ApplicationNotDetected
+    }
+
+    # --- FortiClient Application Version Detection ---
+    $clientExePath = "C:\Program Files\Fortinet\FortiClient\FortiClient.exe"
+    try {
+        if (Test-Path $clientExePath) {
+            $installedClientVersion = (Get-Item $clientExePath).VersionInfo.ProductVersion
+            Write-ToLog "Detected FortiClient.exe version: $installedClientVersion"
         } else {
-            Write-ToLog "InstalledVersion ($installedVersion) does not match ExpectedVersion ($ExpectedVersion)." "Red"
+            Write-ToLog "FortiClient.exe not found at $clientExePath" "Red"
             Write-ToLog "Ending detection script" -IsHeader
             ApplicationNotDetected
         }
     } catch {
-        Write-ToLog "Could not read InstalledVersion from registry: $($_.Exception.Message)" "Red"
+        Write-ToLog "Could not get FortiClient.exe version: $($_.Exception.Message)" "Red"
+        Write-ToLog "Ending detection script" -IsHeader
+        ApplicationNotDetected
+    }
+
+    # --- Detection Logic ---
+    if (($installedVpnVersion -eq $ExpectedVpnVersion) -and ($installedClientVersion -eq $ExpectedClientVersion)) {
+        Write-ToLog "Found VPN tunnel version matches ExpectedVpnVersion ($ExpectedVpnVersion)." "Green"
+        Write-ToLog "Found FortiClient.exe version matches ExpectedClientVersion ($ExpectedClientVersion)." "Green"
+        Write-ToLog "Ending detection script" -IsHeader
+        ApplicationDetected
+    } else {
+        if ($installedVpnVersion -ne $ExpectedVpnVersion) {
+            Write-ToLog "Found VPN tunnel version ($installedVpnVersion) does not match ExpectedVpnVersion ($ExpectedVpnVersion)." "Red"
+        }
+        if ($installedClientVersion -ne $ExpectedClientVersion) {
+            Write-ToLog "Found FortiClient.exe version ($installedClientVersion) does not match ExpectedClientVersion ($ExpectedClientVersion)." "Red"
+        }
         Write-ToLog "Ending detection script" -IsHeader
         ApplicationNotDetected
     }

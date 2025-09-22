@@ -3,7 +3,7 @@ param(
 [Parameter(Mandatory=$false)][string]$Prefix,
 [Parameter(Mandatory=$false)][string]$VpnConfFileName,
 [Parameter(Mandatory=$false)][string]$Endpoint,
-[Parameter(Mandatory=$false)][string]$ExpectedVersion = "1.0"
+[Parameter(Mandatory=$false)][string]$ExpectedVersion
 )
 #endregion
 
