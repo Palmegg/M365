@@ -32,7 +32,7 @@ REM Elevation check
 REM -----------------------------
 whoami /groups | find "S-1-5-32-544" >NUL 2>&1
 IF ERRORLEVEL 1 (
-	ECHO [INFO ] Attempting to relaunch elevated...
+	ECHO [INFO] Attempting to relaunch elevated...
 	powershell -NoLogo -NoProfile -Command "Start-Process -FilePath '%~f0' -Verb RunAs"
 	IF ERRORLEVEL 1 (
 		ECHO [ERROR] Unable to self elevate. Right-click and 'Run as administrator'.
@@ -53,7 +53,7 @@ REM Download Autopilot community script (latest published to PSGallery)
 REM Using PowerShell to ensure TLS 1.2 and direct PSGallery installation path.
 REM Script: Get-WindowsAutopilotInfo.ps1 by community (Michael Niehaus et al.)
 REM -----------------------------
-ECHO [INFO ] Downloading Get-WindowsAutopilotInfo.ps1 ...
+ECHO [INFO] Downloading Get-WindowsAutopilotInfo.ps1 ...
 powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -Command "try { $ErrorActionPreference='Stop'; Install-PackageProvider -Name NuGet -Force -Scope CurrentUser > $null; Set-PSRepository -Name 'PSGallery' -InstallationPolicy Trusted -ErrorAction SilentlyContinue; Save-Script -Name Get-WindowsAutopilotInfo -Path '.' -Force; Write-Host '[INFO ] Download complete'; } catch { Write-Host '[ERROR] Failed to download script: ' + $_; exit 1 }"
 IF ERRORLEVEL 1 (
 	ECHO [ERROR] Could not retrieve Get-WindowsAutopilotInfo.ps1
@@ -70,13 +70,13 @@ REM Execute hardware hash upload
 REM Parameters reference: Get-Help .\Get-WindowsAutopilotInfo.ps1 -Full
 REM Using -Online with Graph auth.
 REM -----------------------------
-ECHO [INFO ] Starting Autopilot hash collection & upload ...
+ECHO [INFO] Starting Autopilot hash collection & upload ...
 
 SET PS_CMD=^"$ErrorActionPreference='Stop'; ^
 	$tenant='%TENANT_ID%'; $app='%APP_ID%'; $secret='%APP_SECRET%'; $groupTag='%GROUP_TAG%'; ^
 	$params=@{ 'TenantId'=$tenant; 'AppId'=$app; 'AppSecret'=$secret; 'Online'=$true; 'AddToGroup'=$false }; ^
 	if ($groupTag) { $params['GroupTag']=$groupTag }; ^
-	Write-Host '[INFO ] Parameters prepared'; ^
+	Write-Host '[INFO] Parameters prepared'; ^
 	. .\Get-WindowsAutopilotInfo.ps1 @params; ^
 	Write-Host '[SUCCESS] Autopilot hash uploaded successfully.' ^"
 
@@ -91,7 +91,7 @@ REM Optional: export CSV locally as well (uncomment if needed)
 REM powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -Command "Get-Content AutopilotHWID.csv | Select-Object -First 5"
 
 ECHO.
-ECHO [DONE ] Process complete. You may close this window.
+ECHO [DONE] Process complete. You may close this window.
 
 POPD
 ENDLOCAL

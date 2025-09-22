@@ -2,9 +2,9 @@
 param(
 [Parameter(Mandatory=$false)][string]$Prefix,
 [Parameter(Mandatory=$false)][string]$VpnConfFileName,
-[Parameter(Mandatory=$false)][string]$Endpoint
+[Parameter(Mandatory=$false)][string]$Endpoint,
+[Parameter(Mandatory=$false)][string]$ExpectedVersion = "1.0"
 )
-
 #endregion
 
 #region ---------------------------------------------------[Modifiable Parameters and defaults]------------------------------------
@@ -99,44 +99,6 @@ function Test-FortiClientInstallation {
         return $false
     }
 }
-function Test-RegistryValue {
-    param (
-        [Parameter(Mandatory=$true)]
-        [ValidateNotNullOrEmpty()]$Endpoint
-    )
-    $RegPath = "SOFTWARE\\Fortinet\\FortiClient\\Sslvpn\\Tunnels\\$Prefix"
-    try {
-        # Always use 64-bit registry view if on 64-bit OS
-        if ([Environment]::Is64BitOperatingSystem) {
-            $baseKey = [Microsoft.Win32.RegistryKey]::OpenBaseKey(
-                [Microsoft.Win32.RegistryHive]::LocalMachine,
-                [Microsoft.Win32.RegistryView]::Registry64
-            )
-        } else {
-            $baseKey = [Microsoft.Win32.RegistryKey]::OpenBaseKey(
-                [Microsoft.Win32.RegistryHive]::LocalMachine,
-                [Microsoft.Win32.RegistryView]::Default
-            )
-        }
-        $tunnelKey = $baseKey.OpenSubKey($RegPath)
-        if ($null -eq $tunnelKey) {
-            Write-ToLog "Registry check: VPN tunnel key not found in registry (64-bit): $RegPath" "Yellow"
-            return $false
-        }
-        $serverValue = $tunnelKey.GetValue("server")
-        if ($serverValue -eq $Endpoint) {
-            Write-ToLog "Registry check: VPN tunnel '$Prefix' found and server matches endpoint '$Endpoint'"
-            return $true
-        } else {
-            Write-ToLog "Registry check: VPN tunnel '$Prefix' found but server does not match endpoint ('$serverValue' vs '$Endpoint')" "Yellow"
-            return $false
-        }
-    }
-    catch {
-        Write-ToLog "Registry check: Error reading server value for '$Prefix': $($_.Exception.Message)" "Red"
-        return $false
-    }
-}
 #endregion
 
 #region ---------------------------------------------------[Script Execution]------------------------------------------------------
@@ -173,28 +135,9 @@ if ([string]::IsNullOrWhiteSpace($PSScriptRoot)) {
     Write-ToLog "PSScriptRoot is set to: $ScriptRoot"
 }
 
-# Pre-installation check for FortiClient and customer VPN connection
-
-if (Test-FortiClientInstallation) {
-    Write-ToLog "FortiClient is already installed. Checking for customer VPN connection..."
-    # NEW
-    if (Test-RegistryValue -Endpoint $Endpoint) {
-        Write-ToLog "VPN connection '$Endpoint' is already present in registry. No installation needed." "Green"
-        Write-ToLog "Ending installation script" -IsHeader
-        exit 0
-    } else {
-        Write-ToLog "VPN connection '$Endpoint' is missing. Proceeding with configuration..." "Yellow"
-        # Continue to configuration steps below (skip MSI install)
-        $SkipMsiInstall = $true
-    }
-} else {
+# Only check if FortiClient is installed before MSI install
+if (-not (Test-FortiClientInstallation)) {
     Write-ToLog "FortiClient is not installed. Proceeding with MSI installation..."
-    $SkipMsiInstall = $false
-}
-
-# Install MSI file via msiexec
-if (-not $SkipMsiInstall) {
-
 
     # Define path to MSI file (assume MSI is in same folder as script)
     $MsiPath = Join-Path -Path $ScriptRoot -ChildPath "FortiClient.msi"
@@ -227,16 +170,8 @@ if (-not $SkipMsiInstall) {
     else {
         Write-ToLog "FortiClient installation verified successfully."
     }
-}
-
-Write-ToLog "Disabling default welcome message"
-# Disable VPN welcome message
-try {
-    Set-RegistryKey -Key 'HKEY_LOCAL_MACHINE\SOFTWARE\Fortinet\FortiClient\Sslvpn' -Name 'show_vpn_welcome' -Type DWord -Value 0
-}
-catch {
-    Write-ToLog "Error disabling VPN welcome message: $($_.Exception.Message)" "Red"
-    exit 1
+} else {
+    Write-ToLog "FortiClient is already installed. Skipping MSI installation."
 }
 
 # Import VPN configuration from customer .reg file
@@ -249,14 +184,11 @@ try {
     }
     Write-ToLog "Starting import of reg file: $regFile"
 
-    # ----------------------- 64-bit reg.exe enforcement -----------------------
-    # Force 64-bit reg.exe when the process is 32-bit on a 64-bit OS
-    $regExe = "$env:windir\reg.exe"
+    $regExe = Join-Path $env:windir 'System32\reg.exe'
     if ([Environment]::Is64BitOperatingSystem -and -not [Environment]::Is64BitProcess) {
-        $regExe = "$env:windir\sysnative\reg.exe"
+        $regExe = Join-Path $env:windir 'sysnative\reg.exe'
     }
     Write-ToLog "Using reg.exe at: $regExe for import of .reg file"
-    # -------------------------------------------------------------------------
 
     Start-Process -FilePath $regExe -ArgumentList "import", "`"$regFile`"" -Wait -NoNewWindow -ErrorAction Stop
     Write-ToLog "Reg file '$regFile' imported successfully."
@@ -279,6 +211,17 @@ if (-not $base64.OpenSubKey($tunnelKeyPath)) {
 } else {
     Write-ToLog "Registry check (64-bit) succeeded: $tunnelKeyPath"
 }
-# ---------------------------------------------------------------------------
+
+# Set InstalledVersion in registry for version control
+$TunnelRegPath = "HKLM:\SOFTWARE\Fortinet\FortiClient\Sslvpn\Tunnels\$Prefix"
+try {
+    Set-ItemProperty -Path $TunnelRegPath -Name "InstalledVersion" -Value $ExpectedVersion -Type String
+    Write-ToLog "Set InstalledVersion to $ExpectedVersion in $TunnelRegPath"
+} catch {
+    Write-ToLog "Failed to set InstalledVersion in registry: $($_.Exception.Message)" "Red"
+    exit 1
+}
+
+Write-ToLog "Ending installation script" -IsHeader
 
 #endregion
