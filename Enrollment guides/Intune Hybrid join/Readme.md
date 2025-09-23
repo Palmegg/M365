@@ -37,7 +37,7 @@ Windows will now copy files, install features, and reboot several times. No acti
 
 ## Autopilot enrollment via .bat file
 
-Once you reach **Configure for work or school** press shift + F10 to open a command prompt window
+Once you reach **"Configure for work or school"** press shift + F10 to open a command prompt window
 
 > [!IMPORTANT]
 > __*In some cases it will be necessary to press shift + fn + F10*__
