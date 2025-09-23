@@ -59,6 +59,9 @@ After the device has rebooted several times and OOBE starts again:
 
 When the process reports **Success**, click **Reseal**. The device reboots back to the ready state and is now prepared for handoff to the end user (user phase sign-in will be faster because core provisioning already ran).
 
-> [!NOTE] If failure occurs, photograph/log the error details before exiting. > Common causes: missing assignment, network restrictions, or required app > > install failure.
+> [!NOTE] If failure occurs, photograph/log the error details before exiting. > Common causes: missing assignment, network restrictions, or required app install failure.
+
+> [!NOTE]
+> Some settings may report errors or as "Not Applicable" if the device is running Pro/Business rather than Enterprise.
 
 ---
