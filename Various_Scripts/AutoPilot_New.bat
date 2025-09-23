@@ -1,10 +1,10 @@
 @echo off
 setlocal
-
+set "LOGDIR=%CD%"
 REM Configuration (EDIT THESE)
-set "TENANT_ID=fc441c89-e42b-443d-9642-351d1dfe31a4"
-set "APP_ID=d418162b-e0f3-47f8-9435-2cafbb342b4b"
-set "APP_SECRET=zkJ8Q~JUz3aG1E1Sdx2rxJtIrBLweaf2b_c"
+SET TENANT_ID=INSERT HERE
+SET APP_ID=INSERT HERE
+SET APP_SECRET=INSERT HERE
 set "GROUP_TAG="
 
 REM Check for internet connectivity (using Cloudflare)
@@ -19,11 +19,10 @@ echo Internet connection found.
 echo Downloading script...
 
 REM Define download path (TEMP folder)
-set "downloadPath=%TEMP%\AutopilotHelper.ps1"
+set "downloadPath=%LOGDIR%\AutopilotHelper.ps1"
 
 REM Download the latest script from your GitHub
-powershell -NoLogo -NoProfile -Command "Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/Palmegg/M365/main/Various%20scripts/AutopilotHelper.ps1' -OutFile '%downloadPath%'"
-powershell -Command "Invoke-WebRequest -Uri 'https://ast.oo.dk/SpeedTune/SpeedTune.ps1' -OutFile '%downloadPath%'"
+powershell -Command "Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/Palmegg/M365/refs/heads/main/Various_Scripts/AutopilotHelper.ps1' -OutFile '%downloadPath%'"
 REM Check if download succeeded
 if errorlevel 1 (
     echo [ERROR] Failed to download AutopilotHelper.ps1. Exiting.
