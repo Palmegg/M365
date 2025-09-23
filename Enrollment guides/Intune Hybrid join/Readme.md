@@ -7,7 +7,8 @@
 - [Windows 11 Hybrid Azure AD Join + Intune Enrollment Guide](#windows-11-hybrid-azure-ad-join--intune-enrollment-guide)
   - [Table of Contents](#table-of-contents)
   - [Clean Install Windows 11](#clean-install-windows-11)
-  - [(Optional) Windows Autopilot Pre-Provision (White Glove)](#optional-windows-autopilot-pre-provision-white-glove)
+  - [Autopilot enrollment via .bat file](#autopilot-enrollment-via-bat-file)
+  - [Windows Autopilot Pre-Provision (White Glove)](#windows-autopilot-pre-provision-white-glove)
     - [Completion](#completion)
 
 ---
@@ -34,9 +35,33 @@ Select the unallocated space and click **Next**.
 
 Windows will now copy files, install features, and reboot several times. No action needed until the Out-of-Box Experience (OOBE) reappears.
 
----
+## Autopilot enrollment via .bat file
 
-## (Optional) Windows Autopilot Pre-Provision (White Glove)
+Once you reach **Configure for work or school** press shift + F10 to open a command prompt window
+
+> [!IMPORTANT]
+> __*In some cases it will be necessary to press shift + fn + F10*__
+
+Now type the following to change your working directory to your USB Drive where Autopilot.bat is located. 
+
+```
+D:
+```
+Now run the batch file with:
+
+```
+.\Autopilot.bat
+```
+
+Once the script has imported the device to the specific tenant, please restart the computer using the following command
+
+```
+Restart-Computer
+```
+
+![CMD Commands](./images/CmdCommands.png)
+
+## Windows Autopilot Pre-Provision (White Glove)
 
 After the device has rebooted several times and OOBE starts again:
 

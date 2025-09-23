@@ -54,7 +54,7 @@ REM Using PowerShell to ensure TLS 1.2 and direct PSGallery installation path.
 REM Script: Get-WindowsAutopilotInfo.ps1 by community (Michael Niehaus et al.)
 REM -----------------------------
 ECHO [INFO] Downloading Get-WindowsAutopilotInfo.ps1 ...
-powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -Command "try { $ErrorActionPreference='Stop'; Install-PackageProvider -Name NuGet -Force -Scope CurrentUser > $null; Set-PSRepository -Name 'PSGallery' -InstallationPolicy Trusted -ErrorAction SilentlyContinue; Save-Script -Name Get-WindowsAutopilotInfo -Path '.' -Force; Write-Host '[INFO ] Download complete'; } catch { Write-Host '[ERROR] Failed to download script: ' + $_; exit 1 }"
+powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -Command "try { $ErrorActionPreference='Stop'; Install-PackageProvider -Name NuGet -Force -Scope CurrentUser > $null; Set-PSRepository -Name 'PSGallery' -InstallationPolicy Trusted -ErrorAction SilentlyContinue; Save-Script -Name Get-WindowsAutopilotInfo -Path '.' -Force; Write-Host '[INFO] Download complete'; } catch { Write-Host '[ERROR] Failed to download script: ' + $_; exit 1 }"
 IF ERRORLEVEL 1 (
 	ECHO [ERROR] Could not retrieve Get-WindowsAutopilotInfo.ps1
 	EXIT /B 20
@@ -70,14 +70,22 @@ REM Execute hardware hash upload
 REM Parameters reference: Get-Help .\Get-WindowsAutopilotInfo.ps1 -Full
 REM Using -Online with Graph auth.
 REM -----------------------------
-ECHO [INFO] Starting Autopilot hash collection & upload ...
+REM BIOS serial validation (Autopilot requires non-empty serial)
+ECHO [INFO] Verifying BIOS serial number...
+powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -Command "try { $sn=(Get-CimInstance -ClassName Win32_BIOS).SerialNumber; if ([string]::IsNullOrWhiteSpace($sn)) { Write-Host '[ERROR] Empty BIOS SerialNumber. Cannot continue.'; exit 89 } else { Write-Host ('[INFO] Serial: ' + $sn) } } catch { Write-Host '[ERROR] Failed to read SerialNumber: ' + $_; exit 89 }"
+IF ERRORLEVEL 1 (
+	ECHO [ERROR] Serial validation failed.
+	EXIT /B 89
+)
+
+ECHO [INFO] Starting Autopilot hash collection and upload ...
 
 SET PS_CMD=^"$ErrorActionPreference='Stop'; ^
 	$tenant='%TENANT_ID%'; $app='%APP_ID%'; $secret='%APP_SECRET%'; $groupTag='%GROUP_TAG%'; ^
 	$params=@{ 'TenantId'=$tenant; 'AppId'=$app; 'AppSecret'=$secret; 'Online'=$true; 'AddToGroup'=$false }; ^
 	if ($groupTag) { $params['GroupTag']=$groupTag }; ^
 	Write-Host '[INFO] Parameters prepared'; ^
-	. .\Get-WindowsAutopilotInfo.ps1 @params; ^
+	& .\Get-WindowsAutopilotInfo.ps1 @params; ^
 	Write-Host '[SUCCESS] Autopilot hash uploaded successfully.' ^"
 
 powershell -NoLogo -NoProfile -ExecutionPolicy Bypass -Command %PS_CMD%
