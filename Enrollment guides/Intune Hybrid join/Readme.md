@@ -57,7 +57,7 @@ After the device has rebooted several times and OOBE starts again:
 
 ### Completion
 
-When the process reports **Success**, click **Reseal**. The device reboots back to the ready state and is now prepared for handoff to the end user (user phase sign-in will be faster because core provisioning already ran).
+When the process reports **Success**, click **Reseal**. The device reboots back to the ready state and is now ready to be signed into with the users credentials.
 
 > [!NOTE]
 > If failure occurs, photograph/log the error details before exiting.
