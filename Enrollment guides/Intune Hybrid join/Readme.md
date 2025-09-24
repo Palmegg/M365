@@ -1,17 +1,9 @@
 # Windows 11 Hybrid Azure AD Join + Intune Enrollment Guide
 
----
 
-## Table of Contents
+## Preparation of Autopilot.bat
 
-- [Windows 11 Hybrid Azure AD Join + Intune Enrollment Guide](#windows-11-hybrid-azure-ad-join--intune-enrollment-guide)
-  - [Table of Contents](#table-of-contents)
-  - [Clean Install Windows 11](#clean-install-windows-11)
-  - [Autopilot enrollment via .bat file](#autopilot-enrollment-via-bat-file)
-  - [Windows Autopilot Pre-Provision (White Glove)](#windows-autopilot-pre-provision-white-glove)
-    - [Completion](#completion)
-
----
+Please follow the instructions from [here](Various_Scripts\Autopilot\Readme.md) to prepare your *Autopilot.bat*
 
 ## Clean Install Windows 11
 
