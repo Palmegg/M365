@@ -9,7 +9,7 @@ param(
     [string]$GroupTag
 )
 
-# Set log file path (change as needed)
+# Set log file path
 if ($LogDir) {
     $LogFile = Join-Path -Path $LogDir -ChildPath "AutopilotHelper.log"
 } else {
@@ -74,4 +74,4 @@ if ($GroupTag) { $params['GroupTag'] = $GroupTag }
 Write-ToLog "[INFO] Running Get-WindowsAutopilotInfo.ps1..." -LogColor Cyan
 . $scriptPath @params
 
-Write-ToLog "[SUCCESS] Autopilot hash uploaded successfully." -LogColor Green
+Write-ToLog "[INFO] Autopilot script has finished running" -LogColor Green

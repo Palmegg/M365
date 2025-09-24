@@ -3,7 +3,7 @@
 
 ## Preparation of Autopilot.bat
 
-Please follow the instructions from [here](Various_Scripts\Autopilot\Readme.md) to prepare your *Autopilot.bat*
+Please follow the instructions from [here](https://github.com/Palmegg/M365/tree/main/Various_Scripts/Autopilot) to prepare your *Autopilot.bat*
 
 ## Clean Install Windows 11
 
