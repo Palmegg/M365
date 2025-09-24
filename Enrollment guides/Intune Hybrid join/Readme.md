@@ -52,6 +52,7 @@ Now run the batch file with:
 ```
 .\Autopilot.bat
 ```
+![CMD Commands](./images/CmdCommands.png)
 
 Once the script has imported the device to the specific tenant, please restart the computer using the following command
 
@@ -59,9 +60,7 @@ Once the script has imported the device to the specific tenant, please restart t
 Restart-Computer
 ```
 
-![CMD Commands](./images/CmdCommands.png)
-
-## Windows Autopilot Pre-Provision (White Glove)
+## Windows Autopilot Pre-Provision
 
 After the device has rebooted several times and OOBE starts again:
 
@@ -70,8 +69,8 @@ After the device has rebooted several times and OOBE starts again:
 
 ![Skip Device Rename](./images/SkipDeviceRename.png)
 
-3. Continue until you see **"Set up for work or school"** (wording can vary slightly such as _Configure for work/school or private account_).
-4. Press the **Windows key 5 times** in quick succession. This launches the **Pre-provisioning (Autopilot) environment**.
+1. Continue until you see **"Set up for work or school"**
+2. Press the **Windows key 5 times** in quick succession. This launches the **Pre-provisioning (Autopilot) environment**.
 
 ![Enter Pre-Provisioning](./images/PreProvisioning2.png)
 
@@ -83,9 +82,5 @@ After the device has rebooted several times and OOBE starts again:
 ### Completion
 
 When the process reports **Success**, click **Reseal**. The device reboots back to the ready state and is now ready to be signed into with the users credentials.
-
-> [!NOTE]
-> If failure occurs, photograph/log the error details before exiting.
-> Common causes: missing assignment, network restrictions, or required app install failure.
 
 ---
