@@ -9,8 +9,7 @@ const packages = {
       {
         id: "Prefix",
         label: "Customer prefix",
-        placeholder:
-          "Crop A/S or CRP - This will be shown in registry path",
+        placeholder: "Crop A/S or CRP - This will be shown in registry path",
         required: true,
       },
       {
@@ -22,13 +21,19 @@ const packages = {
       {
         id: "VpnConfFileName",
         label: "Name of VPN config file (without .reg)",
-        placeholder: "Crop A/S or Crop VPN",
+        placeholder: "ie. CropTunnel or CropVPN",
         required: true,
       },
       {
         id: "Endpoint",
-        label: "Endpoint to connect to:",
+        label: "Endpoint to connect to",
         placeholder: "vpn.example.com:443",
+        required: true,
+      },
+      {
+        id: "ExpectedVersion",
+        label: "Expected version of registry settings",
+        placeholder: "1.0",
         required: true,
       },
     ],
@@ -75,12 +80,14 @@ function selectPackage(pkg) {
   document.getElementById("btnZip").disabled = true;
 
   // Ensure theme is reapplied after package change
-  let theme = localStorage.getItem('theme');
+  let theme = localStorage.getItem("theme");
   if (!theme) {
-    theme = window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    theme = window.matchMedia("(prefers-color-scheme: dark)").matches
+      ? "dark"
+      : "light";
   }
-  document.body.classList.remove('light-theme', 'dark-theme');
-  document.body.classList.add(theme + '-theme');
+  document.body.classList.remove("light-theme", "dark-theme");
+  document.body.classList.add(theme + "-theme");
 }
 
 function renderFormFields() {
@@ -177,7 +184,8 @@ document.getElementById("btnGen").addEventListener("click", async () => {
         `[string]$Prefix                       = "${values.Prefix}"\n` +
         `[string]$VpnConnectionDescription     = "${values.VpnConnectionDescription}"\n` +
         `[string]$VpnConfFileName              = "${values.VpnConfFileName}"\n` +
-        `[string]$Endpoint                     = "${values.Endpoint}"\n`;
+        `[string]$Endpoint                     = "${values.Endpoint}"\n` +
+        `[string]$ExpectedVersion              = "${values.ExpectedVersion}"\n`;
       if (modRegionHeader.test(script)) {
         script = script.replace(modRegionHeader, (m) => m + injected);
       } else {
@@ -190,8 +198,7 @@ document.getElementById("btnGen").addEventListener("click", async () => {
       document.getElementById("btnPs1").disabled = false;
       document.getElementById("btnZip").disabled = false;
     } catch (e) {
-      document.getElementById("preview").textContent =
-        "Error: " + e.message;
+      document.getElementById("preview").textContent = "Error: " + e.message;
       window.latestScript = null;
       document.getElementById("btnPs1").disabled = true;
       document.getElementById("btnZip").disabled = true;
@@ -235,7 +242,8 @@ document.getElementById("btnZip").addEventListener("click", async () => {
     `[string]$Prefix                       = "${values.Prefix}"\n` +
     `[string]$VpnConnectionDescription     = "${values.VpnConnectionDescription}"\n` +
     `[string]$VpnConfFileName              = "${values.VpnConfFileName}"\n` +
-    `[string]$Endpoint                     = "${values.Endpoint}"\n`;
+    `[string]$Endpoint                     = "${values.Endpoint}"\n` +
+    `[string]$ExpectedVersion              = "${values.ExpectedVersion}"\n`;
   if (modRegionHeader.test(detectorScript)) {
     detectorScript = detectorScript.replace(
       modRegionHeader,
@@ -269,7 +277,10 @@ document.getElementById("btnZip").addEventListener("click", async () => {
 });
 // Registry file template
 function regTemplate({ Prefix, vpnDescription, server }) {
-  return `Windows Registry Editor Version 5.00\n\n[HKEY_LOCAL_MACHINE\\SOFTWARE\\Fortinet\\FortiClient\\Sslvpn\\Tunnels\\${Prefix}]\n"Description"="${vpnDescription}"\n"Server"="${server}"\n"promptusername"=dword:00000000\n"promptcertificate"=dword:00000000\n"ServerCert"="1"\n"DATA3"=""\n"dual_stack"=dword:00000000\n"sso_enabled"=dword:00000001\n"use_external_browser"=dword:00000000\n"azure_auto_login"=dword:00000000`;
+  // InstalledVersion will be set later by installer script; can optionally include here if desired.
+  return `Windows Registry Editor Version 5.00\n\n[HKEY_LOCAL_MACHINE\\SOFTWARE\\Fortinet\\FortiClient\\Sslvpn\\Tunnels\\${Prefix}]\n"Description"="${vpnDescription}"\n"Server"="${server}"\n"InstalledVersion"="${
+    document.getElementById("ExpectedVersion")?.value || ""
+  }"\n"promptusername"=dword:00000000\n"promptcertificate"=dword:00000000\n"ServerCert"="1"\n"DATA3"=""\n"dual_stack"=dword:00000000\n"sso_enabled"=dword:00000001\n"use_external_browser"=dword:00000000\n"azure_auto_login"=dword:00000000`;
 }
 
 // Initial render

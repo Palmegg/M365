@@ -50,36 +50,6 @@ function Write-ToLog {
     $Log | Out-File -FilePath $LogFile -Append
 }
 
-function Set-RegistryKey {
-    param(
-        [Parameter(Mandatory=$true)] [string]$Key,
-        [Parameter(Mandatory=$true)] [string]$Name,
-        [Parameter(Mandatory=$true)] [string]$Type,
-        [Parameter(Mandatory=$true)] $Value
-    )
-    try {
-        $regPath = $Key -replace 'HKEY_LOCAL_MACHINE', 'HKLM:'
-        if (!(Test-Path $regPath)) {
-            New-Item -Path $regPath -Force | Out-Null
-        }
-        if ($Type -eq 'DWord') {
-            if (Get-ItemProperty -Path $regPath -Name $Name -ErrorAction SilentlyContinue) {
-                Set-ItemProperty -Path $regPath -Name $Name -Value ([int]$Value) -Type DWord
-            } else {
-                New-ItemProperty -Path $regPath -Name $Name -Value ([int]$Value) -PropertyType DWord -Force | Out-Null
-            }
-        } else {
-            # Add support for other types if needed
-            Set-ItemProperty -Path $regPath -Name $Name -Value $Value
-        }
-        Write-ToLog "Registry key $Key, value $Name set to $Value"
-    }
-    catch {
-        Write-ToLog "Error setting registry key: $($_.Exception.Message)" "Red"
-        exit 1
-    }
-}
-
 function Test-FortiClientInstallation {
     param (
         [string]$InstalledFile = "C:\Program Files\Fortinet\FortiClient\FortiClient.exe"
