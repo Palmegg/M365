@@ -6,11 +6,6 @@ param(
 )
 #endregion
 
-#region ---------------------------------------------------[Modifiable Parameters and defaults]------------------------------------
-[string]$CorpDataPath                 = "C:\ProgramData\Microsoft\IntuneManagementExtension\Logs"
-[string]$ApplicationLogName           = "#${Prefix}_ForticlientInstaller"
-#endregion
-
 #region ---------------------------------------------------[Static Variables]------------------------------------------------------
 [string]$logpath = "$($CorpDataPath)"
 if (!(Test-Path -Path $logpath)) {

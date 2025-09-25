@@ -31,8 +31,8 @@ const packages = {
         required: true,
       },
       {
-        id: "ExpectedVersion",
-        label: "Expected version of registry settings",
+        id: "ExpectedVpnVersion",
+        label: "Expected version of VPN registry settings",
         placeholder: "1.0",
         required: true,
       },
@@ -185,7 +185,7 @@ document.getElementById("btnGen").addEventListener("click", async () => {
         `[string]$VpnConnectionDescription     = "${values.VpnConnectionDescription}"\n` +
         `[string]$VpnConfFileName              = "${values.VpnConfFileName}"\n` +
         `[string]$Endpoint                     = "${values.Endpoint}"\n` +
-        `[string]$ExpectedVersion              = "${values.ExpectedVersion}"\n`;
+        `[string]$ExpectedVersion              = "${values.ExpectedVpnVersion}"\n`;
       if (modRegionHeader.test(script)) {
         script = script.replace(modRegionHeader, (m) => m + injected);
       } else {
@@ -243,7 +243,7 @@ document.getElementById("btnZip").addEventListener("click", async () => {
     `[string]$VpnConnectionDescription     = "${values.VpnConnectionDescription}"\n` +
     `[string]$VpnConfFileName              = "${values.VpnConfFileName}"\n` +
     `[string]$Endpoint                     = "${values.Endpoint}"\n` +
-    `[string]$ExpectedVersion              = "${values.ExpectedVersion}"\n`;
+    `[string]$ExpectedVersion              = "${values.ExpectedVpnVersion}"\n`;
   if (modRegionHeader.test(detectorScript)) {
     detectorScript = detectorScript.replace(
       modRegionHeader,
@@ -277,10 +277,9 @@ document.getElementById("btnZip").addEventListener("click", async () => {
 });
 // Registry file template
 function regTemplate({ Prefix, vpnDescription, server }) {
-  // InstalledVersion will be set later by installer script; can optionally include here if desired.
   return `Windows Registry Editor Version 5.00\n\n[HKEY_LOCAL_MACHINE\\SOFTWARE\\Fortinet\\FortiClient\\Sslvpn\\Tunnels\\${Prefix}]\n"Description"="${vpnDescription}"\n"Server"="${server}"\n"InstalledVersion"="${
     document.getElementById("ExpectedVersion")?.value || ""
-  }"\n"promptusername"=dword:00000000\n"promptcertificate"=dword:00000000\n"ServerCert"="1"\n"DATA3"=""\n"dual_stack"=dword:00000000\n"sso_enabled"=dword:00000001\n"use_external_browser"=dword:00000000\n"azure_auto_login"=dword:00000000`;
+  }"\n"promptusername"=dword:00000000\n"promptcertificate"=dword:00000000\n"ServerCert"="1"\n"DATA3"=""\n"dual_stack"=dword:00000000\n"sso_enabled"=dword:00000001\n"use_external_browser"=dword:00000001\n"azure_auto_login"=dword:00000000`;
 }
 
 // Initial render
