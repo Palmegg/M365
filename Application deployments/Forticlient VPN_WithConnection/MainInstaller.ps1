@@ -114,6 +114,36 @@ function Get-MsiProductVersion {
     param([Parameter(Mandatory)][string]$Path)
     return Get-MsiProperty -Path $Path -Property 'ProductVersion'
 }
+
+# Helper: Open 64-bit HKLM base key once (for registry operations despite possible 32-bit host)
+function Open-Hklm64BaseKey {
+    [Microsoft.Win32.RegistryKey]::OpenBaseKey(
+        [Microsoft.Win32.RegistryHive]::LocalMachine,
+        [Microsoft.Win32.RegistryView]::Registry64
+    )
+}
+
+function Test-RegistryKey64 {
+    [CmdletBinding()] param([Parameter(Mandatory)][string]$RelativePath)
+    try {
+        $base = Open-Hklm64BaseKey
+        return [bool]($base.OpenSubKey($RelativePath))
+    } catch { return $false }
+}
+
+function Get-RegistryValue64 {
+    [CmdletBinding()] param(
+        [Parameter(Mandatory)][string]$Path,   # Accept full HKLM:\ path OR relative without HKLM:\
+        [Parameter(Mandatory)][string]$Name
+    )
+    try {
+        $rel = $Path -replace '^HKLM:\\',''
+        $base = Open-Hklm64BaseKey
+        $k = $base.OpenSubKey($rel)
+        if (-not $k) { return $null }
+        return $k.GetValue($Name,$null)
+    } catch { return $null }
+}
 #endregion
 
 #region ---------------------------------------------------[Script Execution]------------------------------------------------------
@@ -293,56 +323,45 @@ catch {
     exit 1
 }
 
-# ----------------------- 64-bit registry verification -----------------------
-$base64 = [Microsoft.Win32.RegistryKey]::OpenBaseKey(
-    [Microsoft.Win32.RegistryHive]::LocalMachine,
-    [Microsoft.Win32.RegistryView]::Registry64
-)
-$tunnelKeyPath = "SOFTWARE\Fortinet\FortiClient\Sslvpn\Tunnels\$Prefix"
-if (-not $base64.OpenSubKey($tunnelKeyPath)) {
-    Write-ToLog "Registry check (64-bit) failed: $tunnelKeyPath" -LogColor Red
+# ----------------------- 64-bit registry verification (refactored) -----------------------
+$tunnelRelative = "SOFTWARE\Fortinet\FortiClient\Sslvpn\Tunnels\$Prefix"
+if (-not (Test-RegistryKey64 -RelativePath $tunnelRelative)) {
+    Write-ToLog "Registry check (64-bit) failed: $tunnelRelative" -LogColor Red
     Write-ToLog "Ending installation script" -IsHeader
     exit 1
 } else {
-    Write-ToLog "Registry check (64-bit) succeeded: $tunnelKeyPath"
+    Write-ToLog "Registry check (64-bit) succeeded: $tunnelRelative"
 }
 
-$tunnelKeyNative = "HKLM:\\SOFTWARE\\Fortinet\\FortiClient\\Sslvpn\\Tunnels\\$Prefix"
 # Post-import validation of Server value (if Endpoint supplied)
 if (-not [string]::IsNullOrWhiteSpace($Endpoint)) {
+    $serverValue = Get-RegistryValue64 -Path "HKLM:\SOFTWARE\Fortinet\FortiClient\Sslvpn\Tunnels\$Prefix" -Name 'Server'
+    if ($null -eq $serverValue) {
+        Write-ToLog "Could not read Server value after import (64-bit hive)." 'Red'
+        Write-ToLog "Ending installation script" -IsHeader
+        exit 1
+    } elseif ($serverValue -ne $Endpoint) {
+        Write-ToLog "Post-import validation FAILED: Server='$serverValue' != Expected '$Endpoint'" 'Red'
+        Write-ToLog "Ending installation script" -IsHeader
+        exit 1
+    } else {
+        Write-ToLog "Post-import validation succeeded: Server matches Endpoint ($Endpoint)" 'Green'
+    }
+}
+
+# Set InstalledVersion in registry for version control (only if provided)
+$TunnelRegPath = "HKLM:\SOFTWARE\Fortinet\FortiClient\Sslvpn\Tunnels\$Prefix"
+if (-not [string]::IsNullOrWhiteSpace($ExpectedVpnVersion)) {
     try {
-        $afterServer = (Get-ItemProperty -Path $tunnelKeyNative -Name Server -ErrorAction Stop).Server
-        if ($afterServer -ne $Endpoint) {
-            Write-ToLog "Post-import validation FAILED: Server='$afterServer' does not match expected Endpoint='$Endpoint'" "Red"
-            Write-ToLog "Ending installation script" -IsHeader
-            exit 1
-        } else {
-            Write-ToLog "Post-import validation succeeded: Server matches Endpoint ($Endpoint)" "Green"
-        }
+        Set-ItemProperty -Path $TunnelRegPath -Name 'InstalledVersion' -Value $ExpectedVpnVersion -Type String
+        Write-ToLog "Set InstalledVersion to $ExpectedVpnVersion in $TunnelRegPath"
     } catch {
-        Write-ToLog "Could not read Server value after import: $($_.Exception.Message)" "Red"
+        Write-ToLog "Failed to set InstalledVersion in registry: $($_.Exception.Message)" 'Red'
         Write-ToLog "Ending installation script" -IsHeader
         exit 1
     }
-}
-
-# Set InstalledVersion in registry for version control
-$TunnelRegPath = "HKLM:\SOFTWARE\Fortinet\FortiClient\Sslvpn\Tunnels\$Prefix"
-try {
-    if (-not [string]::IsNullOrWhiteSpace($ExpectedVpnVersion)) {
-        try {
-            Set-ItemProperty -Path $TunnelRegPath -Name "InstalledVersion" -Value $ExpectedVpnVersion -Type String
-            Write-ToLog "Set InstalledVersion to $ExpectedVpnVersion in $TunnelRegPath"
-        } catch {
-            Write-ToLog "Failed to set InstalledVersion in registry: $($_.Exception.Message)" "Red"
-            exit 1
-        }
-    } else {
-        Write-ToLog "ExpectedVpnVersion not provided; InstalledVersion not updated." "Yellow"
-    }
-} catch {
-    Write-ToLog "Failed to set InstalledVersion in registry: $($_.Exception.Message)" "Red"
-    exit 1
+} else {
+    Write-ToLog 'ExpectedVpnVersion not provided; InstalledVersion not updated.' 'Yellow'
 }
 
 Write-ToLog "Ending installation script" -IsHeader

@@ -6,8 +6,6 @@
 [string]$Prefix                     = "TimengoDPG"
 [string]$CorpDataPath               = "C:\ProgramData\Microsoft\IntuneManagementExtension\Logs"
 [string]$ApplicationLogName         = "#${Prefix}"
-[string]$RegistryPath               = "HKLM:\SOFTWARE\Timengo\DPGAddIn"
-[string]$RegistryValueName          = "Version"
 #endregion
 
 #region ---------------------------------------------------[Static Variables]------------------------------------------------------
