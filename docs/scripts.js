@@ -36,6 +36,12 @@ const packages = {
         placeholder: "1.0",
         required: true,
       },
+      {
+        id: "ExpectedClientVersion",
+        label: "Expected version of Forticlient VPN Client",
+        placeholder: "ie. 7.4.3.1737",
+        required: true,
+      },
     ],
   },
   devicerenamer: {
@@ -185,7 +191,8 @@ document.getElementById("btnGen").addEventListener("click", async () => {
         `[string]$VpnConnectionDescription     = "${values.VpnConnectionDescription}"\n` +
         `[string]$VpnConfFileName              = "${values.VpnConfFileName}"\n` +
         `[string]$Endpoint                     = "${values.Endpoint}"\n` +
-        `[string]$ExpectedVersion              = "${values.ExpectedVpnVersion}"\n`;
+        `[string]$ExpectedVpnVersion           = "${values.ExpectedVpnVersion}"\n` +
+        `[string]$ExpectedClientVersion        = "${values.ExpectedClientVersion}"\n`;
       if (modRegionHeader.test(script)) {
         script = script.replace(modRegionHeader, (m) => m + injected);
       } else {
@@ -243,7 +250,8 @@ document.getElementById("btnZip").addEventListener("click", async () => {
     `[string]$VpnConnectionDescription     = "${values.VpnConnectionDescription}"\n` +
     `[string]$VpnConfFileName              = "${values.VpnConfFileName}"\n` +
     `[string]$Endpoint                     = "${values.Endpoint}"\n` +
-    `[string]$ExpectedVersion              = "${values.ExpectedVpnVersion}"\n`;
+    `[string]$ExpectedVpnVersion           = "${values.ExpectedVpnVersion}"\n` +
+    `[string]$ExpectedClientVersion        = "${values.ExpectedClientVersion}"\n`;
   if (modRegionHeader.test(detectorScript)) {
     detectorScript = detectorScript.replace(
       modRegionHeader,
@@ -278,7 +286,7 @@ document.getElementById("btnZip").addEventListener("click", async () => {
 // Registry file template
 function regTemplate({ Prefix, vpnDescription, server }) {
   return `Windows Registry Editor Version 5.00\n\n[HKEY_LOCAL_MACHINE\\SOFTWARE\\Fortinet\\FortiClient\\Sslvpn\\Tunnels\\${Prefix}]\n"Description"="${vpnDescription}"\n"Server"="${server}"\n"InstalledVersion"="${
-    document.getElementById("ExpectedVersion")?.value || ""
+    document.getElementById("ExpectedVpnVersion")?.value || ""
   }"\n"promptusername"=dword:00000000\n"promptcertificate"=dword:00000000\n"ServerCert"="1"\n"DATA3"=""\n"dual_stack"=dword:00000000\n"sso_enabled"=dword:00000001\n"use_external_browser"=dword:00000001\n"azure_auto_login"=dword:00000000`;
 }
 

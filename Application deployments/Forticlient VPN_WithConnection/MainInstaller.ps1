@@ -3,7 +3,8 @@ param(
 [Parameter(Mandatory=$false)][string]$Prefix,
 [Parameter(Mandatory=$false)][string]$VpnConfFileName,
 [Parameter(Mandatory=$false)][string]$Endpoint,
-[Parameter(Mandatory=$false)][string]$ExpectedVpnVersion
+[Parameter(Mandatory=$false)][string]$ExpectedVpnVersion,
+[Parameter(Mandatory=$false)][string]$ExpectedClientVersion
 )
 #endregion
 
@@ -139,6 +140,8 @@ if (!(Test-Path $ReadMeFile)) {
 
 Write-ToLog "Starting installation script" -IsHeader
 Write-ToLog "Running as: $env:UserName"
+if ($ExpectedVpnVersion) { Write-ToLog "ExpectedVpnVersion provided: $ExpectedVpnVersion" }
+if ($ExpectedClientVersion) { Write-ToLog "ExpectedClientVersion provided: $ExpectedClientVersion" }
 
 # If $PSScriptRoot is not defined, use current folder
 if ([string]::IsNullOrWhiteSpace($PSScriptRoot)) {
