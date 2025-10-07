@@ -3,7 +3,6 @@ param(
 [Parameter(Mandatory=$false)][string]$Prefix,
 [Parameter(Mandatory=$false)][string]$VpnConfFileName,
 [Parameter(Mandatory=$false)][string]$Endpoint,
-[Parameter(Mandatory=$false)][string]$ExpectedVpnVersion,
 [Parameter(Mandatory=$false)][string]$ExpectedClientVersion
 )
 #endregion
@@ -114,105 +113,6 @@ function Get-MsiProductVersion {
     param([Parameter(Mandatory)][string]$Path)
     return Get-MsiProperty -Path $Path -Property 'ProductVersion'
 }
-
-# Enumerate FortiClient uninstall entries (64 + 32-bit views)
-function Get-FortiClientUninstallEntries {
-    $paths = @(
-        'HKLM:SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall',
-        'HKLM:SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall'
-    )
-    $results = @()
-    foreach ($p in $paths) {
-        try {
-            if (Test-Path $p) {
-                Get-ChildItem -Path $p -ErrorAction SilentlyContinue | ForEach-Object {
-                    try {
-                        $dn = (Get-ItemProperty -Path $_.PSPath -ErrorAction Stop).DisplayName
-                        if ($dn -and $dn -like 'FortiClient*') {
-                            $ip = Get-ItemProperty -Path $_.PSPath -ErrorAction SilentlyContinue
-                            $uninst = $ip.UninstallString
-                            $quiet  = $ip.QuietUninstallString
-                            $prodCode = $null
-                            foreach ($cmd in @($uninst,$quiet)) {
-                                if (-not $prodCode -and $cmd -match '\{[0-9A-Fa-f\-]{36}\}') { $prodCode = $Matches[0] }
-                            }
-                            $results += [pscustomobject]@{
-                                DisplayName   = $dn
-                                UninstallString = $uninst
-                                QuietUninstallString = $quiet
-                                ProductCode   = $prodCode
-                                RegistryPath  = $_.PSPath
-                            }
-                        }
-                    } catch {}
-                }
-            }
-        } catch {}
-    }
-    # Deduplicate by ProductCode if present
-    $dedup = @{}
-    foreach ($r in $results) {
-        $key = if ($r.ProductCode) { $r.ProductCode } else { $r.RegistryPath }
-        if (-not $dedup.ContainsKey($key)) { $dedup[$key] = $r }
-    }
-    return $dedup.Values
-}
-
-function Uninstall-FortiClientExisting {
-    $entries = Get-FortiClientUninstallEntries
-    if (-not $entries -or $entries.Count -eq 0) {
-        Write-ToLog 'No FortiClient uninstall entries found; nothing to remove.' 'Yellow'
-        return $true
-    }
-    Write-ToLog ("Found {0} FortiClient uninstall entr{1}. Beginning removal." -f $entries.Count, ($(if($entries.Count -eq 1){'y'}else{'ies'}))) 'Yellow'
-    foreach ($e in $entries) {
-        $pc = $e.ProductCode
-        $desc = if ($pc) { "$($e.DisplayName) $pc" } else { $e.DisplayName }
-        $args = $null
-        if ($pc) {
-            $args = "/x $pc /qn /norestart"
-        } elseif ($e.UninstallString -and $e.UninstallString -match 'MsiExec(\.exe)?\s+/I\s*\{') {
-            # Replace /I with /X and force silent
-            $prod = $null; if ($e.UninstallString -match '\{[0-9A-Fa-f\-]{36}\}') { $prod = $Matches[0] }
-            if ($prod) { $args = "/x $prod /qn /norestart" }
-        }
-        if (-not $args) {
-            # Fallback: attempt quiet uninstall string if provided
-            if ($e.QuietUninstallString) {
-                Write-ToLog "Executing provided QuietUninstallString for $desc" 'Yellow'
-                try {
-                    Start-Process -FilePath 'cmd.exe' -ArgumentList "/c", $e.QuietUninstallString -Wait -WindowStyle Hidden
-                } catch {
-                    Write-ToLog "Failed quiet uninstall for $desc $($_.Exception.Message)" 'Red'
-                    return $false
-                }
-                continue
-            } else {
-                Write-ToLog "Unable to derive silent uninstall command for $desc (skipping)." 'Red'
-                return $false
-            }
-        }
-        Write-ToLog "Uninstalling $desc via msiexec $args"
-        try {
-            $proc = Start-Process -FilePath 'msiexec.exe' -ArgumentList $args -Wait -PassThru -ErrorAction Stop
-            $code = $proc.ExitCode
-            switch ($code) {
-                0     { Write-ToLog "Uninstall succeeded for $desc" 'Green' }
-                3010  { Write-ToLog "Uninstall succeeded for $desc (3010: restart required)" 'Yellow' }
-                1605  { Write-ToLog "Product already uninstalled (1605) for $desc" 'Yellow' }
-                default {
-                    Write-ToLog "Uninstall failed for $desc (exit code $code)" 'Red'
-                    return $false
-                }
-            }
-        } catch {
-            Write-ToLog "Exception during uninstall of $desc $($_.Exception.Message)" 'Red'
-            return $false
-        }
-    }
-    return $true
-}
-
 # Helper: Open 64-bit HKLM base key once (for registry operations despite possible 32-bit host)
 function Open-Hklm64BaseKey {
     [Microsoft.Win32.RegistryKey]::OpenBaseKey(
@@ -268,8 +168,7 @@ if (!(Test-Path $ReadMeFile)) {
 
 Write-ToLog "Starting installation script" -IsHeader
 Write-ToLog "Running as: $env:UserName"
-if ($ExpectedVpnVersion) { Write-ToLog "ExpectedVpnVersion provided: $ExpectedVpnVersion" }
-if ($ExpectedClientVersion) { Write-ToLog "ExpectedClientVersion provided: $ExpectedClientVersion" }
+if ($ExpectedClientVersion) { Write-ToLog "We expect client version: $ExpectedClientVersion" }
 
 # If $PSScriptRoot is not defined, use current folder
 if ([string]::IsNullOrWhiteSpace($PSScriptRoot)) {
@@ -284,79 +183,56 @@ if ([string]::IsNullOrWhiteSpace($PSScriptRoot)) {
 $preVersion = Get-FortiClientVersion
 if ($preVersion) { $preVersion = $preVersion.Trim() }
 if ($preVersion) {
-    Write-ToLog "Detected existing FortiClient version before install attempt: $preVersion"
+    Write-ToLog "We found existing FortiClient version: $preVersion"
 } else {
-    Write-ToLog "FortiClient version not detected prior to install (likely not installed)."
+    Write-ToLog "FortiClient version not detected prior to install"
 }
 
 ## -------------------------------------------------- Version Enforcement Logic --------------------------------------------------
 
-$msiFiles = Get-ChildItem -Path $ScriptRoot -Filter 'FortiClient*.msi' -File -ErrorAction SilentlyContinue
-if (-not $msiFiles -or $msiFiles.Count -eq 0) {
-    Write-ToLog "No FortiClient*.msi file found in $ScriptRoot" 'Red'
-    exit 1
-}
-if ($msiFiles.Count -gt 1) {
-    Write-ToLog "Multiple FortiClient MSIs detected (expected exactly one): $($msiFiles.Name -join ', ')" 'Red'
-    Write-ToLog 'Aborting because only a single MSI is allowed by current policy.' 'Red'
-    exit 1
-}
+$msi = Get-ChildItem -Path $ScriptRoot -Filter 'FortiClient*.msi' -File -ErrorAction SilentlyContinue
 
-$Msi = $msiFiles[0]
-$msiVersion = Get-MsiProductVersion -Path $Msi.FullName
+$msiVersion = Get-MsiProductVersion -Path $msi.FullName
 if (-not $msiVersion) {
     Write-ToLog "Could not read ProductVersion from $($Msi.Name). Proceeding with installation anyway." 'Yellow'
 }
 $displayMsiVersion = if ($msiVersion) { $msiVersion } else { 'n/a' }
-Write-ToLog "Found FortiClient MSI: $($Msi.Name) (ProductVersion: $displayMsiVersion)"
+Write-ToLog "Forticlient installer found in scriptroot: $($Msi.Name) Version => $displayMsiVersion"
 
 $installedVersion = $preVersion
 $expectedTrim = if ([string]::IsNullOrWhiteSpace($ExpectedClientVersion)) { $null } else { $ExpectedClientVersion.Trim() }
-
-# Decision matrix:
-# Skip ONLY if all three values that exist align: ExpectedClientVersion == InstalledVersion == MSI ProductVersion.
-# If ExpectedClientVersion is provided and any mismatch with installed OR MSI version -> uninstall existing (if any) then install MSI.
-# If ExpectedClientVersion not provided, just install if not installed (leave existing if present already).
-
 $needInstall = $true
-$needUninstallFirst = $false
 
 if ($expectedTrim) {
     if ($installedVersion -and $msiVersion -and ($installedVersion.Trim() -eq $expectedTrim) -and ($msiVersion -eq $expectedTrim)) {
-        Write-ToLog "All versions match ExpectedClientVersion '$expectedTrim'. Skipping reinstall." 'Green'
+        Write-ToLog "All versions match version '$expectedTrim' Skipping reinstall" 'Green'
         $needInstall = $false
     } else {
         # Determine reasons
-        if (-not $installedVersion) { Write-ToLog "FortiClient not installed; will install expected version '$expectedTrim'." 'Yellow' }
-        if ($installedVersion -and $installedVersion.Trim() -ne $expectedTrim) { Write-ToLog "Installed version '$installedVersion' != Expected '$expectedTrim' (will enforce)." 'Yellow'; $needUninstallFirst = $true }
-        if ($msiVersion -and $msiVersion -ne $expectedTrim) { Write-ToLog "MSI ProductVersion '$msiVersion' != Expected '$expectedTrim' (still proceeding to install—assuming MSI is authoritative)." 'Yellow' }
+        if (-not $installedVersion) { Write-ToLog "FortiClient not installed; will now install '$expectedTrim'." 'Yellow' }
+        if ($installedVersion -and $installedVersion.Trim() -ne $expectedTrim) { Write-ToLog "Installed version '$installedVersion' does not match the expected version '$expectedTrim'. Install continues" 'Yellow' }
+        if ($msiVersion -and $msiVersion -ne $expectedTrim) { Write-ToLog "MSI version in scriptroot is '$msiVersion', which does not match the expected version '$expectedTrim'." 'Yellow' }
         if (-not $msiVersion) { Write-ToLog "MSI ProductVersion unreadable; proceeding by policy to install." 'Yellow' }
     }
 } else {
     # No expectation supplied: only install if missing
     if ($installedVersion) {
-        Write-ToLog "No ExpectedClientVersion supplied and FortiClient already installed ($installedVersion). Skipping reinstall." 'Green'
+        Write-ToLog "No Expected Client Version supplied and FortiClient already installed ($installedVersion) Skipping reinstall" 'Green'
         $needInstall = $false
     } else {
-        Write-ToLog 'No ExpectedClientVersion supplied; FortiClient absent. Installing.' 'Yellow'
+        Write-ToLog 'No Expected Client Version supplied; FortiClient absent. Installing.' 'Yellow'
     }
 }
 
 if ($needInstall) {
-    if ($needUninstallFirst) {
-        Write-ToLog 'Beginning uninstall of existing FortiClient versions before reinstall.' 'Yellow'
-        if (-not (Uninstall-FortiClientExisting)) {
-            Write-ToLog 'Uninstall phase reported errors; aborting.' 'Red'
-            exit 1
-        }
-    }
+    Write-ToLog 'Starting MSI installation' 'Yellow'
     try {
         Write-ToLog "Starting MSI installation: $($Msi.FullName)"
         $Arguments = "/i `"$($Msi.FullName)`" /qn /norestart"
         $process = Start-Process -FilePath 'msiexec.exe' -ArgumentList $Arguments -Wait -PassThru -ErrorAction Stop
         $exitCode = $process.ExitCode
         switch ($exitCode) {
-            0     { Write-ToLog "MSI installation completed successfully (exit code 0)"; break }
+            0     { Write-ToLog "MSI installation completed successfully"; break }
             3010  { Write-ToLog "MSI installation completed (exit code 3010: restart required). Treating as success." 'Yellow'; break }
             default {
                 Write-ToLog "Installation failed with exit code: $exitCode" 'Red'
@@ -369,7 +245,7 @@ if ($needInstall) {
     }
 
     if (-not (Test-FortiClientInstallation)) {
-        Write-ToLog 'Post-install verification failed (FortiClient executable missing)' 'Red'
+        Write-ToLog 'Post-install verification failed' 'Red'
         exit 1
     } else {
         Write-ToLog 'FortiClient installation verified successfully.' 'Green'
@@ -379,16 +255,21 @@ if ($needInstall) {
 # Post-install / final version logging
 $postVersion = Get-FortiClientVersion
 if ($postVersion) {
-    Write-ToLog "Final FortiClient version detected: $postVersion"
-} else {
-    Write-ToLog "FortiClient version still not detectable after installation attempt." "Yellow"
+    if ($needInstall) {
+        Write-ToLog "Forticlient version after installation: $postVersion"
+    } else {
+        Write-ToLog "No installation was performed; current version is $postVersion"
+    }
+} 
+else {
+    Write-ToLog "Forticlient version still not detectable after installation attempt." "Yellow"
 }
 
 # ---------------------------------------------------------------------------
 # VPN Tunnel Enforcement (always re-apply .reg file)
 # ---------------------------------------------------------------------------
 
-# Import VPN configuration from customer .reg file (always enforce desired state)
+# Import VPN configuration from customer .reg file
 try {
     # Define path to .reg (assume file is in same folder as script)
     $regFile = Join-Path -Path $ScriptRoot -ChildPath $VpnConfFileName
@@ -436,21 +317,6 @@ if (-not [string]::IsNullOrWhiteSpace($Endpoint)) {
     } else {
         Write-ToLog "Post-import validation succeeded: Server matches Endpoint ($Endpoint)" 'Green'
     }
-}
-
-# Set InstalledVersion in registry for version control (only if provided)
-$TunnelRegPath = "HKLM:\SOFTWARE\Fortinet\FortiClient\Sslvpn\Tunnels\$Prefix"
-if (-not [string]::IsNullOrWhiteSpace($ExpectedVpnVersion)) {
-    try {
-        Set-ItemProperty -Path $TunnelRegPath -Name 'InstalledVersion' -Value $ExpectedVpnVersion -Type String
-        Write-ToLog "Set InstalledVersion to $ExpectedVpnVersion in $TunnelRegPath"
-    } catch {
-        Write-ToLog "Failed to set InstalledVersion in registry: $($_.Exception.Message)" 'Red'
-        Write-ToLog "Ending installation script" -IsHeader
-        exit 1
-    }
-} else {
-    Write-ToLog 'ExpectedVpnVersion not provided; InstalledVersion not updated.' 'Yellow'
 }
 
 Write-ToLog "Ending installation script" -IsHeader

@@ -22,7 +22,7 @@ REM Define download path (TEMP folder)
 set "downloadPath=%LOGDIR%\AutopilotHelper.ps1"
 
 REM Download the latest script from GitHub
-powershell -Command "Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/Palmegg/M365/refs/heads/main/Various_Scripts/AutopilotHelper.ps1' -OutFile '%downloadPath%'"
+powershell -Command "Invoke-WebRequest -Uri 'https://raw.githubusercontent.com/Palmegg/M365/refs/heads/main/Various_Scripts/Autopilot/AutopilotHelper.ps1' -OutFile '%downloadPath%'"                        
 REM Check if download succeeded
 if errorlevel 1 (
     echo [ERROR] Failed to download AutopilotHelper.ps1. Exiting.
