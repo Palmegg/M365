@@ -1,13 +1,5 @@
-#region ---------------------------------------------------[Script parameters]-----------------------------------------------------
-param(
-    [Parameter(Mandatory=$false)]
-    [string]$ExpectedVersion = "",
-    [Parameter(Mandatory=$false)]
-    [string]$FolderName = "ApacheJMeter"
-)
-#endregion
-
 #region ---------------------------------------------------[Modifiable Parameters and defaults]------------------------------------
+[string]$ExpectedVersion        = "5.6.3"  # Set to "" to skip version check, or specify exact version (e.g., "5.6.3")
 [string]$CorpDataPath           = "$env:LOCALAPPDATA\IntuneManagementLogs"
 [string]$ApplicationLogName     = "#ApacheJMeter_Detection"
 #endregion
@@ -114,17 +106,24 @@ if ($FolderName -match "apache-jmeter-(.+)") {
     
     # If expected version is specified, validate it
     if ($ExpectedVersion -ne "" -and $ExpectedVersion -ne "Unknown") {
+        Write-ToLog "-> Expected version: $ExpectedVersion" "Cyan"
         if ($InstalledVersion -eq $ExpectedVersion) {
             Write-ToLog "-> Version match: $InstalledVersion = $ExpectedVersion" "Green"
         }
         else {
-            Write-ToLog "-> Version mismatch: $InstalledVersion != $ExpectedVersion" "Yellow"
+            Write-ToLog "-> Version mismatch: $InstalledVersion != $ExpectedVersion" "Red"
+            Write-ToLog "-> Required version $ExpectedVersion not found" "Red"
             ApplicationNotDetected
         }
     }
 }
 else {
     Write-ToLog "-> Warning: Could not extract version from folder name" "Yellow"
+    # If version is required but can't be extracted, fail the detection
+    if ($ExpectedVersion -ne "" -and $ExpectedVersion -ne "Unknown") {
+        Write-ToLog "-> ERROR: Version requirement specified but cannot verify version from folder name" "Red"
+        ApplicationNotDetected
+    }
 }
 
 # If no version check required or version file doesn't exist, just verify folder exists with content
