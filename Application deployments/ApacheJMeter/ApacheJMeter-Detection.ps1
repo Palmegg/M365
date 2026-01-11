@@ -106,37 +106,25 @@ $VersionFile = Join-Path -Path $TargetPath -ChildPath "version.txt"
 Write-ToLog "-> Apache JMeter folder found: $($JMeterFolders[0].Name)" "Green"
 Write-ToLog "-> Full path: $TargetPath" "Cyan"
 
-# Check if version file exists
-if (Test-Path -Path $VersionFile) {
-    try {
-        $VersionContent = Get-Content -Path $VersionFile -Raw
-        Write-ToLog "-> Version file found" "Green"
-        Write-ToLog "-> Version info: $($VersionContent -replace "`r`n", ' | ')" "Cyan"
-        
-        # Extract version from file
-        if ($VersionContent -match "Apache JMeter Version: (.+)") {
-            $InstalledVersion = $matches[1].Trim()
-            Write-ToLog "-> Installed version: $InstalledVersion" "Cyan"
-            
-            # If expected version is specified, validate it
-            if ($ExpectedVersion -ne "" -and $ExpectedVersion -ne "Unknown") {
-                if ($InstalledVersion -eq $ExpectedVersion) {
-                    Write-ToLog "-> Version match: $InstalledVersion = $ExpectedVersion" "Green"
-                    ApplicationDetected
-                }
-                else {
-                    Write-ToLog "-> Version mismatch: $InstalledVersion != $ExpectedVersion" "Yellow"
-                    ApplicationNotDetected
-                }
-            }
+# Extract version from folder name (e.g., apache-jmeter-5.6.3 → 5.6.3)
+$FolderName = $JMeterFolders[0].Name
+if ($FolderName -match "apache-jmeter-(.+)") {
+    $InstalledVersion = $matches[1].Trim()
+    Write-ToLog "-> Detected version from folder name: $InstalledVersion" "Cyan"
+    
+    # If expected version is specified, validate it
+    if ($ExpectedVersion -ne "" -and $ExpectedVersion -ne "Unknown") {
+        if ($InstalledVersion -eq $ExpectedVersion) {
+            Write-ToLog "-> Version match: $InstalledVersion = $ExpectedVersion" "Green"
         }
-    }
-    catch {
-        Write-ToLog "-> Warning: Could not read version file: $_" "Yellow"
+        else {
+            Write-ToLog "-> Version mismatch: $InstalledVersion != $ExpectedVersion" "Yellow"
+            ApplicationNotDetected
+        }
     }
 }
 else {
-    Write-ToLog "-> Version file not found (older deployment)" "Yellow"
+    Write-ToLog "-> Warning: Could not extract version from folder name" "Yellow"
 }
 
 # If no version check required or version file doesn't exist, just verify folder exists with content
