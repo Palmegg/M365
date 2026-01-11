@@ -11,8 +11,6 @@ if (!(Test-Path -Path $logpath)) {
 }
 [string]$Script:LogFile = "$($logpath)\$($ApplicationLogName).log"
 [string]$DesktopPath = [Environment]::GetFolderPath("Desktop")
-[string]$TargetPath = Join-Path -Path $DesktopPath -ChildPath $FolderName
-[string]$VersionFile = Join-Path -Path $TargetPath -ChildPath "version.txt"
 #endregion
 
 #region ---------------------------------------------------[Functions]-------------------------------------------------------------
@@ -93,7 +91,6 @@ if ($JMeterFolders.Count -eq 0) {
 
 # Use the first matching folder
 $TargetPath = $JMeterFolders[0].FullName
-$VersionFile = Join-Path -Path $TargetPath -ChildPath "version.txt"
 
 Write-ToLog "-> Apache JMeter folder found: $($JMeterFolders[0].Name)" "Green"
 Write-ToLog "-> Full path: $TargetPath" "Cyan"
@@ -160,32 +157,6 @@ foreach ($CriticalFile in $CriticalFiles) {
 if ($MissingFiles.Count -gt 0) {
     Write-ToLog "-> ERROR: $($MissingFiles.Count) critical file(s) missing" "Red"
     ApplicationNotDetected
-}
-
-# Try to detect JMeter version from JAR manifest if available
-$JMeterJar = Join-Path -Path $TargetPath -ChildPath "bin\ApacheJMeter.jar"
-if (Test-Path -Path $JMeterJar) {
-    try {
-        # Get file version info
-        $JarFile = Get-Item -Path $JMeterJar
-        Write-ToLog "-> JMeter JAR file size: $([math]::Round($JarFile.Length / 1MB, 2)) MB" "Cyan"
-        Write-ToLog "-> JMeter JAR last modified: $($JarFile.LastWriteTime)" "Cyan"
-    }
-    catch {
-        Write-ToLog "-> Warning: Could not read JAR file properties: $_" "Yellow"
-    }
-}
-
-# Check if jmeter.bat is executable
-$JMeterBat = Join-Path -Path $TargetPath -ChildPath "bin\jmeter.bat"
-if (Test-Path -Path $JMeterBat) {
-    $BatContent = Get-Content -Path $JMeterBat -Raw -ErrorAction SilentlyContinue
-    if ($BatContent -match 'JMETER_HOME') {
-        Write-ToLog "-> jmeter.bat appears to be valid (contains JMETER_HOME reference)" "Green"
-    }
-    else {
-        Write-ToLog "-> Warning: jmeter.bat may be corrupted" "Yellow"
-    }
 }
 
 Write-ToLog "-> All verification checks passed" "Green"
