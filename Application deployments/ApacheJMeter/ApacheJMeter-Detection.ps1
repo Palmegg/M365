@@ -89,15 +89,22 @@ if (!(Test-Path $ReadMeFile)) {
 
 Write-ToLog "Starting Apache JMeter detection script" -IsHeader
 Write-ToLog "-> Running as: $env:UserName"
-Write-ToLog "-> Looking for folder: $TargetPath"
+Write-ToLog "-> Looking for folder matching: apache-jmeter-* on desktop"
 
-# Check if Apache JMeter folder exists on desktop
-if (!(Test-Path -Path $TargetPath)) {
-    Write-ToLog "-> ERROR: Apache JMeter folder not found on desktop" "Red"
+# Check if Apache JMeter folder exists on desktop (wildcard match)
+$JMeterFolders = Get-ChildItem -Path $DesktopPath -Directory -Filter "apache-jmeter-*" -ErrorAction SilentlyContinue
+
+if ($JMeterFolders.Count -eq 0) {
+    Write-ToLog "-> ERROR: No Apache JMeter folder found on desktop" "Red"
     ApplicationNotDetected
 }
 
-Write-ToLog "-> Apache JMeter folder found" "Green"
+# Use the first matching folder
+$TargetPath = $JMeterFolders[0].FullName
+$VersionFile = Join-Path -Path $TargetPath -ChildPath "version.txt"
+
+Write-ToLog "-> Apache JMeter folder found: $($JMeterFolders[0].Name)" "Green"
+Write-ToLog "-> Full path: $TargetPath" "Cyan"
 
 # Check if version file exists
 if (Test-Path -Path $VersionFile) {
