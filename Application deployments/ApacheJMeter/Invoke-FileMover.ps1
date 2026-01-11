@@ -129,7 +129,6 @@ try {
         Write-ToLog "-> ERROR: Verification failed - destination folder not found" "Red"
         Write-ToLog "Ending deployment script" -IsHeader
         exit 1
-    }   exit 1
     }
 }
 catch {
