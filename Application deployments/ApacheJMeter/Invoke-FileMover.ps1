@@ -1,16 +1,6 @@
-#region ---------------------------------------------------[Script parameters]-----------------------------------------------------
-param(
-    [Parameter(Mandatory=$false)]
-    [string]$DestinationFolderName = "ApacheJMeter",
-    [Parameter(Mandatory=$false)]
-    [string]$Version = "Unknown"
-)
-#endregion
-
 #region ---------------------------------------------------[Modifiable Parameters and defaults]------------------------------------
 [string]$CorpDataPath           = "$env:LOCALAPPDATA\IntuneManagementLogs"
 [string]$ApplicationLogName     = "#ApacheJMeter_Deployment"
-[string]$SourceFolderName       = "ApacheJMeter"
 #endregion
 
 #region ---------------------------------------------------[Static Variables]------------------------------------------------------
@@ -19,9 +9,7 @@ if (!(Test-Path -Path $logpath)) {
     New-Item -Path $logpath -ItemType Directory -Force | Out-Null
 }
 [string]$Script:LogFile = "$($logpath)\$($ApplicationLogName).log"
-[string]$SourcePath = Join-Path -Path $PSScriptRoot -ChildPath $SourceFolderName
 [string]$DesktopPath = [Environment]::GetFolderPath("Desktop")
-[string]$DestinationPath = Join-Path -Path $DesktopPath -ChildPath $DestinationFolderName
 #endregion
 
 #region ---------------------------------------------------[Functions]-------------------------------------------------------------
@@ -79,17 +67,25 @@ if (!(Test-Path $ReadMeFile)) {
 Write-ToLog "Starting Apache JMeter deployment script" -IsHeader
 Write-ToLog "-> Running as: $env:UserName"
 Write-ToLog "-> Running from: $PSScriptRoot"
-Write-ToLog "-> Version: $Version"
 
-# Validate source folder exists
-if (!(Test-Path -Path $SourcePath)) {
-    Write-ToLog "-> ERROR: Source folder not found: $SourcePath" "Red"
+# Find apache-jmeter-* folder in script root
+Write-ToLog "-> Looking for apache-jmeter-* folder in script root..."
+$JMeterFolders = Get-ChildItem -Path $PSScriptRoot -Directory -Filter "apache-jmeter-*" -ErrorAction SilentlyContinue
+
+if ($JMeterFolders.Count -eq 0) {
+    Write-ToLog "-> ERROR: No apache-jmeter-* folder found in $PSScriptRoot" "Red"
     Write-ToLog "Ending deployment script" -IsHeader
     exit 1
 }
 
-Write-ToLog "-> Source folder found: $SourcePath"
-Write-ToLog "-> Destination: $DestinationPath"
+# Use the first matching folder
+$SourcePath = $JMeterFolders[0].FullName
+$SourceFolderName = $JMeterFolders[0].Name
+$DestinationPath = Join-Path -Path $DesktopPath -ChildPath $SourceFolderName
+
+Write-ToLog "-> Source folder found: $SourceFolderName" "Green"
+Write-ToLog "-> Full source path: $SourcePath" "Cyan"
+Write-ToLog "-> Destination: $DestinationPath" "Cyan"
 
 # Check if destination already exists
 if (Test-Path -Path $DestinationPath) {
@@ -114,16 +110,6 @@ try {
     if (Test-Path -Path $DestinationPath) {
         $FileCount = (Get-ChildItem -Path $DestinationPath -Recurse -File | Measure-Object).Count
         Write-ToLog "-> Verification successful: $FileCount files deployed" "Green"
-        
-        # Create version file for tracking
-        $VersionFile = Join-Path -Path $DestinationPath -ChildPath "version.txt"
-        try {
-            "Apache JMeter Version: $Version`nDeployed: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')`nDeployed by: $env:UserName" | Out-File -FilePath $VersionFile -Force
-            Write-ToLog "-> Version file created: $Version" "Green"
-        }
-        catch {
-            Write-ToLog "-> Warning: Could not create version file: $_" "Yellow"
-        }
     }
     else {
         Write-ToLog "-> ERROR: Verification failed - destination folder not found" "Red"
