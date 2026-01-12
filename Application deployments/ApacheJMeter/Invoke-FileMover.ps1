@@ -68,53 +68,42 @@ Write-ToLog "Starting Apache JMeter deployment script" -IsHeader
 Write-ToLog "-> Running as: $env:UserName"
 Write-ToLog "-> Running from: $PSScriptRoot"
 
-# Find apache-jmeter-* folder in script root
-Write-ToLog "-> Looking for apache-jmeter-* folder in script root..."
-$JMeterFolders = Get-ChildItem -Path $PSScriptRoot -Directory -Filter "apache-jmeter-*" -ErrorAction SilentlyContinue
+# Find apache-jmeter-*.zip file in script root
+Write-ToLog "-> Looking for apache-jmeter-*.zip file in script root..."
+$JMeterZips = Get-ChildItem -Path $PSScriptRoot -File -Filter "apache-jmeter-*.zip" -ErrorAction SilentlyContinue
 
-if ($JMeterFolders.Count -eq 0) {
-    Write-ToLog "-> ERROR: No apache-jmeter-* folder found in $PSScriptRoot" "Red"
+if ($JMeterZips.Count -eq 0) {
+    Write-ToLog "-> ERROR: No apache-jmeter-*.zip file found in $PSScriptRoot" "Red"
     Write-ToLog "Ending deployment script" -IsHeader
     exit 1
 }
 
-# Use the first matching folder
-$SourcePath = $JMeterFolders[0].FullName
-$SourceFolderName = $JMeterFolders[0].Name
-$DestinationPath = Join-Path -Path $DesktopPath -ChildPath $SourceFolderName
+# Use the first matching ZIP file
+$ZipPath = $JMeterZips[0].FullName
+$ZipFileName = $JMeterZips[0].Name
 
-Write-ToLog "-> Source folder found: $SourceFolderName" "Green"
-Write-ToLog "-> Full source path: $SourcePath" "Cyan"
-Write-ToLog "-> Destination: $DestinationPath" "Cyan"
+Write-ToLog "-> ZIP file found: $ZipFileName" "Green"
+Write-ToLog "-> Full ZIP path: $ZipPath" "Cyan"
+Write-ToLog "-> Extracting to: $DesktopPath" "Cyan"
 
-# Check if destination already exists
-if (Test-Path -Path $DestinationPath) {
-    Write-ToLog "-> Apache JMeter folder already exists on desktop, removing old version..." "Yellow"
-    try {
-        Remove-Item -Path $DestinationPath -Recurse -Force -ErrorAction Stop
-        Write-ToLog "-> Old version removed successfully" "Green"
-    }
-    catch {
-        Write-ToLog "-> ERROR: Failed to remove old version: $_" "Red"
-        Write-ToLog "Ending deployment script" -IsHeader
-        exit 1
-    }
-}
-
-# Copy Apache JMeter folder to user's desktop
+# Extract ZIP file to desktop
 try {
-    Write-ToLog "-> Copying Apache JMeter folder to desktop..."
-    Copy-Item -Path $SourcePath -Destination $DestinationPath -Recurse -Force -ErrorAction Stop
-    Write-ToLog "-> Apache JMeter successfully deployed to desktop" "Green"
-    # Verify deployment
-    if (Test-Path -Path $DestinationPath) {
-        $FileCount = (Get-ChildItem -Path $DestinationPath -Recurse -File | Measure-Object).Count
-        Write-ToLog "-> Verification successful: $FileCount files deployed" "Green"
+    Write-ToLog "-> Extracting Apache JMeter ZIP file to desktop..."
+    Expand-Archive -Path $ZipPath -DestinationPath $DesktopPath -Force -ErrorAction Stop
+    Write-ToLog "-> Apache JMeter successfully extracted to desktop" "Green"
+    
+    # Verify extraction by finding the extracted folder
+    $ExtractedFolderName = [System.IO.Path]::GetFileNameWithoutExtension($ZipFileName)
+    $ExtractedPath = Join-Path -Path $DesktopPath -ChildPath $ExtractedFolderName
+    
+    if (Test-Path -Path $ExtractedPath) {
+        $FileCount = (Get-ChildItem -Path $ExtractedPath -Recurse -File | Measure-Object).Count
+        Write-ToLog "-> Verification successful: $FileCount files extracted" "Green"
+        Write-ToLog "-> Extracted folder: $ExtractedFolderName" "Green"
     }
     else {
-        Write-ToLog "-> ERROR: Verification failed - destination folder not found" "Red"
-        Write-ToLog "Ending deployment script" -IsHeader
-        exit 1
+        Write-ToLog "-> Warning: Could not verify extracted folder at $ExtractedPath" "Yellow"
+        Write-ToLog "-> ZIP extraction completed but folder structure may differ" "Yellow"
     }
 }
 catch {
