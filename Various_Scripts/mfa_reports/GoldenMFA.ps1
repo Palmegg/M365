@@ -34,7 +34,7 @@ $users = Get-MgUser -All -Property Id, DisplayName, UserPrincipalName, Departmen
 
 # Fetch all sign-in logs within the last 30 days
 try {
-    $dateFilter = (Get-Date).AddDays(-1).ToUniversalTime().ToString("o")
+    $dateFilter = (Get-Date).AddDays(-30).ToUniversalTime().ToString("o")
     Write-Host "🔍 Fetching sign-in data from the last 30 days..." -ForegroundColor Yellow
     $allSignIns = Get-MgAuditLogSignIn -Filter "createdDateTime ge $dateFilter" -All
     Write-Host "✓ All recent sign-ins fetched successfully." -ForegroundColor Green

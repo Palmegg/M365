@@ -44,10 +44,9 @@ function Write-ToLog {
 
 #region ---------------------------------------------------[Script Execution]------------------------------------------------------
 
-#Configure console output encoding
-$null = cmd /c '' #Tip for ISE
-[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+#Configure script preferences
 $Script:ProgressPreference = 'SilentlyContinue'
+$ErrorActionPreference = 'Stop'
 
 # ReadMe file with disclaimer and instructions
 $ReadMeFile = "$logpath\README.txt"
