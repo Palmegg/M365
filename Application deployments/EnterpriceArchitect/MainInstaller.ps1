@@ -44,20 +44,55 @@ function Get-MsiProperty {
         [Parameter(Mandatory)][string]$Path,
         [Parameter(Mandatory)][string]$Property
     )
-    if (-not (Test-Path -LiteralPath $Path)) { return $null }
-    try {
-        $installer = New-Object -ComObject WindowsInstaller.Installer
-        $database  = $installer.GetType().InvokeMember('OpenDatabase','InvokeMethod',$null,$installer,@($Path,0))
-        $query     = "SELECT Value FROM Property WHERE Property='$Property'"
-        $view      = $database.OpenView($query)
-        $view.Execute()
-        $record = $view.Fetch()
-        if ($record) { return $record.StringData(1) }
-        return $null
-    } catch {
-        Write-ToLog "Failed to read MSI property '$Property' from '$Path': $($_.Exception.Message)" "Yellow"
-        return $null
+    if (-not (Test-Path -LiteralPath $Path)) { 
+        return $null 
     }
+    
+    $windowsInstaller = $null
+    $database = $null
+    $view = $null
+    $result = $null
+    
+    try {
+        $windowsInstaller = New-Object -ComObject WindowsInstaller.Installer
+        $database = $windowsInstaller.GetType().InvokeMember('OpenDatabase', 'InvokeMethod', $null, $windowsInstaller, @($Path, 0))
+        $query = "SELECT Value FROM Property WHERE Property='$Property'"
+        $view = $database.GetType().InvokeMember('OpenView', 'InvokeMethod', $null, $database, ($query))
+        $null = $view.GetType().InvokeMember('Execute', 'InvokeMethod', $null, $view, $null)
+        
+        $record = $view.GetType().InvokeMember('Fetch', 'InvokeMethod', $null, $view, $null)
+        if ($record) {
+            $value = $record.GetType().InvokeMember('StringData', 'GetProperty', $null, $record, 1)
+            if ($value) {
+                # Convert to string and aggressively clean
+                $valueStr = [string]$value
+                # Remove ALL whitespace characters from beginning and end
+                $valueStr = $valueStr.TrimStart([char[]]@(32,9,10,13,160,8232,8233))
+                $valueStr = $valueStr.TrimEnd([char[]]@(32,9,10,13,160,8232,8233))
+                $valueStr = $valueStr -replace '^\s+', '' -replace '\s+$', ''
+                
+                if (-not [string]::IsNullOrWhiteSpace($valueStr)) {
+                    $result = $valueStr
+                }
+            }
+        }
+    }
+    catch {
+        # Silently fail
+    }
+    finally {
+        if ($view) { 
+            try { $null = [System.Runtime.Interopservices.Marshal]::ReleaseComObject($view) } catch {}
+        }
+        if ($database) { 
+            try { $null = [System.Runtime.Interopservices.Marshal]::ReleaseComObject($database) } catch {}
+        }
+        if ($windowsInstaller) { 
+            try { $null = [System.Runtime.Interopservices.Marshal]::ReleaseComObject($windowsInstaller) } catch {}
+        }
+    }
+    
+    return $result
 }
 
 function Get-MsiProductVersion {
@@ -210,13 +245,14 @@ Write-ToLog "Found MSI file: $msiPath"
 # Get MSI properties
 $msiVersion = Get-MsiProductVersion -Path $msiPath
 $msiProductCode = Get-MsiProductCode -Path $msiPath
-if ($msiVersion) { 
-    $msiVersion = $msiVersion.Trim() 
-    Write-ToLog "MSI ProductVersion: $msiVersion"
+
+if (-not [string]::IsNullOrWhiteSpace($msiVersion)) {
+    Write-ToLog "MSI ProductVersion: [$msiVersion]"
 } else {
     Write-ToLog "Warning: Could not read ProductVersion from MSI" "Yellow"
 }
-if ($msiProductCode) {
+
+if (-not [string]::IsNullOrWhiteSpace($msiProductCode)) {
     Write-ToLog "MSI ProductCode: $msiProductCode"
 }
 
@@ -253,12 +289,17 @@ Write-ToLog "Detected installed Enterprise Architect version (post-clean): $inst
 
 $versionsMatch = $false
 if ($installedVersion -and $msiVersion) {
-    try {
-        $verObjInstalled = [version]$installedVersion
-        $verObjMsi = [version]$msiVersion
-        if ($verObjInstalled -eq $verObjMsi) { $versionsMatch = $true }
-    } catch {
-        if ($installedVersion -eq $msiVersion) { $versionsMatch = $true }
+    if ($installedVersion -eq $msiVersion) {
+        $versionsMatch = $true
+    } else {
+        # Try version object comparison as fallback
+        try {
+            $verObjInstalled = [version]$installedVersion
+            $verObjMsi = [version]$msiVersion
+            if ($verObjInstalled -eq $verObjMsi) { $versionsMatch = $true }
+        } catch {
+            # String comparison already done above
+        }
     }
 }
 

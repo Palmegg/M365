@@ -2,7 +2,7 @@
 #endregion
 
 #region ---------------------------------------------------[Modifiable Parameters and defaults]------------------------------------
-[string]$ExpectedVersion            = "16.1.1628.14"
+[string]$ExpectedVersion            = "17.1.1716"
 [string]$Prefix                     = "EnterpriseArchitect"
 [string]$CorpDataPath               = "C:\ProgramData\Microsoft\IntuneManagementExtension\Logs"
 [string]$ApplicationLogName         = "#${Prefix}"
@@ -101,6 +101,9 @@ $detectedVersion = $null
 $installedProduct = Get-InstalledVersion | Select-Object -First 1
 if ($installedProduct) {
     $detectedVersion = $installedProduct.DisplayVersion
+    if ($detectedVersion) { 
+        $detectedVersion = $detectedVersion.Trim() 
+    }
     Write-ToLog "Detected version from registry: $detectedVersion (Product: $($installedProduct.DisplayName))" "Cyan"
 }
 
