@@ -1,8 +1,8 @@
 #region ---------------------------------------------------[Modifiable Parameters and defaults]------------------------------------
-[string]$Prefix                   = "OfficeExtensionsPreRequisites"
+[string]$Prefix                   = "AccessibilityAssistant"
 [string]$CorpDataPath             = "C:\ProgramData\Microsoft\IntuneManagementExtension\Logs"
 [string]$ApplicationLogName       = "#${Prefix}-Detection"
-[string]$OldProductNamePattern    = "(?i)OptimentorRibbon"
+[string]$OldProductNamePattern    = "(?i)Accessibility\s*Assistant"
 [bool]$EnableVerboseLogging       = $true
 #endregion
 
@@ -42,24 +42,6 @@ function Write-DebugToLog {
     if ($EnableVerboseLogging) {
         Write-ToLog "[DEBUG] $LogMsg" 'DarkGray'
     }
-}
-
-function ApplicationDetected {
-    [CmdletBinding()]
-    param()
-
-    # Intune custom detection expects a success exit code and non-empty stdout.
-    $detectionMarker = "Random output to mark as installed"
-    Write-ToLog "Ending OfficeExtensions pre-requisite detection" -IsHeader
-    Write-Output $detectionMarker
-    exit 0
-}
-
-function ApplicationNotDetected {
-    [CmdletBinding()]
-    param()
-
-    exit 1
 }
 
 function Get-RegistryUninstallEntries {
@@ -163,65 +145,22 @@ function Get-UnloadedUserProfiles {
     [CmdletBinding()]
     param()
 
-    $profiles = @()
     $loadedSids = Get-LoadedUserSids
+    $profiles = @()
+    $profileListRoot = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList'
 
-    try {
-        $candidateProfiles = Get-CimInstance -ClassName Win32_UserProfile -ErrorAction Stop | Where-Object {
-            $_.SID -match '^S-1-5-21-\d+-\d+-\d+-\d+$' -and
-            -not $_.Special -and
-            -not $_.Loaded -and
-            ($null -eq $_.RefCount -or $_.RefCount -eq 0) -and
-            -not [string]::IsNullOrWhiteSpace($_.LocalPath)
-        }
-    }
-    catch {
-        Write-ToLog "Win32_UserProfile query failed, falling back to ProfileList: $($_.Exception.Message)" 'Yellow'
-        $profileListRoot = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\ProfileList'
-        if (-not (Test-Path $profileListRoot)) {
-            return @()
-        }
-
-        Get-ChildItem -Path $profileListRoot -ErrorAction SilentlyContinue | ForEach-Object {
-            try {
-                $sid = $_.PSChildName
-                if ($sid -notmatch '^S-1-5-21-\d+-\d+-\d+-\d+$') { return }
-                if ($loadedSids -contains $sid) { return }
-
-                $profile = Get-ItemProperty -Path $_.PSPath -ErrorAction Stop
-                $profilePath = [Environment]::ExpandEnvironmentVariables([string]$profile.ProfileImagePath)
-                if ([string]::IsNullOrWhiteSpace($profilePath)) { return }
-                if (Test-IsSkippableProfilePath -ProfilePath $profilePath) {
-                    Write-DebugToLog "Skipping special profile path: $profilePath"
-                    return
-                }
-
-                $ntUserDat = Join-Path $profilePath 'NTUSER.DAT'
-                if (-not (Test-Path -LiteralPath $ntUserDat)) { return }
-
-                $profiles += [pscustomobject]@{
-                    Sid         = $sid
-                    ProfilePath = $profilePath
-                    NtUserDat   = $ntUserDat
-                }
-            } catch {}
-        }
-
-        return @($profiles)
+    if (-not (Test-Path $profileListRoot)) {
+        return @()
     }
 
-    $candidateProfiles | ForEach-Object {
+    Get-ChildItem -Path $profileListRoot -ErrorAction SilentlyContinue | ForEach-Object {
         try {
-            $sid = [string]$_.SID
-            $profilePath = [Environment]::ExpandEnvironmentVariables([string]$_.LocalPath)
-            if ($_.RefCount -gt 0) {
-                Write-DebugToLog "Skipping profile with RefCount $($_.RefCount): $sid"
-                return
-            }
-            if ($loadedSids -contains $sid) {
-                Write-DebugToLog "Skipping already loaded profile from HKU: $sid"
-                return
-            }
+            $sid = $_.PSChildName
+            if ($sid -notmatch '^S-1-5-21-\d+-\d+-\d+-\d+$') { return }
+            if ($loadedSids -contains $sid) { return }
+
+            $profile = Get-ItemProperty -Path $_.PSPath -ErrorAction Stop
+            $profilePath = [Environment]::ExpandEnvironmentVariables([string]$profile.ProfileImagePath)
             if ([string]::IsNullOrWhiteSpace($profilePath)) { return }
             if (Test-IsSkippableProfilePath -ProfilePath $profilePath) {
                 Write-DebugToLog "Skipping special profile path: $profilePath"
@@ -249,26 +188,8 @@ function Invoke-RegLoad {
         [Parameter(Mandatory)][string]$HiveFile
     )
 
-    $psi = New-Object System.Diagnostics.ProcessStartInfo
-    $psi.FileName = 'reg.exe'
-    $psi.Arguments = ('load HKU\{0} "{1}"' -f $HiveName, $HiveFile)
-    $psi.UseShellExecute = $false
-    $psi.CreateNoWindow = $true
-    $psi.RedirectStandardOutput = $true
-    $psi.RedirectStandardError = $true
-
-    $process = New-Object System.Diagnostics.Process
-    $process.StartInfo = $psi
-    $null = $process.Start()
-    $stdOut = $process.StandardOutput.ReadToEnd()
-    $stdErr = $process.StandardError.ReadToEnd()
-    $process.WaitForExit()
-
-    $message = (@($stdOut, $stdErr) -join [Environment]::NewLine).Trim()
-    return @{
-        ExitCode = $process.ExitCode
-        Message  = $message
-    }
+    $process = Start-Process -FilePath 'reg.exe' -ArgumentList @('load', "HKU\$HiveName", $HiveFile) -Wait -PassThru -NoNewWindow -ErrorAction Stop
+    return $process.ExitCode
 }
 
 function Invoke-RegUnload {
@@ -279,7 +200,7 @@ function Invoke-RegUnload {
     return $process.ExitCode
 }
 
-function Get-OptimentorAddinEntriesFromRoots {
+function Get-OldAddinEntriesFromRoots {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][string[]]$Roots,
@@ -308,7 +229,7 @@ function Get-OptimentorAddinEntriesFromRoots {
     return @($results)
 }
 
-function Get-OptimentorAddinEntries {
+function Get-OldAddinEntries {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string]$NamePattern)
 
@@ -331,7 +252,7 @@ function Get-OptimentorAddinEntries {
     }
 
     $results = @()
-    $results += Get-OptimentorAddinEntriesFromRoots -Roots $roots -SourceLabel 'loaded hives' -NamePattern $NamePattern
+    $results += Get-OldAddinEntriesFromRoots -Roots $roots -SourceLabel 'loaded hives' -NamePattern $NamePattern
 
     $unloadedProfiles = Get-UnloadedUserProfiles
     foreach ($profile in $unloadedProfiles) {
@@ -340,18 +261,9 @@ function Get-OptimentorAddinEntries {
 
         try {
             Write-DebugToLog "Loading user hive for detection, SID $($profile.Sid): $($profile.NtUserDat)"
-            $loadResult = Invoke-RegLoad -HiveName $tempHiveName -HiveFile $profile.NtUserDat
-            if ($loadResult.ExitCode -ne 0) {
-                $loadDetail = if ([string]::IsNullOrWhiteSpace($loadResult.Message)) {
-                    "reg.exe exit code: $($loadResult.ExitCode)"
-                } else {
-                    $loadResult.Message
-                }
-                if ($loadDetail -match 'bruges af en anden proces|used by another process') {
-                    Write-ToLog "Skipping profile hive for detection, SID $($profile.Sid). NTUSER.DAT is locked by another process." 'Yellow'
-                } else {
-                    Write-ToLog "Skipping profile hive for detection, SID $($profile.Sid). $loadDetail" 'Yellow'
-                }
+            $loadExitCode = Invoke-RegLoad -HiveName $tempHiveName -HiveFile $profile.NtUserDat
+            if ($loadExitCode -ne 0) {
+                Write-ToLog "Failed to load hive for detection, SID $($profile.Sid). reg.exe exit code: $loadExitCode" 'Yellow'
                 continue
             }
 
@@ -362,7 +274,7 @@ function Get-OptimentorAddinEntries {
                 "Registry::HKEY_USERS\$tempHiveName\Software\Microsoft\Office\Outlook\Addins"
             )
 
-            $results += Get-OptimentorAddinEntriesFromRoots -Roots $profileRoots -SourceLabel "unloaded profile $($profile.Sid)" -NamePattern $NamePattern
+            $results += Get-OldAddinEntriesFromRoots -Roots $profileRoots -SourceLabel "unloaded profile $($profile.Sid)" -NamePattern $NamePattern
         }
         catch {
             Write-ToLog "Error scanning unloaded profile $($profile.Sid): $($_.Exception.Message)" 'Yellow'
@@ -386,7 +298,7 @@ $null = cmd /c ''
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 $Script:ProgressPreference = 'SilentlyContinue'
 
-Write-ToLog "Starting OfficeExtensions pre-requisite detection" -IsHeader
+Write-ToLog "Starting AccessibilityAssistant pre-requisite detection" -IsHeader
 Write-ToLog "Running as: $env:USERDOMAIN\$env:USERNAME"
 
 try {
@@ -395,7 +307,7 @@ try {
     $products += @(Get-MsiProductsExEntries -NamePattern $OldProductNamePattern)
     $products = @($products | Select-Object DisplayName, ScopePath, Source -Unique)
 
-    $addinEntries = @(Get-OptimentorAddinEntries -NamePattern $OldProductNamePattern)
+    $addinEntries = @(Get-OldAddinEntries -NamePattern $OldProductNamePattern)
 
     Write-ToLog "Old product hits: $($products.Count)" 'Gray'
     Write-ToLog "Old add-in key hits: $($addinEntries.Count)" 'Gray'
@@ -404,24 +316,25 @@ try {
         $products | ForEach-Object {
             Write-ToLog "Still installed: $($_.DisplayName) | Scope: $($_.ScopePath) | Source: $($_.Source)" 'Red'
         }
-        Write-ToLog "Ending OfficeExtensions pre-requisite detection" -IsHeader
-        ApplicationNotDetected
+        Write-ToLog "Ending AccessibilityAssistant pre-requisite detection" -IsHeader
+        exit 1
     }
 
     if ($addinEntries.Count -gt 0) {
         $addinEntries | ForEach-Object {
             Write-ToLog "Old add-in key still present: $($_.KeyPath) | Source: $($_.Source)" 'Red'
         }
-        Write-ToLog "Ending OfficeExtensions pre-requisite detection" -IsHeader
-        ApplicationNotDetected
+        Write-ToLog "Ending AccessibilityAssistant pre-requisite detection" -IsHeader
+        exit 1
     }
 
-    Write-ToLog "Pre-requisite detected as compliant: OptimentorRibbon not found." 'Green'
-    ApplicationDetected
+    Write-ToLog "Pre-requisite detected as compliant: AccessibilityAssistant not found." 'Green'
+    Write-ToLog "Ending AccessibilityAssistant pre-requisite detection" -IsHeader
+    exit 0
 }
 catch {
     Write-ToLog "Detection error: $($_.Exception.Message)" 'Red'
-    Write-ToLog "Ending OfficeExtensions pre-requisite detection" -IsHeader
-    ApplicationNotDetected
+    Write-ToLog "Ending AccessibilityAssistant pre-requisite detection" -IsHeader
+    exit 1
 }
 #endregion

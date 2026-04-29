@@ -1,0 +1,627 @@
+
+#Requires -Modules Microsoft.Graph.Users, Microsoft.Graph.Groups, Microsoft.Graph.Identity.DirectoryManagement
+<#
+.SYNOPSIS
+    Fase 2 — Opret brugere og grupper i COCO-tenanten baseret på Phase 1 discovery-data.
+
+.DESCRIPTION
+    Læser CSV-filer fra Phase1-Discovery.ps1 og opretter:
+      1. Brugere (Members) i COCO-tenanten med ny @cocouture.dk UPN
+      2. Distributionsgrupper med @cocouture.dk mailnavn
+      3. Microsoft 365 Grupper med @cocouture.dk mailnavn + medlemmer
+
+    UPN-mapping (automatisk):
+      @signal-clothing.com    → @cocouture.dk
+      @nn-brandhouse.com      → @cocouture.dk
+      @nnbrandhouse.onmicrosoft.com → @cocouture.dk (præfix bevares, undtagen admin-konti)
+
+    Springes over automatisk:
+      - Gæstebrugere (UserType = Guest) — håndteres separat via B2B invitation
+      - Brugere der allerede eksisterer i COCO (tjek på UPN)
+
+    Scopes (verificeret mod Microsoft Learn docs 2026-03-25):
+      User.ReadWrite.All      — Opret brugere
+      Group.ReadWrite.All     — Opret grupper og tilføj medlemmer
+      Directory.ReadWrite.All — Nødvendig for mail-enabled groups
+
+.PARAMETER DiscoveryPath
+    Sti til discovery-mappen fra Phase1. Default: discovery_<dato> i scriptets mappe.
+
+.PARAMETER TempPassword
+    Midlertidigt password til alle nye brugere.
+
+.PARAMETER EnableAccounts
+    Aktivér konti ved oprettelse. Default: $false (aktivér manuelt efter datamigrering).
+
+.PARAMETER WhatIf
+    Simulér — ingen objekter oprettes.
+
+.PARAMETER LogPath
+    Sti til logfil CSV.
+
+.PARAMETER TestUser
+    Kør kun mod én specifik bruger (kilde-UPN fra NNBH, fx "ple@signal-clothing.com").
+    Bruges til at validere scriptet inden fuld kørsel. Grupper springes over i TestUser-tilstand.
+
+.EXAMPLE
+    # Simulér alt
+    Connect-MgGraph -TenantId "cocouture.onmicrosoft.com" -Scopes "User.ReadWrite.All","Group.ReadWrite.All","Directory.ReadWrite.All"
+    .\Phase2-Provision.ps1 -WhatIf
+
+.EXAMPLE
+    # Test med én specifik bruger først
+    .\Phase2-Provision.ps1 -TestUser "ple@signal-clothing.com" -TempPassword "Signal2COCO!"
+
+.EXAMPLE
+    # Fuld kørsel mod COCO
+    .\Phase2-Provision.ps1 -DiscoveryPath "C:\Migration\discovery_20260325" -TempPassword "Signal2COCO!"
+
+.NOTES
+    Forfatter: netIP
+    Dato: 2026-03-25
+    VIGTIGT: Kør altid mod COCO-tenanten, ikke NNBH.
+#>
+
+[CmdletBinding(SupportsShouldProcess)]
+param(
+    [string]$DiscoveryPath = (Get-ChildItem "$PSScriptRoot\discovery_*" -Directory | Sort-Object Name -Descending | Select-Object -First 1).FullName,
+    [string]$TempPassword  = "Signal2COCO!",
+    [bool]  $EnableAccounts = $false,
+    [string]$TestUser      = "",   # Kilde-UPN på bruger der skal testes, fx "ple@signal-clothing.com"
+    [string]$LogPath        = "$PSScriptRoot\phase2_log_$(Get-Date -Format 'yyyyMMdd_HHmmss').csv"
+)
+
+Set-StrictMode -Version Latest
+$ErrorActionPreference = "Stop"
+
+# ============================================================
+# HJÆLPEFUNKTIONER
+# ============================================================
+
+function Write-Status {
+    param([string]$Message, [string]$Level = "INFO")
+    $ts = Get-Date -Format "HH:mm:ss"
+    $color = switch ($Level) {
+        "INFO"    { "Cyan"    }
+        "SUCCESS" { "Green"   }
+        "WARN"    { "Yellow"  }
+        "ERROR"   { "Red"     }
+        "SKIP"    { "DarkGray"}
+        "HEADER"  { "White"   }
+    }
+    if ($Level -eq "HEADER") {
+        Write-Host ""
+        Write-Host "═══════════════════════════════════════════════════" -ForegroundColor White
+        Write-Host "  $Message" -ForegroundColor White
+        Write-Host "═══════════════════════════════════════════════════" -ForegroundColor White
+    } else {
+        Write-Host "[$ts] [$Level] $Message" -ForegroundColor $color
+    }
+}
+
+function Add-Log {
+    param([string]$Type, [string]$Name, [string]$NewUPN, [string]$OldUPN, [string]$Status, [string]$Note = "")
+    "$((Get-Date -Format 'yyyy-MM-dd HH:mm:ss')),$Type,$Name,$NewUPN,$OldUPN,$Status,$Note" |
+        Out-File $LogPath -Append -Encoding UTF8
+}
+
+# UPN-mapping: konvertér kilde-UPN til nyt @cocouture.dk UPN
+# Ét centralt sted — al logik samlet her
+function Convert-UPN {
+    param([string]$SourceUPN)
+
+    # Specifikke undtagelser der kræver særlig præfix
+    $exceptions = @{
+        "admin@nnbrandhouse.onmicrosoft.com" = "ple-adm@cocouture.dk"
+    }
+    if ($exceptions.ContainsKey($SourceUPN.ToLower())) {
+        return $exceptions[$SourceUPN.ToLower()]
+    }
+
+    # Gæstekonti (#EXT#) springes over — returnér $null
+    if ($SourceUPN -match "#EXT#") { return $null }
+
+    # Udtræk præfix (del før @)
+    $prefix = ($SourceUPN -split "@")[0].ToLower()
+
+    # Rens onmicrosoft-præfixer der ikke er brugbare som mail
+    # (fx egadmin2@nnbrandhouse.onmicrosoft.com → egadmin2@cocouture.dk)
+    # Præfixet bevares, domænet erstattes
+
+    return "$prefix@cocouture.dk"
+}
+
+# Tjek om bruger allerede eksisterer i mål-tenanten
+function Test-UserExists {
+    param([string]$UPN)
+    try {
+        $u = Get-MgUser -UserId $UPN -ErrorAction SilentlyContinue
+        return ($null -ne $u)
+    } catch { return $false }
+}
+
+# Tjek om gruppe allerede eksisterer (på MailNickname)
+function Test-GroupExists {
+    param([string]$MailNickname)
+    try {
+        $g = Get-MgGroup -Filter "mailNickname eq '$MailNickname'" -ErrorAction SilentlyContinue
+        return ($null -ne $g -and $g.Count -gt 0)
+    } catch { return $false }
+}
+
+# ============================================================
+# VALIDER FORBINDELSE
+# ============================================================
+
+function Confirm-GraphConnection {
+    $ctx = Get-MgContext
+    if (-not $ctx) {
+        Write-Status "Ikke forbundet til Microsoft Graph." "ERROR"
+        Write-Status "Kør: Connect-MgGraph -TenantId 'cocouture.onmicrosoft.com' -Scopes 'User.ReadWrite.All','Group.ReadWrite.All','Directory.ReadWrite.All'" "ERROR"
+        return $false
+    }
+    Write-Status "Forbundet som: $($ctx.Account)" "SUCCESS"
+    Write-Status "Tenant: $($ctx.TenantId)" "INFO"
+
+    # Advar hvis man er forbundet til NNBH ved en fejl
+    if ($ctx.TenantId -eq "nnbrandhouse.onmicrosoft.com" -or $ctx.Account -match "signal-clothing|nn-brandhouse|nnbrandhouse") {
+        Write-Status "ADVARSEL: Du ser ud til at være forbundet til KILDE-tenanten (NNBH)!" "ERROR"
+        Write-Status "Dette script skal køres mod MÅL-tenanten (COCO). Afbryd og genopret forbindelsen." "ERROR"
+        Write-Status "Tryk Enter for at fortsætte alligevel, Ctrl+C for at afbryde." "WARN"
+        Read-Host
+    }
+    return $true
+}
+
+# ============================================================
+# MAIN
+# ============================================================
+
+Write-Status "FASE 2 — PROVISION: COCO TENANT" "HEADER"
+Write-Status "Discovery-sti: $DiscoveryPath" "INFO"
+Write-Status "WhatIf: $($WhatIfPreference -eq 'Continue' -or $PSBoundParameters.ContainsKey('WhatIf'))" "INFO"
+if ($TestUser) {
+    Write-Status "TESTBRUGER-TILSTAND: Kører kun mod '$TestUser' — grupper springes over" "WARN"
+}
+
+$isWhatIf = $WhatIfPreference -eq 'Continue' -or $PSBoundParameters.ContainsKey('WhatIf')
+
+if (-not $isWhatIf) {
+    if (-not (Confirm-GraphConnection)) { exit 1 }
+}
+
+if (-not (Test-Path $DiscoveryPath)) {
+    Write-Status "Discovery-mappen findes ikke: $DiscoveryPath" "ERROR"
+    exit 1
+}
+
+# Init logfil
+"Timestamp,Type,Name,NewUPN,OldUPN,Status,Note" | Out-File $LogPath -Encoding UTF8
+
+# ----------------------------------------------------------
+# INDLÆS DISCOVERY DATA
+# ----------------------------------------------------------
+Write-Status "Indlæser discovery-data..." "HEADER"
+
+$srcUsers       = Import-Csv "$DiscoveryPath\01_users.csv"         -Encoding UTF8
+$srcDistGroups  = Import-Csv "$DiscoveryPath\02_distribution_groups.csv" -Encoding UTF8
+$srcDistMembers = Import-Csv "$DiscoveryPath\02_distribution_group_members.csv" -Encoding UTF8
+$srcM365Groups  = Import-Csv "$DiscoveryPath\03_m365_groups.csv"   -Encoding UTF8
+$srcM365Members = Import-Csv "$DiscoveryPath\03_m365_group_members.csv" -Encoding UTF8
+
+Write-Status "Brugere: $($srcUsers.Count) | DistGrupper: $($srcDistGroups.Count) | M365-grupper: $($srcM365Groups.Count)" "SUCCESS"
+
+# ----------------------------------------------------------
+# 1. BRUGERE
+# ----------------------------------------------------------
+Write-Status "1/3 — Opretter brugere i COCO..." "HEADER"
+
+# Filtrér: kun Members (ikke gæster), ikke EXT-konti
+$memberUsers = $srcUsers | Where-Object {
+    $_.UserType -eq "Member" -and
+    $_.UserPrincipalName -notmatch "#EXT#"
+}
+
+# TestUser-tilstand: filtrer til kun den ene specificerede bruger
+if ($TestUser) {
+    $memberUsers = $memberUsers | Where-Object { $_.UserPrincipalName -eq $TestUser }
+    if (-not $memberUsers) {
+        Write-Status "Testbruger '$TestUser' ikke fundet i discovery-data." "ERROR"
+        Write-Status "Tilgængelige kilde-UPN'er:" "INFO"
+        ($srcUsers | Where-Object { $_.UserType -eq "Member" -and $_.UserPrincipalName -notmatch "#EXT#" }).UserPrincipalName | ForEach-Object {
+            Write-Status "  $_" "INFO"
+        }
+        exit 1
+    }
+    Write-Status "Testbruger fundet: $($memberUsers.DisplayName) [$($memberUsers.UserPrincipalName)]" "SUCCESS"
+} else {
+    Write-Status "Members at behandle: $($memberUsers.Count) (gæster springes over og håndteres via B2B invitation)" "INFO"
+}
+
+# Byg UPN-mapping tabel til brug ved gruppe-membership
+$upnMapping = @{}   # OldId → NewUPN (til brug i gruppe-trin)
+
+$userStats = @{ Created = 0; Skipped = 0; Failed = 0; WhatIf = 0 }
+
+foreach ($u in $memberUsers) {
+
+    $newUPN = Convert-UPN -SourceUPN $u.UserPrincipalName
+    if (-not $newUPN) {
+        Write-Status "  Spring over (EXT/gæst): $($u.UserPrincipalName)" "SKIP"
+        Add-Log "User" $u.DisplayName $newUPN $u.UserPrincipalName "SKIPPED_GUEST"
+        continue
+    }
+
+    # Gem mapping OldId → NewUPN til gruppe-trin
+    $upnMapping[$u.Id] = $newUPN
+
+    $displayStr = "$($u.DisplayName) [$($u.UserPrincipalName) → $newUPN]"
+
+    if ($isWhatIf) {
+        Write-Status "  [WHATIF] Ville oprette: $displayStr" "INFO"
+        Add-Log "User" $u.DisplayName $newUPN $u.UserPrincipalName "WHATIF"
+        $userStats.WhatIf++
+        continue
+    }
+
+    # Tjek om bruger allerede eksisterer
+    if (Test-UserExists -UPN $newUPN) {
+        Write-Status "  Springer over (eksisterer): $displayStr" "SKIP"
+        Add-Log "User" $u.DisplayName $newUPN $u.UserPrincipalName "SKIPPED_EXISTS"
+        $userStats.Skipped++
+        continue
+    }
+
+    # Byg MailNickname (præfix af ny UPN, rens specialtegn)
+    $mailNickname = ($newUPN -split "@")[0] -replace "[^a-zA-Z0-9._-]", ""
+
+    $params = @{
+        DisplayName       = $u.DisplayName
+        UserPrincipalName = $newUPN
+        MailNickname      = $mailNickname
+        PasswordProfile   = @{
+            Password                      = $TempPassword
+            ForceChangePasswordNextSignIn = $true
+        }
+        AccountEnabled    = $EnableAccounts
+        UsageLocation     = if ($u.UsageLocation) { $u.UsageLocation } else { "DK" }
+        Department        = $u.Department
+        JobTitle          = $u.JobTitle
+        CompanyName       = "Signal Clothing"
+    }
+
+    try {
+        $newUser = New-MgUser @params -ErrorAction Stop
+        Write-Status "  Oprettet: $displayStr" "SUCCESS"
+        Add-Log "User" $u.DisplayName $newUPN $u.UserPrincipalName "CREATED"
+        $userStats.Created++
+    }
+    catch {
+        Write-Status "  FEJL [$($u.DisplayName)]: $_" "ERROR"
+        Add-Log "User" $u.DisplayName $newUPN $u.UserPrincipalName "ERROR" "$_"
+        $userStats.Failed++
+    }
+}
+
+Write-Status "Brugere — Oprettet: $($userStats.Created) | Sprunget over: $($userStats.Skipped) | Fejl: $($userStats.Failed)" "INFO"
+
+# TestUser: verificér oprettelsen og vis detaljeret output
+if ($TestUser -and -not $isWhatIf -and $userStats.Created -gt 0) {
+    Write-Status "TESTVERIFIKATION — henter bruger fra COCO..." "HEADER"
+    Start-Sleep -Seconds 3   # vent kort på provisionering
+    $newUPN = Convert-UPN -SourceUPN $TestUser
+    try {
+        $created = Get-MgUser -UserId $newUPN -Property `
+            Id, DisplayName, UserPrincipalName, AccountEnabled, `
+            UsageLocation, Department, CompanyName, CreatedDateTime `
+            -ErrorAction Stop
+
+        Write-Host ""
+        Write-Host "  Oprettet bruger verificeret:" -ForegroundColor Green
+        Write-Host "  ┌──────────────────────────────────────────────────" -ForegroundColor Green
+        Write-Host "  │ Id              : $($created.Id)" -ForegroundColor White
+        Write-Host "  │ DisplayName     : $($created.DisplayName)" -ForegroundColor White
+        Write-Host "  │ UPN             : $($created.UserPrincipalName)" -ForegroundColor White
+        Write-Host "  │ AccountEnabled  : $($created.AccountEnabled)" -ForegroundColor White
+        Write-Host "  │ UsageLocation   : $($created.UsageLocation)" -ForegroundColor White
+        Write-Host "  │ Department      : $($created.Department)" -ForegroundColor White
+        Write-Host "  │ CompanyName     : $($created.CompanyName)" -ForegroundColor White
+        Write-Host "  │ CreatedDateTime : $($created.CreatedDateTime)" -ForegroundColor White
+        Write-Host "  └──────────────────────────────────────────────────" -ForegroundColor Green
+        Write-Host ""
+        Write-Status "Test bestået. Kør uden -TestUser for at behandle alle brugere." "SUCCESS"
+    }
+    catch {
+        Write-Status "Verifikation fejlede — brugeren blev muligvis ikke oprettet korrekt: $_" "ERROR"
+    }
+}
+
+# Gæster — log separat
+$guestUsers = $srcUsers | Where-Object { $_.UserType -eq "Guest" -or $_.UserPrincipalName -match "#EXT#" }
+if ($guestUsers.Count -gt 0) {
+    Write-Status "" "INFO"
+    Write-Status "GÆSTEBRUGERE ($($guestUsers.Count)) — skal re-inviteres via B2B i COCO:" "WARN"
+    foreach ($g in $guestUsers) {
+        Write-Status "  → $($g.DisplayName) ($($g.Mail))" "SKIP"
+        Add-Log "Guest" $g.DisplayName "" $g.UserPrincipalName "PENDING_B2B_INVITE" "Skal inviteres manuelt via Entra B2B"
+    }
+}
+
+# ----------------------------------------------------------
+# 2. DISTRIBUTIONSGRUPPER
+# ----------------------------------------------------------
+if ($TestUser) {
+    Write-Status "2/3 — Distributionsgrupper springes over i testbruger-tilstand." "SKIP"
+} else {
+Write-Status "2/3 — Opretter distributionsgrupper..." "HEADER"
+
+# Distributionsgrupper oprettes via Exchange Online PowerShell (New-DistributionGroup),
+# IKKE via Microsoft Graph — Graph understøtter ikke oprettelse af mail-enabled distribution groups direkte.
+# Vi genererer et Exchange Online PS-script der kan køres separat.
+
+$exoScriptPath = "$PSScriptRoot\Phase2b-DistGroups-ExchangeOnline.ps1"
+
+$exoLines = @()
+$exoLines += "#Requires -Modules ExchangeOnlineManagement"
+$exoLines += "<#"
+$exoLines += ".SYNOPSIS"
+$exoLines += "    Opretter distributionsgrupper i COCO-tenanten via Exchange Online PowerShell."
+$exoLines += "    Genereret automatisk af Phase2-Provision.ps1"
+$exoLines += ".NOTES"
+$exoLines += "    Kør: Connect-ExchangeOnline -UserPrincipalName admin@cocouture.dk"
+$exoLines += "    Derefter: .\Phase2b-DistGroups-ExchangeOnline.ps1"
+$exoLines += "#>"
+$exoLines += ""
+$exoLines += 'Connect-ExchangeOnline -UserPrincipalName "admin@cocouture.dk"'
+$exoLines += ""
+$exoLines += '$Results = @()'
+$exoLines += ""
+
+$distStats = @{ Generated = 0 }
+
+foreach ($grp in $srcDistGroups) {
+
+    # Map gruppe-email domæne
+    $newMail     = $grp.Mail -replace "@signal-clothing\.com$", "@cocouture.dk" `
+                             -replace "@nn-brandhouse\.com$",   "@cocouture.dk"
+    $newNickname = ($newMail -split "@")[0] -replace "[^a-zA-Z0-9._-]", ""
+    $cleanName   = $grp.DisplayName -replace "'", "''"  # escape single quotes i PS strings
+
+    # Find medlemmer for denne gruppe (kun brugere, ikke nested grupper — de håndteres nedenfor)
+    $grpUserMembers = $srcDistMembers | Where-Object {
+        $_.GroupId -eq $grp.Id -and $_.MemberType -eq "#microsoft.graph.user"
+    }
+    $grpGroupMembers = $srcDistMembers | Where-Object {
+        $_.GroupId -eq $grp.Id -and $_.MemberType -eq "#microsoft.graph.group"
+    }
+
+    # Byg member-liste med mappede UPNs
+    $memberList = @()
+    foreach ($m in $grpUserMembers) {
+        $mappedUPN = Convert-UPN -SourceUPN $m.MemberUPN
+        if ($mappedUPN) { $memberList += $mappedUPN }
+    }
+
+    $exoLines += "# ─── $($grp.DisplayName) ─────────────────────────────"
+    $exoLines += "try {"
+    $exoLines += "    `$grp = New-DistributionGroup ``"
+    $exoLines += "        -Name '$cleanName' ``"
+    $exoLines += "        -DisplayName '$cleanName' ``"
+    $exoLines += "        -Alias '$newNickname' ``"
+    $exoLines += "        -PrimarySmtpAddress '$newMail' ``"
+    $exoLines += "        -Type 'Distribution' ``"
+    if ($grp.Description) {
+        $cleanDesc = $grp.Description -replace "'", "''"
+        $exoLines += "        -Notes '$cleanDesc' ``"
+    }
+    $exoLines += "        -ErrorAction Stop"
+    $exoLines += "    Write-Host '[SUCCESS] Oprettet: $($grp.DisplayName)' -ForegroundColor Green"
+    $exoLines += "    `$Results += [PSCustomObject]@{ Group='$cleanName'; Status='Created'; Error='' }"
+
+    # Tilføj bruger-medlemmer
+    if ($memberList.Count -gt 0) {
+        $exoLines += ""
+        $exoLines += "    # Tilføj $($memberList.Count) bruger-member(s)"
+        foreach ($m in $memberList) {
+            $exoLines += "    Add-DistributionGroupMember -Identity '$newMail' -Member '$m' -ErrorAction SilentlyContinue"
+        }
+    }
+
+    # Tilføj nested gruppe-medlemmer (med ny domænemapping)
+    if ($grpGroupMembers.Count -gt 0) {
+        $exoLines += ""
+        $exoLines += "    # Tilføj $($grpGroupMembers.Count) nested gruppe(r) — disse skal eksistere allerede"
+        foreach ($gm in $grpGroupMembers) {
+            $nestedNewMail = $gm.GroupMail -replace "@signal-clothing\.com$", "@cocouture.dk" `
+                                           -replace "@nn-brandhouse\.com$",   "@cocouture.dk"
+            # Find nested gruppes eget mail fra srcDistGroups
+            $nestedSrc = $srcDistGroups | Where-Object { $_.Id -eq $gm.MemberId }
+            if ($nestedSrc) {
+                $nestedNewMail = $nestedSrc.Mail -replace "@signal-clothing\.com$", "@cocouture.dk" `
+                                                 -replace "@nn-brandhouse\.com$",   "@cocouture.dk"
+            }
+            $exoLines += "    Add-DistributionGroupMember -Identity '$newMail' -Member '$nestedNewMail' -ErrorAction SilentlyContinue"
+        }
+    }
+
+    $exoLines += "}"
+    $exoLines += "catch {"
+    $exoLines += "    Write-Host `"[ERROR] $($grp.DisplayName): `$_`" -ForegroundColor Red"
+    $exoLines += "    `$Results += [PSCustomObject]@{ Group='$cleanName'; Status='Error'; Error=`$_ }"
+    $exoLines += "}"
+    $exoLines += ""
+
+    $distStats.Generated++
+    Add-Log "DistGroup" $grp.DisplayName $newMail $grp.Mail "SCRIPT_GENERATED"
+
+    if ($isWhatIf) {
+        Write-Status "  [WHATIF] Ville generere EXO-script for: $($grp.DisplayName) → $newMail" "INFO"
+    } else {
+        Write-Status "  Genereret: $($grp.DisplayName) → $newMail ($($memberList.Count) brugere)" "SUCCESS"
+    }
+}
+
+# Afslut EXO-script med rapport
+$exoLines += '# ─── RAPPORT ────────────────────────────────────────────'
+$exoLines += '$Results | Format-Table -AutoSize'
+$exoLines += '$Results | Export-Csv "$PSScriptRoot\phase2b_distgroups_result.csv" -NoTypeInformation -Encoding UTF8'
+$exoLines += 'Write-Host "Færdig. Tjek phase2b_distgroups_result.csv for detaljer."'
+
+$exoLines | Out-File $exoScriptPath -Encoding UTF8
+Write-Status "Exchange Online script genereret: Phase2b-DistGroups-ExchangeOnline.ps1 ($($distStats.Generated) grupper)" "SUCCESS"
+Write-Status "Kør dette script separat med: Connect-ExchangeOnline" "WARN"
+} # end if -not TestUser
+
+# ----------------------------------------------------------
+# 3. MICROSOFT 365 GRUPPER
+# ----------------------------------------------------------
+if ($TestUser) {
+    Write-Status "3/3 — M365-grupper springes over i testbruger-tilstand." "SKIP"
+} else {
+Write-Status "3/3 — Opretter Microsoft 365 Grupper..." "HEADER"
+Write-Status "OBS: M365-grupper SKAL oprettes INDEN SharePoint-migration (hver gruppe provisionerer et SP-site)" "WARN"
+
+$m365Stats = @{ Created = 0; Skipped = 0; Failed = 0; WhatIf = 0 }
+
+foreach ($grp in $srcM365Groups) {
+
+    # Skip "All Company" — denne oprettes automatisk af M365
+    if ($grp.DisplayName -eq "All Company") {
+        Write-Status "  Spring over 'All Company' — oprettes automatisk af M365" "SKIP"
+        Add-Log "M365Group" $grp.DisplayName "" $grp.Mail "SKIPPED_AUTO"
+        continue
+    }
+
+    # Map mail-domæne
+    $newMail     = $grp.Mail -replace "@nn-brandhouse\.com$",   "@cocouture.dk" `
+                             -replace "@signal-clothing\.com$", "@cocouture.dk"
+    $newNickname = ($newMail -split "@")[0] -replace "[^a-zA-Z0-9._-]", ""
+
+    $displayStr  = "$($grp.DisplayName) → $newNickname@cocouture.dk"
+
+    if ($isWhatIf) {
+        Write-Status "  [WHATIF] Ville oprette M365-gruppe: $displayStr" "INFO"
+        Add-Log "M365Group" $grp.DisplayName $newMail $grp.Mail "WHATIF"
+        $m365Stats.WhatIf++
+        continue
+    }
+
+    # Tjek om gruppe allerede eksisterer
+    if (Test-GroupExists -MailNickname $newNickname) {
+        Write-Status "  Springer over (eksisterer): $displayStr" "SKIP"
+        Add-Log "M365Group" $grp.DisplayName $newMail $grp.Mail "SKIPPED_EXISTS"
+        $m365Stats.Skipped++
+        continue
+    }
+
+    try {
+        $newGroup = New-MgGroup -DisplayName $grp.DisplayName `
+            -MailNickname      $newNickname `
+            -MailEnabled       $true `
+            -SecurityEnabled   $false `
+            -GroupTypes        @("Unified") `
+            -Visibility        $grp.Visibility `
+            -Description       $grp.Description `
+            -ErrorAction Stop
+
+        Write-Status "  Oprettet M365-gruppe: $displayStr" "SUCCESS"
+        Add-Log "M365Group" $grp.DisplayName $newMail $grp.Mail "CREATED"
+        $m365Stats.Created++
+
+        # Tilføj medlemmer (kun interne brugere — gæster re-inviteres)
+        $grpMembers = $srcM365Members | Where-Object { $_.GroupId -eq $grp.Id }
+
+        # Vent kort på gruppe-provisionering
+        Start-Sleep -Seconds 3
+
+        foreach ($m in $grpMembers) {
+            # Spring gæster over
+            if ($m.MemberUPN -match "#EXT#" -or $m.MemberUPN -match "icloud\.com|jemmaagencies|elevateshowroom|palladio|regtradeag|dressnocode|martex|almoda") {
+                Write-Status "    Spring over gæst: $($m.MemberDisplayName) — invitér via B2B" "SKIP"
+                Add-Log "M365GroupMember" $m.MemberDisplayName "" $m.MemberUPN "SKIPPED_GUEST_MEMBER" "Gruppe: $($grp.DisplayName)"
+                continue
+            }
+
+            $newMemberUPN = Convert-UPN -SourceUPN $m.MemberUPN
+            if (-not $newMemberUPN) { continue }
+
+            try {
+                $memberUser = Get-MgUser -UserId $newMemberUPN -ErrorAction SilentlyContinue
+                if ($memberUser) {
+                    $memberRef = "https://graph.microsoft.com/v1.0/users/$($memberUser.Id)"
+                    New-MgGroupMember -GroupId $newGroup.Id -OdataId $memberRef -ErrorAction Stop
+                    Write-Status "    Tilføjet: $($m.MemberDisplayName) → $newMemberUPN" "SUCCESS"
+                    Add-Log "M365GroupMember" $m.MemberDisplayName $newMemberUPN $m.MemberUPN "MEMBER_ADDED" "Gruppe: $($grp.DisplayName)"
+                } else {
+                    Write-Status "    Bruger ikke fundet endnu: $newMemberUPN (tilføj manuelt)" "WARN"
+                    Add-Log "M365GroupMember" $m.MemberDisplayName $newMemberUPN $m.MemberUPN "MEMBER_NOT_FOUND" "Gruppe: $($grp.DisplayName)"
+                }
+            }
+            catch {
+                Write-Status "    FEJL ved tilføjelse af $($m.MemberDisplayName): $_" "ERROR"
+                Add-Log "M365GroupMember" $m.MemberDisplayName $newMemberUPN $m.MemberUPN "MEMBER_ERROR" "$_"
+            }
+        }
+    }
+    catch {
+        Write-Status "  FEJL [$($grp.DisplayName)]: $_" "ERROR"
+        Add-Log "M365Group" $grp.DisplayName $newMail $grp.Mail "ERROR" "$_"
+        $m365Stats.Failed++
+    }
+}
+
+Write-Status "M365-grupper — Oprettet: $($m365Stats.Created) | Sprunget over: $($m365Stats.Skipped) | Fejl: $($m365Stats.Failed)" "INFO"
+} # end if -not TestUser
+
+# ============================================================
+# OPSUMMERING
+# ============================================================
+
+Write-Status "FASE 2 AFSLUTTET" "HEADER"
+
+$log = Import-Csv $LogPath
+$created = ($log | Where-Object Status -eq "CREATED").Count
+$skipped = ($log | Where-Object Status -match "SKIPPED").Count
+$errors  = ($log | Where-Object Status -eq "ERROR").Count
+$pending = ($log | Where-Object Status -match "PENDING|NOT_FOUND").Count
+
+Write-Host ""
+Write-Host "┌─────────────────────────────────────────────────────────┐" -ForegroundColor Cyan
+Write-Host "│              FASE 2 OPSUMMERING — COCO TENANT           │" -ForegroundColor Cyan
+Write-Host "├─────────────────────────────────────────────────────────┤" -ForegroundColor Cyan
+Write-Host "│  Oprettet (brugere + M365-grupper) ....  $($created.ToString().PadLeft(4))              │" -ForegroundColor White
+Write-Host "│  Sprunget over (eksisterer/gæst) ......  $($skipped.ToString().PadLeft(4))              │" -ForegroundColor White
+Write-Host "│  Fejl ...................................  $($errors.ToString().PadLeft(4))              │" -ForegroundColor White
+Write-Host "│  Afventer manuel handling (B2B/NotFound) $($pending.ToString().PadLeft(4))              │" -ForegroundColor White
+Write-Host "├─────────────────────────────────────────────────────────┤" -ForegroundColor Cyan
+Write-Host "│  Log gemt: $(Split-Path $LogPath -Leaf)                │" -ForegroundColor White
+Write-Host "└─────────────────────────────────────────────────────────┘" -ForegroundColor Cyan
+
+Write-Host ""
+Write-Host @"
+NÆSTE SKRIDT:
+─────────────────────────────────────────────────────────────────
+1.  Kør distributionsgrupper via Exchange Online:
+      Connect-ExchangeOnline -UserPrincipalName admin@cocouture.dk
+      .\Phase2b-DistGroups-ExchangeOnline.ps1
+
+2.  Tildel licenser til de nye brugere (ENTERPRISEPACK = Office 365 E3):
+      `$sku = Get-MgSubscribedSku | Where-Object SkuPartNumber -eq 'ENTERPRISEPACK'
+      `$users = Import-Csv '$LogPath' | Where-Object { `$_.Status -eq 'CREATED' -and `$_.Type -eq 'User' }
+      foreach (`$u in `$users) {
+          Set-MgUserLicense -UserId `$u.NewUPN ``
+              -AddLicenses @{ SkuId = `$sku.SkuId } ``
+              -RemoveLicenses @()
+      }
+
+3.  Vent på at OneDrive-sites provisioneres (~5-15 min per licenseret bruger).
+
+4.  Re-invitér gæstebrugere via B2B (se log-filer med PENDING_B2B_INVITE).
+
+5.  Aktivér konti EFTER datamigrering er bekræftet:
+      Import-Csv '$LogPath' | Where-Object { `$_.Status -eq 'CREATED' } |
+          ForEach-Object { Update-MgUser -UserId `$_.NewUPN -AccountEnabled `$true }
+
+6.  Kør Phase 3 — Datamigrering (Exchange, OneDrive/SharePoint).
+─────────────────────────────────────────────────────────────────
+"@

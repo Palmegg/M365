@@ -1,8 +1,8 @@
 #region ---------------------------------------------------[Modifiable Parameters and defaults]------------------------------------
-[string]$Prefix                   = "OfficeExtensionsPreRequisites"
+[string]$Prefix                   = "AccessibilityAssistant"
 [string]$CorpDataPath             = "C:\ProgramData\Microsoft\IntuneManagementExtension\Logs"
 [string]$ApplicationLogName       = "#${Prefix}"
-[string]$OldProductNamePattern    = "(?i)OptimentorRibbon"
+[string]$OldProductNamePattern    = "(?i)Accessibility\s*Assistant"
 [bool]$EnableVerboseLogging       = $true
 #endregion
 
@@ -215,7 +215,31 @@ function Get-SilentUninstallInfo {
     return $null
 }
 
-function Invoke-OptimentorRibbonUninstall {
+function Remove-RegistryUninstallEntry {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]$InstalledEntry
+    )
+
+    if ([string]::IsNullOrWhiteSpace($InstalledEntry.RegistryPath)) {
+        return $false
+    }
+
+    try {
+        if (Test-Path -LiteralPath $InstalledEntry.RegistryPath) {
+            Remove-Item -Path $InstalledEntry.RegistryPath -Recurse -Force -ErrorAction Stop
+            Write-ToLog "Removed orphaned registry entry: $($InstalledEntry.RegistryPath)" 'Yellow'
+            return $true
+        }
+    }
+    catch {
+        Write-ToLog "Failed to remove orphaned registry entry $($InstalledEntry.RegistryPath): $($_.Exception.Message)" 'Yellow'
+    }
+
+    return $false
+}
+
+function Invoke-OldProductUninstall {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)]$InstalledEntry,
@@ -237,8 +261,14 @@ function Invoke-OptimentorRibbonUninstall {
     switch ($exitCode) {
         0     { Write-ToLog "Uninstall completed (0)." 'Green' }
         3010  { Write-ToLog "Uninstall completed (3010 restart required)." 'Yellow' }
-        1605  { Write-ToLog "Product already absent (1605)." 'Yellow' }
-        1614  { Write-ToLog "Product already uninstalled (1614)." 'Yellow' }
+        1605  {
+            Write-ToLog "Product already absent (1605) - cleaning orphaned registry entry." 'Yellow'
+            $null = Remove-RegistryUninstallEntry -InstalledEntry $InstalledEntry
+        }
+        1614  {
+            Write-ToLog "Product already uninstalled (1614) - cleaning orphaned registry entry." 'Yellow'
+            $null = Remove-RegistryUninstallEntry -InstalledEntry $InstalledEntry
+        }
         default { throw "Uninstall failed with exit code: $exitCode" }
     }
 }
@@ -325,7 +355,7 @@ function Invoke-RegUnload {
     return $process.ExitCode
 }
 
-function Remove-OptimentorAddinKeysFromRoots {
+function Remove-OldAddinKeysFromRoots {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][string[]]$Roots,
@@ -352,7 +382,7 @@ function Remove-OptimentorAddinKeysFromRoots {
     return $removedCount
 }
 
-function Remove-OptimentorAddinRegistryEntries {
+function Remove-OldAddinRegistryEntries {
     [CmdletBinding()]
     param()
 
@@ -374,7 +404,7 @@ function Remove-OptimentorAddinRegistryEntries {
         )
     }
 
-    $removedCount = Remove-OptimentorAddinKeysFromRoots -Roots $roots -SourceLabel 'loaded hives'
+    $removedCount = Remove-OldAddinKeysFromRoots -Roots $roots -SourceLabel 'loaded hives'
 
     $unloadedProfiles = Get-UnloadedUserProfiles
     foreach ($profile in $unloadedProfiles) {
@@ -396,7 +426,7 @@ function Remove-OptimentorAddinRegistryEntries {
                 "Registry::HKEY_USERS\$tempHiveName\Software\Microsoft\Office\Outlook\Addins"
             )
 
-            $removedCount += Remove-OptimentorAddinKeysFromRoots -Roots $profileRoots -SourceLabel "unloaded profile $($profile.Sid)"
+            $removedCount += Remove-OldAddinKeysFromRoots -Roots $profileRoots -SourceLabel "unloaded profile $($profile.Sid)"
         }
         catch {
             Write-ToLog "Error processing unloaded profile $($profile.Sid): $($_.Exception.Message)" 'Yellow'
@@ -420,7 +450,7 @@ $null = cmd /c ''
 [Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 $Script:ProgressPreference = 'SilentlyContinue'
 
-Write-ToLog "Starting OfficeExtensions pre-requisite removal" -IsHeader
+Write-ToLog "Starting AccessibilityAssistant pre-requisite removal" -IsHeader
 Write-ToLog "Running as: $env:USERDOMAIN\$env:USERNAME"
 
 try {
@@ -430,28 +460,28 @@ try {
     if ($oldProducts.Count -gt 0) {
         foreach ($oldProduct in $oldProducts) {
             Write-ToLog "Uninstalling old product: $($oldProduct.DisplayName) | Source: $($oldProduct.Source) | Scope: $($oldProduct.Scope)" 'Cyan'
-            Invoke-OptimentorRibbonUninstall -InstalledEntry $oldProduct -LogFolder $logpath
+            Invoke-OldProductUninstall -InstalledEntry $oldProduct -LogFolder $logpath
         }
         Start-Sleep -Seconds 5
     }
 
-    Remove-OptimentorAddinRegistryEntries
+    Remove-OldAddinRegistryEntries
 
     $remaining = @(Get-InstalledProductEntries -NamePattern $OldProductNamePattern)
     if ($remaining.Count -gt 0) {
         $remaining | ForEach-Object {
             Write-ToLog "Still present: $($_.DisplayName) | Source: $($_.Source) | Scope: $($_.Scope)" 'Red'
         }
-        throw "Pre-requisite failed: OptimentorRibbon still detected after uninstall attempt."
+        throw "Pre-requisite failed: AccessibilityAssistant still detected after uninstall attempt."
     }
 
-    Write-ToLog "Pre-requisite success: OptimentorRibbon is removed." 'Green'
-    Write-ToLog "Ending OfficeExtensions pre-requisite removal" -IsHeader
+    Write-ToLog "Pre-requisite success: AccessibilityAssistant is removed." 'Green'
+    Write-ToLog "Ending AccessibilityAssistant pre-requisite removal" -IsHeader
     exit 0
 }
 catch {
     Write-ToLog "Pre-requisite failed: $($_.Exception.Message)" 'Red'
-    Write-ToLog "Ending OfficeExtensions pre-requisite removal" -IsHeader
+    Write-ToLog "Ending AccessibilityAssistant pre-requisite removal" -IsHeader
     exit 1
 }
 #endregion
