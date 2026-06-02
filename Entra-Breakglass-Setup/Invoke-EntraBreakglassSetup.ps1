@@ -333,13 +333,20 @@ function Resolve-OnMicrosoftDomain {
     Write-Log -Message 'Resolving initial .onmicrosoft.com domain from tenant domains.'
     $domains = Get-MgDomain -All -ErrorAction Stop
     $initialDomain = $domains |
-        Where-Object { $_.Id -like '*.onmicrosoft.com' -and $_.IsInitial -eq $true } |
+        Where-Object {
+            $domainId = Get-GraphObjectPropertyValue -InputObject $_ -PropertyName @('Id', 'id')
+            $isInitial = Get-GraphObjectPropertyValue -InputObject $_ -PropertyName @('IsInitial', 'isInitial')
+            $domainId -like '*.onmicrosoft.com' -and $isInitial -eq $true
+        } |
         Select-Object -First 1
 
     if (-not $initialDomain) {
         $initialDomain = $domains |
-            Where-Object { $_.Id -like '*.onmicrosoft.com' } |
-            Sort-Object Id |
+            Where-Object {
+                $domainId = Get-GraphObjectPropertyValue -InputObject $_ -PropertyName @('Id', 'id')
+                $domainId -like '*.onmicrosoft.com'
+            } |
+            Sort-Object { Get-GraphObjectPropertyValue -InputObject $_ -PropertyName @('Id', 'id') } |
             Select-Object -First 1
     }
 
@@ -347,8 +354,9 @@ function Resolve-OnMicrosoftDomain {
         throw 'Could not find a tenant .onmicrosoft.com domain. Enter the tenant initial domain and try again.'
     }
 
-    Add-RunResult "Resolved tenant .onmicrosoft.com domain: $($initialDomain.Id)"
-    return $initialDomain.Id.ToLowerInvariant()
+    $initialDomainId = Get-GraphObjectPropertyValue -InputObject $initialDomain -PropertyName @('Id', 'id')
+    Add-RunResult "Resolved tenant .onmicrosoft.com domain: $initialDomainId"
+    return $initialDomainId.ToLowerInvariant()
 }
 
 function ConvertTo-OnMicrosoftUpn {
@@ -394,6 +402,57 @@ function New-RandomPassword {
     return -join (($required + $rest) | Sort-Object { Get-Random })
 }
 
+function Get-GraphObjectPropertyValue {
+    [CmdletBinding()]
+    param(
+        [AllowNull()] $InputObject,
+        [Parameter(Mandatory)][string[]] $PropertyName
+    )
+
+    if (-not $InputObject) {
+        return $null
+    }
+
+    foreach ($name in $PropertyName) {
+        $property = $InputObject.PSObject.Properties[$name]
+        if ($property -and $null -ne $property.Value) {
+            return $property.Value
+        }
+    }
+
+    $additionalProperties = $InputObject.PSObject.Properties['AdditionalProperties']
+    if ($additionalProperties -and $additionalProperties.Value -is [System.Collections.IDictionary]) {
+        foreach ($name in $PropertyName) {
+            if ($additionalProperties.Value.Contains($name) -and $null -ne $additionalProperties.Value[$name]) {
+                return $additionalProperties.Value[$name]
+            }
+        }
+    }
+
+    return $null
+}
+
+function Get-GraphObjectId {
+    [CmdletBinding()]
+    param([AllowNull()] $InputObject)
+
+    return Get-GraphObjectPropertyValue -InputObject $InputObject -PropertyName @('Id', 'id')
+}
+
+function Get-GraphObjectDisplayName {
+    [CmdletBinding()]
+    param([AllowNull()] $InputObject)
+
+    return Get-GraphObjectPropertyValue -InputObject $InputObject -PropertyName @('DisplayName', 'displayName')
+}
+
+function Get-GraphObjectUserPrincipalName {
+    [CmdletBinding()]
+    param([AllowNull()] $InputObject)
+
+    return Get-GraphObjectPropertyValue -InputObject $InputObject -PropertyName @('UserPrincipalName', 'userPrincipalName')
+}
+
 function Get-GraphUserByUpn {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string] $UserPrincipalName)
@@ -410,6 +469,15 @@ function Get-GraphUserByUpn {
     }
 }
 
+function Get-GraphGroupByDisplayName {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string] $GroupName)
+
+    $escapedName = $GroupName.Replace("'", "''")
+    $groups = Get-MgGroup -Filter "displayName eq '$escapedName'" -ConsistencyLevel eventual -All -Property 'id,displayName' -ErrorAction Stop
+    return $groups | Where-Object { (Get-GraphObjectDisplayName -InputObject $_) -eq $GroupName } | Select-Object -First 1
+}
+
 function Find-PotentialBreakglassAccounts {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string] $OnMicrosoftDomain)
@@ -421,9 +489,11 @@ function Find-PotentialBreakglassAccounts {
         $candidatePattern = '(?i)(^|[@._-])(svr_ea|adm_ea|ea0[1-9]|ea[0-9]{2}|emergency|emergencyaccess|emergency-access|breakglass|break-glass|break_glass)'
         $candidates = @(
             $users | Where-Object {
-                ($_.UserPrincipalName -match $candidatePattern) -or
-                ($_.DisplayName -match $candidatePattern)
-            } | Sort-Object UserPrincipalName
+                $candidateUpn = Get-GraphObjectUserPrincipalName -InputObject $_
+                $candidateDisplayName = Get-GraphObjectDisplayName -InputObject $_
+                ($candidateUpn -match $candidatePattern) -or
+                ($candidateDisplayName -match $candidatePattern)
+            } | Sort-Object { Get-GraphObjectUserPrincipalName -InputObject $_ }
         )
 
         if ($candidates.Count -eq 0) {
@@ -432,7 +502,9 @@ function Find-PotentialBreakglassAccounts {
         }
 
         $candidateText = ($candidates | Select-Object -First 15 | ForEach-Object {
-            '{0} (enabled: {1})' -f $_.UserPrincipalName, $_.AccountEnabled
+            $candidateUpn = Get-GraphObjectUserPrincipalName -InputObject $_
+            $candidateAccountEnabled = Get-GraphObjectPropertyValue -InputObject $_ -PropertyName @('AccountEnabled', 'accountEnabled')
+            '{0} (enabled: {1})' -f $candidateUpn, $candidateAccountEnabled
         }) -join [Environment]::NewLine
 
         $moreText = if ($candidates.Count -gt 15) { "$([Environment]::NewLine)...and $($candidates.Count - 15) more." } else { '' }
@@ -461,6 +533,17 @@ function Get-OrCreateBreakglassUser {
     $existingUser = Get-GraphUserByUpn -UserPrincipalName $upn
 
     if ($existingUser) {
+        $existingUserId = Get-GraphObjectId -InputObject $existingUser
+        if ([string]::IsNullOrWhiteSpace($existingUserId)) {
+            Write-Log -Level WARN -Message "Breakglass account '$upn' exists, but Microsoft Graph did not return an object id. Re-querying the user."
+            $existingUser = Get-GraphUserByUpn -UserPrincipalName $upn
+            $existingUserId = Get-GraphObjectId -InputObject $existingUser
+        }
+
+        if ([string]::IsNullOrWhiteSpace($existingUserId)) {
+            throw "Breakglass account '$upn' exists, but Microsoft Graph did not return an Id. Cannot safely continue."
+        }
+
         Add-RunResult "Breakglass account exists: $upn"
         return $existingUser
     }
@@ -502,7 +585,13 @@ function Get-OrCreateBreakglassUser {
         }
     }
 
-    $createdUser = New-MgUser @newUserParams -ErrorAction Stop
+    New-MgUser @newUserParams -ErrorAction Stop | Out-Null
+    $createdUser = Get-GraphUserByUpn -UserPrincipalName $upn
+    $createdUserId = Get-GraphObjectId -InputObject $createdUser
+    if ([string]::IsNullOrWhiteSpace($createdUserId)) {
+        throw "Created breakglass account '$upn', but Microsoft Graph did not return it with an Id on verification. Re-run the tool; it will check for the existing account before creating anything."
+    }
+
     $script:CreatedUserSecrets.Add([pscustomobject]@{
         UserPrincipalName = $upn
         TemporaryPassword = $password
@@ -521,11 +610,20 @@ function Get-OrCreateBreakglassGroup {
         [Parameter(Mandatory)][bool] $CreateIfMissing
     )
 
-    $escapedName = $GroupName.Replace("'", "''")
-    $groups = Get-MgGroup -Filter "displayName eq '$escapedName'" -ConsistencyLevel eventual -All -Property 'id,displayName' -ErrorAction Stop
-    $existingGroup = $groups | Where-Object { $_.DisplayName -eq $GroupName } | Select-Object -First 1
+    $existingGroup = Get-GraphGroupByDisplayName -GroupName $GroupName
 
     if ($existingGroup) {
+        $existingGroupId = Get-GraphObjectId -InputObject $existingGroup
+        if ([string]::IsNullOrWhiteSpace($existingGroupId)) {
+            Write-Log -Level WARN -Message "Security group '$GroupName' exists, but Microsoft Graph did not return an object id. Re-querying the group."
+            $existingGroup = Get-GraphGroupByDisplayName -GroupName $GroupName
+            $existingGroupId = Get-GraphObjectId -InputObject $existingGroup
+        }
+
+        if ([string]::IsNullOrWhiteSpace($existingGroupId)) {
+            throw "Security group '$GroupName' exists, but Microsoft Graph did not return an Id. Cannot safely continue."
+        }
+
         Add-RunResult "Security group exists: $GroupName"
         return $existingGroup
     }
@@ -554,12 +652,18 @@ function Get-OrCreateBreakglassGroup {
         $mailNickname = 'CABreakGlassExclude'
     }
 
-    $createdGroup = New-MgGroup `
+    New-MgGroup `
         -DisplayName $GroupName `
         -MailEnabled:$false `
         -MailNickname $mailNickname `
         -SecurityEnabled:$true `
-        -ErrorAction Stop
+        -ErrorAction Stop | Out-Null
+
+    $createdGroup = Get-GraphGroupByDisplayName -GroupName $GroupName
+    $createdGroupId = Get-GraphObjectId -InputObject $createdGroup
+    if ([string]::IsNullOrWhiteSpace($createdGroupId)) {
+        throw "Created security group '$GroupName', but Microsoft Graph did not return it with an Id on verification. Re-run the tool; it will check for the existing group before creating anything."
+    }
 
     Add-RunResult "Created security group: $GroupName"
     return $createdGroup
@@ -572,30 +676,62 @@ function Add-BreakglassUsersToGroup {
         [Parameter(Mandatory)] [object[]] $Users
     )
 
-    foreach ($user in ($Users | Where-Object { $_ -and $_.Id })) {
+    $groupId = Get-GraphObjectId -InputObject $Group
+    $groupDisplayName = Get-GraphObjectDisplayName -InputObject $Group
+    if ([string]::IsNullOrWhiteSpace($groupDisplayName)) {
+        $groupDisplayName = 'selected group'
+    }
+
+    if ([string]::IsNullOrWhiteSpace($groupId)) {
+        Add-RunResult "Could not add users to '$groupDisplayName' because the group object id was not available."
+        Write-Log -Level ERROR -Message "Could not add users to '$groupDisplayName' because the group object id was not available."
+        return
+    }
+
+    $members = if ($script:DryRun) {
+        @()
+    }
+    else {
+        @(Get-MgGroupMember -GroupId $groupId -All -Property 'id' -ErrorAction Stop)
+    }
+    $memberIds = @($members | ForEach-Object { Get-GraphObjectId -InputObject $_ } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+
+    foreach ($user in ($Users | Where-Object { $_ })) {
+        $userId = Get-GraphObjectId -InputObject $user
+        $userPrincipalName = Get-GraphObjectUserPrincipalName -InputObject $user
+        if ([string]::IsNullOrWhiteSpace($userPrincipalName)) {
+            $userPrincipalName = 'unknown user'
+        }
+
+        if ([string]::IsNullOrWhiteSpace($userId)) {
+            Add-RunResult "Could not add '$userPrincipalName' to '$groupDisplayName' because the user object id was not available."
+            Write-Log -Level WARN -Message "Could not add '$userPrincipalName' to '$groupDisplayName' because the user object id was not available."
+            continue
+        }
+
         if ($script:DryRun) {
-            Write-Log -Level DRYRUN -Message "Would add '$($user.UserPrincipalName)' to group '$($Group.DisplayName)'."
-            Add-RunResult "Dry-run: would add '$($user.UserPrincipalName)' to '$($Group.DisplayName)'."
+            Write-Log -Level DRYRUN -Message "Would add '$userPrincipalName' to group '$groupDisplayName'."
+            Add-RunResult "Dry-run: would add '$userPrincipalName' to '$groupDisplayName'."
             continue
         }
 
-        $members = Get-MgGroupMember -GroupId $Group.Id -All -Property 'id' -ErrorAction Stop
-        if ($members.Id -contains $user.Id) {
-            Add-RunResult "User is already member of '$($Group.DisplayName)': $($user.UserPrincipalName)"
+        if ($memberIds -contains $userId) {
+            Add-RunResult "User is already member of '$groupDisplayName': $userPrincipalName"
             continue
         }
 
-        if (-not (Confirm-Change -Message "Add '$($user.UserPrincipalName)' to '$($Group.DisplayName)'?")) {
-            Add-RunResult "Skipped group membership after prompt: $($user.UserPrincipalName)"
+        if (-not (Confirm-Change -Message "Add '$userPrincipalName' to '$groupDisplayName'?")) {
+            Add-RunResult "Skipped group membership after prompt: $userPrincipalName"
             continue
         }
 
         $body = @{
-            '@odata.id' = "https://graph.microsoft.com/v1.0/directoryObjects/$($user.Id)"
+            '@odata.id' = "https://graph.microsoft.com/v1.0/directoryObjects/$userId"
         }
 
-        New-MgGroupMemberByRef -GroupId $Group.Id -BodyParameter $body -ErrorAction Stop
-        Add-RunResult "Added '$($user.UserPrincipalName)' to '$($Group.DisplayName)'."
+        New-MgGroupMemberByRef -GroupId $groupId -BodyParameter $body -ErrorAction Stop
+        Add-RunResult "Added '$userPrincipalName' to '$groupDisplayName'."
+        $memberIds += $userId
     }
 }
 
@@ -607,10 +743,12 @@ function Test-BreakglassGroupMembership {
     )
 
     $results = @()
-    if (-not $Group -or -not $Group.Id) {
+    $groupId = Get-GraphObjectId -InputObject $Group
+    if (-not $Group -or [string]::IsNullOrWhiteSpace($groupId)) {
         foreach ($user in ($Users | Where-Object { $_ })) {
+            $userPrincipalName = Get-GraphObjectUserPrincipalName -InputObject $user
             $results += [pscustomobject]@{
-                UserPrincipalName = $user.UserPrincipalName
+                UserPrincipalName = $userPrincipalName
                 IsMember          = $false
                 Status            = 'Group not available'
             }
@@ -621,8 +759,9 @@ function Test-BreakglassGroupMembership {
 
     if ($script:DryRun) {
         foreach ($user in ($Users | Where-Object { $_ })) {
+            $userPrincipalName = Get-GraphObjectUserPrincipalName -InputObject $user
             $results += [pscustomobject]@{
-                UserPrincipalName = $user.UserPrincipalName
+                UserPrincipalName = $userPrincipalName
                 IsMember          = $false
                 Status            = 'Dry-run: membership not changed'
             }
@@ -631,11 +770,23 @@ function Test-BreakglassGroupMembership {
         return $results
     }
 
-    $members = Get-MgGroupMember -GroupId $Group.Id -All -Property 'id' -ErrorAction Stop
-    foreach ($user in ($Users | Where-Object { $_ -and $_.Id })) {
-        $isMember = ($members.Id -contains $user.Id)
+    $members = @(Get-MgGroupMember -GroupId $groupId -All -Property 'id' -ErrorAction Stop)
+    $memberIds = @($members | ForEach-Object { Get-GraphObjectId -InputObject $_ } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    foreach ($user in ($Users | Where-Object { $_ })) {
+        $userId = Get-GraphObjectId -InputObject $user
+        $userPrincipalName = Get-GraphObjectUserPrincipalName -InputObject $user
+        if ([string]::IsNullOrWhiteSpace($userId)) {
+            $results += [pscustomobject]@{
+                UserPrincipalName = $userPrincipalName
+                IsMember          = $false
+                Status            = 'User object id not available'
+            }
+            continue
+        }
+
+        $isMember = ($memberIds -contains $userId)
         $results += [pscustomobject]@{
-            UserPrincipalName = $user.UserPrincipalName
+            UserPrincipalName = $userPrincipalName
             IsMember          = $isMember
             Status            = $(if ($isMember) { 'Confirmed member' } else { 'Not confirmed as member' })
         }
@@ -652,8 +803,9 @@ function Test-GlobalAdministratorMembership {
 
     if ($script:DryRun) {
         foreach ($user in ($Users | Where-Object { $_ })) {
+            $userPrincipalName = Get-GraphObjectUserPrincipalName -InputObject $user
             $results += [pscustomobject]@{
-                UserPrincipalName = $user.UserPrincipalName
+                UserPrincipalName = $userPrincipalName
                 IsGlobalAdmin     = $false
                 Status            = 'Dry-run: role membership not checked'
             }
@@ -671,13 +823,24 @@ function Test-GlobalAdministratorMembership {
             throw 'Global Administrator role definition was not returned by Microsoft Graph.'
         }
 
-        foreach ($user in ($Users | Where-Object { $_ -and $_.Id })) {
-            $assignmentFilter = [uri]::EscapeDataString("principalId eq '$($user.Id)' and roleDefinitionId eq '$($globalAdminRole.id)'")
+        foreach ($user in ($Users | Where-Object { $_ })) {
+            $userId = Get-GraphObjectId -InputObject $user
+            $userPrincipalName = Get-GraphObjectUserPrincipalName -InputObject $user
+            if ([string]::IsNullOrWhiteSpace($userId)) {
+                $results += [pscustomobject]@{
+                    UserPrincipalName = $userPrincipalName
+                    IsGlobalAdmin     = $false
+                    Status            = 'User object id not available'
+                }
+                continue
+            }
+
+            $assignmentFilter = [uri]::EscapeDataString("principalId eq '$userId' and roleDefinitionId eq '$($globalAdminRole.id)'")
             $assignmentResponse = Invoke-MgGraphRequest -Method GET -Uri "https://graph.microsoft.com/v1.0/roleManagement/directory/roleAssignments?`$filter=$assignmentFilter" -ErrorAction Stop
             $isGlobalAdmin = (@($assignmentResponse.value).Count -gt 0)
 
             $results += [pscustomobject]@{
-                UserPrincipalName = $user.UserPrincipalName
+                UserPrincipalName = $userPrincipalName
                 IsGlobalAdmin     = $isGlobalAdmin
                 Status            = $(if ($isGlobalAdmin) { 'Confirmed Global Administrator' } else { 'Not confirmed as Global Administrator' })
             }
@@ -686,8 +849,9 @@ function Test-GlobalAdministratorMembership {
     catch {
         Write-Log -Level WARN -Message "Could not confirm Global Administrator role membership: $($_.Exception.Message)"
         foreach ($user in ($Users | Where-Object { $_ })) {
+            $userPrincipalName = Get-GraphObjectUserPrincipalName -InputObject $user
             $results += [pscustomobject]@{
-                UserPrincipalName = $user.UserPrincipalName
+                UserPrincipalName = $userPrincipalName
                 IsGlobalAdmin     = $false
                 Status            = "Could not check: $($_.Exception.Message)"
             }
@@ -793,12 +957,16 @@ function Generate-Report {
     $userList = @($Users | Where-Object { $_ })
     $account1 = $userList | Select-Object -First 1
     $account2 = $userList | Select-Object -Skip 1 -First 1
-    $account1Upn = if ($account1) { $account1.UserPrincipalName } else { 'Not available' }
-    $account2Upn = if ($account2) { $account2.UserPrincipalName } else { 'Not available' }
-    $groupObjectId = if ($Group -and $Group.Id) { $Group.Id } else { 'Not available' }
+    $account1Upn = if ($account1) { Get-GraphObjectUserPrincipalName -InputObject $account1 } else { 'Not available' }
+    $account2Upn = if ($account2) { Get-GraphObjectUserPrincipalName -InputObject $account2 } else { 'Not available' }
+    $groupObjectId = if ($Group) { Get-GraphObjectId -InputObject $Group } else { 'Not available' }
+    if ([string]::IsNullOrWhiteSpace($groupObjectId)) {
+        $groupObjectId = 'Not available'
+    }
 
     $passwordRows = foreach ($user in $userList) {
-        $secret = $script:CreatedUserSecrets | Where-Object { $_.UserPrincipalName -eq $user.UserPrincipalName } | Select-Object -First 1
+        $userPrincipalName = Get-GraphObjectUserPrincipalName -InputObject $user
+        $secret = $script:CreatedUserSecrets | Where-Object { $_.UserPrincipalName -eq $userPrincipalName } | Select-Object -First 1
         $passwordText = if ($secret) {
             $secret.TemporaryPassword
         }
@@ -809,7 +977,7 @@ function Generate-Report {
             'Not generated in this run. Existing passwords can not be retrieved.'
         }
 
-        '<tr><td>{0}</td><td class="secret">{1}</td></tr>' -f (ConvertTo-HtmlEncodedText $user.UserPrincipalName), (ConvertTo-HtmlEncodedText $passwordText)
+        '<tr><td>{0}</td><td class="secret">{1}</td></tr>' -f (ConvertTo-HtmlEncodedText $userPrincipalName), (ConvertTo-HtmlEncodedText $passwordText)
     }
 
     $groupRows = foreach ($status in $GroupMembershipStatus) {

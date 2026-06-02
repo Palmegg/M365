@@ -56,6 +56,7 @@ The tool should:
 - `Browse...` button is wired to `System.Windows.Forms.FolderBrowserDialog`.
 - Naming preset buttons exist for `svr_ea01 / svr_ea02` and `adm_ea01 / adm_ea02`.
 - The script scans for potential existing emergency access accounts and warns/logs if it finds candidates.
+- After creating users or the CA exclusion group, the script re-queries Microsoft Graph and validates object ids before continuing. This avoids Graph SDK responses without `Id` breaking group membership steps.
 
 ## Recent Bugs Fixed
 
@@ -65,6 +66,7 @@ The tool should:
 - `There is no Runspace available`: fixed by removing `BackgroundWorker` and using worker process mode.
 - `The variable '$timer' cannot be retrieved because it has not been set`: fixed by using `$script:WorkerTimer`.
 - `A parameter cannot be found that matches parameter name 'TenantName'`: fixed by renaming the internal connection helper to avoid a `Connect-Graph` alias collision from Microsoft Graph PowerShell.
+- `The property 'Id' cannot be found on this object`: fixed by re-querying created users/groups and by using helper functions for Graph object ids/properties instead of direct `.Id` access in membership and report logic.
 
 ## Important Security Decisions
 
