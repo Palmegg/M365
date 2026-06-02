@@ -1226,11 +1226,29 @@ function Start-BreakglassWpfGui {
 
     $reader = New-Object System.Xml.XmlNodeReader $xaml
     $script:MainWindow = [Windows.Markup.XamlReader]::Load($reader)
+    $script:MainWindow.Dispatcher.add_UnhandledException({
+        param($Sender, $EventArgs)
+
+        $exceptionMessage = "Unhandled WPF dispatcher error: $($EventArgs.Exception.Message)"
+        Write-Log -Level ERROR -Message $exceptionMessage
+        [System.Windows.MessageBox]::Show($exceptionMessage, "$($script:AppName) - WPF error", 'OK', 'Error') | Out-Null
+        $EventArgs.Handled = $true
+    })
+    $script:MainWindow.Add_Loaded({
+        Write-Log -Message 'GUI loaded and visible.'
+    })
     $script:MainWindow.Add_ContentRendered({
-        $script:MainWindow.Activate() | Out-Null
-        $script:MainWindow.Topmost = $true
-        $script:MainWindow.Topmost = $false
-        $script:MainWindow.Focus() | Out-Null
+        try {
+            $script:MainWindow.WindowState = 'Normal'
+            $script:MainWindow.Activate() | Out-Null
+            $script:MainWindow.Focus() | Out-Null
+        }
+        catch {
+            Write-Log -Level WARN -Message "Could not activate GUI window: $($_.Exception.Message)"
+        }
+    })
+    $script:MainWindow.Add_Closed({
+        Write-Log -Message 'GUI closed.'
     })
 
     $tenantNameTextBox = $script:MainWindow.FindName('TenantNameTextBox')
@@ -1347,7 +1365,8 @@ function Start-BreakglassWpfGui {
         $script:MainWindow.Close()
     })
 
-    $script:MainWindow.ShowDialog() | Out-Null
+    $dialogResult = $script:MainWindow.ShowDialog()
+    Write-Log -Message "GUI ShowDialog returned: $dialogResult"
 }
 
 try {
