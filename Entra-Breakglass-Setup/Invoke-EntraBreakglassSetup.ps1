@@ -43,6 +43,7 @@ $script:ActiveRunButton = $null
 $script:LastLogTextLength = 0
 $script:LastAccountNameLogValue = ''
 $script:AccountNameUpdateTimer = $null
+$script:DiscoveredAccountCandidates = New-Object System.Collections.Generic.List[object]
 
 New-Item -ItemType Directory -Force -Path $script:LogDirectory, $script:ReportDirectory | Out-Null
 
@@ -946,6 +947,7 @@ function Generate-Report {
         [AllowNull()] $Group,
         [Parameter(Mandatory)][string] $GroupName,
         [AllowEmptyString()][string] $OutputDirectory,
+        [object[]] $DiscoveredAccounts = @(),
         [Parameter(Mandatory)][object[]] $GroupMembershipStatus,
         [Parameter(Mandatory)][object[]] $GlobalAdministratorStatus,
         [Parameter(Mandatory)][string] $AdminSSPRStatus
@@ -967,6 +969,22 @@ function Generate-Report {
     $groupObjectId = if ($Group) { Get-GraphObjectId -InputObject $Group } else { 'Not available' }
     if ([string]::IsNullOrWhiteSpace($groupObjectId)) {
         $groupObjectId = 'Not available'
+    }
+
+    $discoveredAccountRows = foreach ($candidate in @($DiscoveredAccounts | Where-Object { $_ })) {
+        $candidateUpn = Get-GraphObjectUserPrincipalName -InputObject $candidate
+        $candidateDisplayName = Get-GraphObjectDisplayName -InputObject $candidate
+        $candidateEnabled = Get-GraphObjectPropertyValue -InputObject $candidate -PropertyName @('AccountEnabled', 'accountEnabled')
+        $candidateId = Get-GraphObjectId -InputObject $candidate
+
+        '<tr><td>{0}</td><td>{1}</td><td>{2}</td><td>{3}</td></tr>' -f `
+            (ConvertTo-HtmlEncodedText $candidateUpn),
+            (ConvertTo-HtmlEncodedText $candidateDisplayName),
+            (ConvertTo-HtmlEncodedText $candidateEnabled),
+            (ConvertTo-HtmlEncodedText $candidateId)
+    }
+    if (-not $discoveredAccountRows -or $discoveredAccountRows.Count -eq 0) {
+        $discoveredAccountRows = @('<tr><td colspan="4">No existing emergency access candidates found.</td></tr>')
     }
 
     $passwordRows = foreach ($user in $userList) {
@@ -1054,6 +1072,13 @@ function Generate-Report {
         <tr><th>Breakglass Account 2 UPN</th><td>$(ConvertTo-HtmlEncodedText $account2Upn)</td></tr>
     </table>
 
+    <h2>Existing Account Discovery</h2>
+    <p class="muted">Accounts below were found by scanning the signed-in tenant for likely emergency access naming patterns.</p>
+    <table>
+        <tr><th>User principal name</th><th>Display name</th><th>Enabled</th><th>Object id</th></tr>
+        $($discoveredAccountRows -join [Environment]::NewLine)
+    </table>
+
     <h2>Generated Initial Passwords</h2>
     <p class="muted">Passwords are included only for accounts created in this run. Existing account passwords cannot be retrieved.</p>
     <table>
@@ -1130,12 +1155,16 @@ function Invoke-BreakglassSetup {
     $script:DryRun = $DryRun
     $script:RunResults.Clear()
     $script:CreatedUserSecrets.Clear()
+    $script:DiscoveredAccountCandidates.Clear()
 
     Write-Log -Message "Starting setup. Report mode: $script:DryRun"
 
     Connect-BreakglassGraph -TenantName $TenantName -UseDeviceCode $UseDeviceCode | Out-Null
     $onMicrosoftDomain = Resolve-OnMicrosoftDomain -TenantName $TenantName
-    Find-PotentialBreakglassAccounts -OnMicrosoftDomain $onMicrosoftDomain | Out-Null
+    $discoveredAccounts = @(Find-PotentialBreakglassAccounts -OnMicrosoftDomain $onMicrosoftDomain)
+    foreach ($candidate in $discoveredAccounts) {
+        $script:DiscoveredAccountCandidates.Add($candidate) | Out-Null
+    }
 
     $user1 = Get-OrCreateBreakglassUser -InputUpn $BreakglassUpn1 -OnMicrosoftDomain $onMicrosoftDomain -CreateIfMissing $CreateAccountsIfMissing
     $user2 = Get-OrCreateBreakglassUser -InputUpn $BreakglassUpn2 -OnMicrosoftDomain $onMicrosoftDomain -CreateIfMissing $CreateAccountsIfMissing
@@ -1173,6 +1202,7 @@ function Invoke-BreakglassSetup {
         -Group $group `
         -GroupName $GroupName `
         -OutputDirectory $OutputDirectory `
+        -DiscoveredAccounts $discoveredAccounts `
         -GroupMembershipStatus $groupMembershipStatus `
         -GlobalAdministratorStatus $globalAdministratorStatus `
         -AdminSSPRStatus $adminSSPRStatus
@@ -1305,6 +1335,7 @@ function Start-BreakglassWpfGui {
         Width="1120"
         MinHeight="720"
         MinWidth="1000"
+        SizeToContent="Manual"
         WindowStartupLocation="CenterScreen"
         Background="#F6F8FA">
     <Grid Margin="18">
@@ -1321,12 +1352,13 @@ function Start-BreakglassWpfGui {
         </StackPanel>
 
         <Border Grid.Row="1" BorderBrush="#D1D5DB" BorderThickness="1" Background="White" CornerRadius="6" Padding="16" Margin="0,0,0,14">
+            <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" MaxHeight="270">
             <Grid>
                 <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="250"/>
-                    <ColumnDefinition Width="*"/>
-                    <ColumnDefinition Width="260"/>
-                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="230" MinWidth="210" MaxWidth="260"/>
+                    <ColumnDefinition Width="2*"/>
+                    <ColumnDefinition Width="240" MinWidth="220" MaxWidth="280"/>
+                    <ColumnDefinition Width="3*"/>
                 </Grid.ColumnDefinitions>
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto"/>
@@ -1345,11 +1377,11 @@ function Start-BreakglassWpfGui {
                 <TextBox x:Name="BreakglassUpn2TextBox" Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="3" Height="28" Margin="0,0,0,10"/>
 
                 <TextBlock Grid.Row="2" Grid.Column="0" Text="Account names" VerticalAlignment="Center" Margin="0,0,10,10"/>
-                <StackPanel Grid.Row="2" Grid.Column="1" Grid.ColumnSpan="3" Orientation="Horizontal" Margin="0,0,0,10">
-                    <Button x:Name="SaveAccountNamesButton" Content="Save account names" Height="28" Width="150" Margin="0,0,8,0"/>
-                    <Button x:Name="UseSvrEaPresetButton" Content="Use svr_ea01 / svr_ea02" Height="28" Width="170" Margin="0,0,8,0"/>
-                    <Button x:Name="UseAdmEaPresetButton" Content="Use adm_ea01 / adm_ea02" Height="28" Width="170"/>
-                </StackPanel>
+                <WrapPanel Grid.Row="2" Grid.Column="1" Grid.ColumnSpan="3" Margin="0,0,0,10">
+                    <Button x:Name="SaveAccountNamesButton" Content="Save account names" Height="28" MinWidth="150" Margin="0,0,8,8"/>
+                    <Button x:Name="UseSvrEaPresetButton" Content="Use svr_ea01 / svr_ea02" Height="28" MinWidth="170" Margin="0,0,8,8"/>
+                    <Button x:Name="UseAdmEaPresetButton" Content="Use adm_ea01 / adm_ea02" Height="28" MinWidth="170" Margin="0,0,8,8"/>
+                </WrapPanel>
 
                 <TextBlock Grid.Row="3" Grid.Column="0" Text="Security group name" VerticalAlignment="Center" Margin="0,0,10,14"/>
                 <TextBox x:Name="GroupNameTextBox" Grid.Row="3" Grid.Column="1" Grid.ColumnSpan="3" Height="28" Text="CA-BreakGlassExclude" Margin="0,0,0,14"/>
@@ -1364,6 +1396,7 @@ function Start-BreakglassWpfGui {
                 <CheckBox x:Name="DisableAdminSsprCheckBox" Grid.Row="6" Grid.Column="2" Content="Disable admin SSPR" Margin="0,0,0,0"/>
                 <CheckBox x:Name="GenerateDocumentationCheckBox" Grid.Row="6" Grid.Column="3" Content="Generate confidential documentation" IsChecked="True" Margin="0,0,0,0"/>
             </Grid>
+            </ScrollViewer>
         </Border>
 
         <Grid Grid.Row="2">
@@ -1373,11 +1406,11 @@ function Start-BreakglassWpfGui {
             </Grid.RowDefinitions>
             <DockPanel Grid.Row="0" Margin="0,0,0,8">
                 <TextBlock Text="Run log" FontSize="16" FontWeight="SemiBold" Foreground="#1F2937" DockPanel.Dock="Left"/>
-                <StackPanel Orientation="Horizontal" DockPanel.Dock="Right" HorizontalAlignment="Right">
+                <WrapPanel DockPanel.Dock="Right" HorizontalAlignment="Right">
                     <CheckBox x:Name="RunInCurrentTerminalCheckBox" Content="Run in current terminal" IsChecked="True" Margin="0,0,18,0"/>
                     <CheckBox x:Name="UseDeviceCodeCheckBox" Content="Fallback: device code sign-in" IsChecked="False" Margin="0,0,18,0"/>
                     <CheckBox x:Name="DryRunCheckBox" Content="Report mode (no changes)" IsChecked="True"/>
-                </StackPanel>
+                </WrapPanel>
             </DockPanel>
             <TextBox x:Name="LogTextBox" Grid.Row="1" IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" FontFamily="Consolas" FontSize="12" Background="#111827" Foreground="#E5E7EB" Padding="10"/>
         </Grid>

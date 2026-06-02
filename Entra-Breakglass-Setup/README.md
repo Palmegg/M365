@@ -14,6 +14,7 @@ The tool uses Microsoft Graph PowerShell modules. It does not use the deprecated
 - Keeps device-code sign-in available as a fallback option, but not as the default.
 - Includes a Save account names button and naming preset buttons for `svr_ea01` / `svr_ea02` and `adm_ea01` / `adm_ea02`.
 - Looks for existing potential emergency access accounts and warns if likely candidates are found.
+- Includes existing potential emergency access accounts in the confidential report, including in report mode.
 - Checks whether two breakglass accounts exist.
 - Creates missing breakglass accounts when selected.
 - Forces breakglass account UPNs to the tenant `.onmicrosoft.com` domain.
@@ -23,6 +24,7 @@ The tool uses Microsoft Graph PowerShell modules. It does not use the deprecated
 - Shows clear warnings for Conditional Access exclusions and admin SSPR scope.
 - Can disable administrator SSPR tenant-wide when selected.
 - Generates a confidential HTML report with actions, confirmations, manual steps, and newly generated initial passwords.
+- Uses a resizable WPF layout with wrapping action controls and scrollable setup fields.
 - Logs every action to the local `logs` folder.
 - Prompts before every change unless report mode is enabled.
 - Can run Graph work in the current terminal for visible sign-in prompts, or in a separate worker process when preferred.
