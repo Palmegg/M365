@@ -11,6 +11,7 @@ The tool uses Microsoft Graph PowerShell modules. It does not use the deprecated
 - Tenant field is optional. If it is blank, the `.onmicrosoft.com` domain is resolved from the signed-in tenant.
 - Disconnects existing Graph PowerShell context and uses process-scoped context for each run.
 - Uses device code sign-in by default, which is usually more reliable when Conditional Access requires passkey/FIDO2 sign-in.
+- Runs in the current terminal by default so the device-code prompt is visible in the PowerShell session that launched the GUI.
 - Includes naming preset buttons for `svr_ea01` / `svr_ea02` and `adm_ea01` / `adm_ea02`.
 - Looks for existing potential emergency access accounts and warns if likely candidates are found.
 - Checks whether two breakglass accounts exist.
@@ -81,10 +82,11 @@ Recommended first run:
 
 1. Optionally enter the tenant ID or domain. Leave it blank to resolve the tenant after sign-in.
 2. Enter both breakglass UPNs or prefixes, for example `svr_ea01` and `svr_ea02`, or use one of the preset buttons.
-3. Keep `Use device code sign-in` enabled if Conditional Access requires passkey/FIDO2.
-4. Keep `Dry-run mode` enabled.
-5. Review the GUI log and generated report.
-6. Run again with dry-run disabled when the planned actions are correct.
+3. Keep `Run in current terminal` enabled so the device-code prompt appears in the PowerShell terminal.
+4. Keep `Use device code sign-in` enabled if Conditional Access requires passkey/FIDO2.
+5. Keep `Dry-run mode` enabled.
+6. Review the GUI log and generated report.
+7. Run again with dry-run disabled when the planned actions are correct.
 
 ## Important behavior
 

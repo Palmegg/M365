@@ -279,7 +279,11 @@ function Connect-Graph {
         }
 
         $connectParams.UseDeviceCode = $true
-        Write-Log -Message 'Using device code sign-in. Follow the code instructions in the worker PowerShell window and complete passkey sign-in in the browser.'
+        Write-Log -Message 'Using device code sign-in. Follow the code instructions in the PowerShell terminal and complete passkey sign-in in the browser.'
+        Write-Host ''
+        Write-Host 'Microsoft Graph device code sign-in is starting.' -ForegroundColor Cyan
+        Write-Host 'If a code is shown below, open https://microsoft.com/devicelogin and complete sign-in with your passkey.' -ForegroundColor Cyan
+        Write-Host ''
     }
 
     if (-not [string]::IsNullOrWhiteSpace($TenantName)) {
@@ -1182,6 +1186,7 @@ function Start-BreakglassWpfGui {
             <DockPanel Grid.Row="0" Margin="0,0,0,8">
                 <TextBlock Text="Run log" FontSize="16" FontWeight="SemiBold" Foreground="#1F2937" DockPanel.Dock="Left"/>
                 <StackPanel Orientation="Horizontal" DockPanel.Dock="Right" HorizontalAlignment="Right">
+                    <CheckBox x:Name="RunInCurrentTerminalCheckBox" Content="Run in current terminal" IsChecked="True" Margin="0,0,18,0"/>
                     <CheckBox x:Name="UseDeviceCodeCheckBox" Content="Use device code sign-in" IsChecked="True" Margin="0,0,18,0"/>
                     <CheckBox x:Name="DryRunCheckBox" Content="Dry-run mode" IsChecked="True"/>
                 </StackPanel>
@@ -1217,6 +1222,7 @@ function Start-BreakglassWpfGui {
     $addToGroupCheckBox = $script:MainWindow.FindName('AddToGroupCheckBox')
     $disableAdminSsprCheckBox = $script:MainWindow.FindName('DisableAdminSsprCheckBox')
     $generateDocumentationCheckBox = $script:MainWindow.FindName('GenerateDocumentationCheckBox')
+    $runInCurrentTerminalCheckBox = $script:MainWindow.FindName('RunInCurrentTerminalCheckBox')
     $useDeviceCodeCheckBox = $script:MainWindow.FindName('UseDeviceCodeCheckBox')
     $dryRunCheckBox = $script:MainWindow.FindName('DryRunCheckBox')
     $runButton = $script:MainWindow.FindName('RunButton')
@@ -1284,7 +1290,24 @@ function Start-BreakglassWpfGui {
 
         $runButton.IsEnabled = $false
         $runButton.Content = 'Running...'
-        Start-BreakglassWorkerProcess -RunConfig $runConfig -RunButton $runButton
+
+        if ([bool] $runInCurrentTerminalCheckBox.IsChecked) {
+            try {
+                Write-Log -Message 'Running setup in the current PowerShell session so device-code sign-in is visible in the terminal.'
+                Invoke-BreakglassSetup @runConfig
+            }
+            catch {
+                Write-Log -Level ERROR -Message $_.Exception.Message
+                [System.Windows.MessageBox]::Show($_.Exception.Message, "$($script:AppName) - error", 'OK', 'Error') | Out-Null
+            }
+            finally {
+                $runButton.IsEnabled = $true
+                $runButton.Content = 'Run setup'
+            }
+        }
+        else {
+            Start-BreakglassWorkerProcess -RunConfig $runConfig -RunButton $runButton
+        }
     })
 
     $clearLogButton.Add_Click({

@@ -47,6 +47,7 @@ The tool should:
 - Worker process writes to the same log file as the GUI. GUI polls that log file while the worker runs.
 - Worker process is launched with `WindowStyle Normal` so Graph/passkey authentication UI can be seen.
 - GUI has `Use device code sign-in`, enabled by default, because Conditional Access requiring passkey/FIDO2 can block the regular Microsoft Graph PowerShell interactive login with "this app does not support it".
+- GUI has `Run in current terminal`, enabled by default, so the device-code prompt is printed in the VS Code / PowerShell terminal that launched the GUI instead of disappearing in a worker window.
 - The old `$timer` StrictMode bug was fixed by using `$script:WorkerTimer`.
 - `Browse...` button is wired to `System.Windows.Forms.FolderBrowserDialog`.
 - Naming preset buttons exist for `svr_ea01 / svr_ea02` and `adm_ea01 / adm_ea02`.
@@ -84,6 +85,7 @@ Do not stage or modify those unless the user asks.
 - Click `Use svr_ea01 / svr_ea02`.
 - Select output folder with `Browse...`.
 - Keep `Use device code sign-in` enabled when passkey/FIDO2 is required by Conditional Access.
+- Keep `Run in current terminal` enabled if the worker PowerShell window stays blank and does not show the device-code prompt.
 - Keep dry-run enabled for first test.
 - Click `Run setup`.
 - Confirm whether Graph sign-in/passkey flow opens visibly and whether the GUI log keeps updating.
