@@ -29,6 +29,8 @@ $script:MainWindow = $null
 $script:LogTextBox = $null
 $script:WorkerProcess = $null
 $script:WorkerConfigPath = $null
+$script:WorkerTimer = $null
+$script:ActiveRunButton = $null
 $script:LastLogTextLength = 0
 
 New-Item -ItemType Directory -Force -Path $script:LogDirectory, $script:ReportDirectory | Out-Null
@@ -235,7 +237,7 @@ function Invoke-RequiredModuleCheck {
 function Connect-Graph {
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory)]
+        [AllowEmptyString()]
         [string] $TenantName
     )
 
@@ -246,8 +248,17 @@ function Connect-Graph {
         'Domain.Read.All',
         'User.ReadWrite.All',
         'Group.ReadWrite.All',
+        'RoleManagement.Read.Directory',
         'Policy.ReadWrite.Authorization'
     )
+
+    try {
+        Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null
+        Write-Log -Message 'Disconnected any existing Microsoft Graph PowerShell context.'
+    }
+    catch {
+        Write-Log -Level WARN -Message "Could not disconnect an existing Graph context: $($_.Exception.Message)"
+    }
 
     Write-Log -Message "Connecting to Microsoft Graph with delegated scopes: $($scopes -join ', ')"
 
@@ -256,8 +267,15 @@ function Connect-Graph {
         NoWelcome = $true
     }
 
+    if ((Get-Command Connect-MgGraph -ErrorAction Stop).Parameters.ContainsKey('ContextScope')) {
+        $connectParams.ContextScope = 'Process'
+    }
+
     if (-not [string]::IsNullOrWhiteSpace($TenantName)) {
         $connectParams.TenantId = $TenantName.Trim()
+    }
+    else {
+        Write-Log -Message 'Tenant field is empty. Microsoft Graph sign-in will determine the tenant, and the .onmicrosoft.com domain will be resolved after sign-in.'
     }
 
     Connect-MgGraph @connectParams | Out-Null
@@ -296,6 +314,7 @@ function Resolve-OnMicrosoftDomain {
         throw 'Could not find a tenant .onmicrosoft.com domain. Enter the tenant initial domain and try again.'
     }
 
+    Add-RunResult "Resolved tenant .onmicrosoft.com domain: $($initialDomain.Id)"
     return $initialDomain.Id.ToLowerInvariant()
 }
 
@@ -355,6 +374,45 @@ function Get-GraphUserByUpn {
         }
 
         throw
+    }
+}
+
+function Find-PotentialBreakglassAccounts {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string] $OnMicrosoftDomain)
+
+    Write-Log -Message 'Looking for existing potential emergency access / breakglass accounts.'
+
+    try {
+        $users = Get-MgUser -All -Property 'id,displayName,userPrincipalName,accountEnabled' -ErrorAction Stop
+        $candidatePattern = '(?i)(^|[@._-])(svr_ea|adm_ea|ea0[1-9]|ea[0-9]{2}|emergency|emergencyaccess|emergency-access|breakglass|break-glass|break_glass)'
+        $candidates = @(
+            $users | Where-Object {
+                ($_.UserPrincipalName -match $candidatePattern) -or
+                ($_.DisplayName -match $candidatePattern)
+            } | Sort-Object UserPrincipalName
+        )
+
+        if ($candidates.Count -eq 0) {
+            Add-RunResult 'Existing account discovery: no obvious emergency access candidates found.'
+            return @()
+        }
+
+        $candidateText = ($candidates | Select-Object -First 15 | ForEach-Object {
+            '{0} (enabled: {1})' -f $_.UserPrincipalName, $_.AccountEnabled
+        }) -join [Environment]::NewLine
+
+        $moreText = if ($candidates.Count -gt 15) { "$([Environment]::NewLine)...and $($candidates.Count - 15) more." } else { '' }
+        $message = "Potential existing emergency access accounts found:$([Environment]::NewLine)$([Environment]::NewLine)$candidateText$moreText"
+
+        Add-RunResult "Existing account discovery: found $($candidates.Count) potential emergency access account(s)."
+        Show-Warning -Message $message
+        return $candidates
+    }
+    catch {
+        Write-Log -Level WARN -Message "Could not scan for existing emergency access accounts: $($_.Exception.Message)"
+        Add-RunResult "Existing account discovery could not complete: $($_.Exception.Message)"
+        return @()
     }
 }
 
@@ -680,7 +738,7 @@ This Graph authorization policy setting applies tenant-wide to administrators in
 function Generate-Report {
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory)][string] $TenantName,
+        [AllowEmptyString()][string] $TenantName,
         [Parameter(Mandatory)][string] $OnMicrosoftDomain,
         [Parameter(Mandatory)][object[]] $Users,
         [AllowNull()] $Group,
@@ -849,7 +907,7 @@ function Generate-Report {
 function Invoke-BreakglassSetup {
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory)][string] $TenantName,
+        [AllowEmptyString()][string] $TenantName,
         [Parameter(Mandatory)][string] $BreakglassUpn1,
         [Parameter(Mandatory)][string] $BreakglassUpn2,
         [Parameter(Mandatory)][string] $GroupName,
@@ -870,6 +928,7 @@ function Invoke-BreakglassSetup {
 
     Connect-Graph -TenantName $TenantName | Out-Null
     $onMicrosoftDomain = Resolve-OnMicrosoftDomain -TenantName $TenantName
+    Find-PotentialBreakglassAccounts -OnMicrosoftDomain $onMicrosoftDomain | Out-Null
 
     $user1 = Get-OrCreateBreakglassUser -InputUpn $BreakglassUpn1 -OnMicrosoftDomain $onMicrosoftDomain -CreateIfMissing $CreateAccountsIfMissing
     $user2 = Get-OrCreateBreakglassUser -InputUpn $BreakglassUpn2 -OnMicrosoftDomain $onMicrosoftDomain -CreateIfMissing $CreateAccountsIfMissing
@@ -967,6 +1026,7 @@ function Start-BreakglassWorkerProcess {
 
     $workerConfig = @{} + $RunConfig
     $workerConfig.LogFile = $script:LogFile
+    $script:ActiveRunButton = $RunButton
 
     $script:WorkerConfigPath = Join-Path -Path $script:LogDirectory -ChildPath ("WorkerConfig_{0}.json" -f (Get-Date -Format 'yyyyMMdd_HHmmss'))
     $workerConfig | ConvertTo-Json -Depth 5 | Set-Content -Path $script:WorkerConfigPath -Encoding UTF8
@@ -986,11 +1046,11 @@ function Start-BreakglassWorkerProcess {
     ) -join ' '
 
     Write-Log -Message 'Starting setup in a separate PowerShell worker process so the GUI stays responsive.'
-    $script:WorkerProcess = Start-Process -FilePath $powerShellExe -ArgumentList $arguments -WindowStyle Hidden -PassThru
+    $script:WorkerProcess = Start-Process -FilePath $powerShellExe -ArgumentList $arguments -WindowStyle Normal -PassThru
 
-    $timer = New-Object System.Windows.Threading.DispatcherTimer
-    $timer.Interval = [TimeSpan]::FromSeconds(1)
-    $timer.Add_Tick({
+    $script:WorkerTimer = New-Object System.Windows.Threading.DispatcherTimer
+    $script:WorkerTimer.Interval = [TimeSpan]::FromSeconds(1)
+    $script:WorkerTimer.Add_Tick({
         Sync-LogViewFromFile
 
         if (-not $script:WorkerProcess) {
@@ -998,14 +1058,16 @@ function Start-BreakglassWorkerProcess {
         }
 
         if ($script:WorkerProcess.HasExited) {
-            $timer.Stop()
+            $script:WorkerTimer.Stop()
             Sync-LogViewFromFile
             $exitCode = $script:WorkerProcess.ExitCode
             $script:WorkerProcess.Dispose()
             $script:WorkerProcess = $null
+            $script:WorkerTimer = $null
 
-            $RunButton.IsEnabled = $true
-            $RunButton.Content = 'Run setup'
+            $script:ActiveRunButton.IsEnabled = $true
+            $script:ActiveRunButton.Content = 'Run setup'
+            $script:ActiveRunButton = $null
 
             if ($exitCode -eq 0) {
                 Write-Log -Message 'Worker process completed successfully.'
@@ -1017,7 +1079,7 @@ function Start-BreakglassWorkerProcess {
         }
     })
 
-    $timer.Start()
+    $script:WorkerTimer.Start()
 }
 
 function Start-BreakglassWpfGui {
@@ -1066,9 +1128,10 @@ function Start-BreakglassWpfGui {
                     <RowDefinition Height="Auto"/>
                     <RowDefinition Height="Auto"/>
                     <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
                 </Grid.RowDefinitions>
 
-                <TextBlock Grid.Row="0" Grid.Column="0" Text="Tenant name / domain" VerticalAlignment="Center" Margin="0,0,10,10"/>
+                <TextBlock Grid.Row="0" Grid.Column="0" Text="Tenant ID/domain (optional)" VerticalAlignment="Center" Margin="0,0,10,10"/>
                 <TextBox x:Name="TenantNameTextBox" Grid.Row="0" Grid.Column="1" Grid.ColumnSpan="3" Height="28" Margin="0,0,0,10"/>
 
                 <TextBlock Grid.Row="1" Grid.Column="0" Text="Breakglass account 1 UPN or prefix" VerticalAlignment="Center" Margin="0,0,10,10"/>
@@ -1077,18 +1140,24 @@ function Start-BreakglassWpfGui {
                 <TextBlock Grid.Row="2" Grid.Column="0" Text="Breakglass account 2 UPN or prefix" VerticalAlignment="Center" Margin="0,0,10,10"/>
                 <TextBox x:Name="BreakglassUpn2TextBox" Grid.Row="2" Grid.Column="1" Grid.ColumnSpan="3" Height="28" Margin="0,0,0,10"/>
 
-                <TextBlock Grid.Row="3" Grid.Column="0" Text="Security group name" VerticalAlignment="Center" Margin="0,0,10,14"/>
-                <TextBox x:Name="GroupNameTextBox" Grid.Row="3" Grid.Column="1" Grid.ColumnSpan="3" Height="28" Text="CA-BreakGlassExclude" Margin="0,0,0,14"/>
+                <TextBlock Grid.Row="3" Grid.Column="0" Text="Naming presets" VerticalAlignment="Center" Margin="0,0,10,10"/>
+                <StackPanel Grid.Row="3" Grid.Column="1" Grid.ColumnSpan="3" Orientation="Horizontal" Margin="0,0,0,10">
+                    <Button x:Name="UseSvrEaPresetButton" Content="Use svr_ea01 / svr_ea02" Height="28" Width="170" Margin="0,0,8,0"/>
+                    <Button x:Name="UseAdmEaPresetButton" Content="Use adm_ea01 / adm_ea02" Height="28" Width="170"/>
+                </StackPanel>
 
-                <TextBlock Grid.Row="4" Grid.Column="0" Text="Output folder" VerticalAlignment="Center" Margin="0,0,10,14"/>
-                <TextBox x:Name="OutputFolderTextBox" Grid.Row="4" Grid.Column="1" Grid.ColumnSpan="2" Height="28" Margin="0,0,8,14"/>
-                <Button x:Name="BrowseOutputFolderButton" Grid.Row="4" Grid.Column="3" Content="Browse..." Height="28" Width="90" HorizontalAlignment="Left" Margin="0,0,0,14"/>
+                <TextBlock Grid.Row="4" Grid.Column="0" Text="Security group name" VerticalAlignment="Center" Margin="0,0,10,14"/>
+                <TextBox x:Name="GroupNameTextBox" Grid.Row="4" Grid.Column="1" Grid.ColumnSpan="3" Height="28" Text="CA-BreakGlassExclude" Margin="0,0,0,14"/>
 
-                <CheckBox x:Name="CreateAccountsCheckBox" Grid.Row="5" Grid.Column="0" Grid.ColumnSpan="2" Content="Create accounts if missing" IsChecked="True" Margin="0,0,0,10"/>
-                <CheckBox x:Name="CreateGroupCheckBox" Grid.Row="5" Grid.Column="2" Grid.ColumnSpan="2" Content="Create group if missing" IsChecked="True" Margin="0,0,0,10"/>
-                <CheckBox x:Name="AddToGroupCheckBox" Grid.Row="6" Grid.Column="0" Grid.ColumnSpan="2" Content="Add accounts to group" IsChecked="True" Margin="0,0,0,0"/>
-                <CheckBox x:Name="DisableAdminSsprCheckBox" Grid.Row="6" Grid.Column="2" Content="Disable admin SSPR" Margin="0,0,0,0"/>
-                <CheckBox x:Name="GenerateDocumentationCheckBox" Grid.Row="6" Grid.Column="3" Content="Generate confidential documentation" IsChecked="True" Margin="0,0,0,0"/>
+                <TextBlock Grid.Row="5" Grid.Column="0" Text="Output folder" VerticalAlignment="Center" Margin="0,0,10,14"/>
+                <TextBox x:Name="OutputFolderTextBox" Grid.Row="5" Grid.Column="1" Grid.ColumnSpan="2" Height="28" Margin="0,0,8,14"/>
+                <Button x:Name="BrowseOutputFolderButton" Grid.Row="5" Grid.Column="3" Content="Browse..." Height="28" Width="90" HorizontalAlignment="Left" Margin="0,0,0,14"/>
+
+                <CheckBox x:Name="CreateAccountsCheckBox" Grid.Row="6" Grid.Column="0" Grid.ColumnSpan="2" Content="Create accounts if missing" IsChecked="True" Margin="0,0,0,10"/>
+                <CheckBox x:Name="CreateGroupCheckBox" Grid.Row="6" Grid.Column="2" Grid.ColumnSpan="2" Content="Create group if missing" IsChecked="True" Margin="0,0,0,10"/>
+                <CheckBox x:Name="AddToGroupCheckBox" Grid.Row="7" Grid.Column="0" Grid.ColumnSpan="2" Content="Add accounts to group" IsChecked="True" Margin="0,0,0,0"/>
+                <CheckBox x:Name="DisableAdminSsprCheckBox" Grid.Row="7" Grid.Column="2" Content="Disable admin SSPR" Margin="0,0,0,0"/>
+                <CheckBox x:Name="GenerateDocumentationCheckBox" Grid.Row="7" Grid.Column="3" Content="Generate confidential documentation" IsChecked="True" Margin="0,0,0,0"/>
             </Grid>
         </Border>
 
@@ -1125,6 +1194,8 @@ function Start-BreakglassWpfGui {
     $groupNameTextBox = $script:MainWindow.FindName('GroupNameTextBox')
     $outputFolderTextBox = $script:MainWindow.FindName('OutputFolderTextBox')
     $browseOutputFolderButton = $script:MainWindow.FindName('BrowseOutputFolderButton')
+    $useSvrEaPresetButton = $script:MainWindow.FindName('UseSvrEaPresetButton')
+    $useAdmEaPresetButton = $script:MainWindow.FindName('UseAdmEaPresetButton')
     $createAccountsCheckBox = $script:MainWindow.FindName('CreateAccountsCheckBox')
     $createGroupCheckBox = $script:MainWindow.FindName('CreateGroupCheckBox')
     $addToGroupCheckBox = $script:MainWindow.FindName('AddToGroupCheckBox')
@@ -1139,6 +1210,18 @@ function Start-BreakglassWpfGui {
     $outputFolderTextBox.Text = $script:ReportDirectory
 
     Write-Log -Message "GUI started. Log file: $script:LogFile"
+
+    $useSvrEaPresetButton.Add_Click({
+        $breakglassUpn1TextBox.Text = 'svr_ea01'
+        $breakglassUpn2TextBox.Text = 'svr_ea02'
+        Write-Log -Message 'Applied naming preset: svr_ea01 / svr_ea02.'
+    })
+
+    $useAdmEaPresetButton.Add_Click({
+        $breakglassUpn1TextBox.Text = 'adm_ea01'
+        $breakglassUpn2TextBox.Text = 'adm_ea02'
+        Write-Log -Message 'Applied naming preset: adm_ea01 / adm_ea02.'
+    })
 
     $browseOutputFolderButton.Add_Click({
         $folderDialog = New-Object System.Windows.Forms.FolderBrowserDialog
@@ -1160,11 +1243,10 @@ function Start-BreakglassWpfGui {
     })
 
     $runButton.Add_Click({
-        if ([string]::IsNullOrWhiteSpace($tenantNameTextBox.Text) -or
-            [string]::IsNullOrWhiteSpace($breakglassUpn1TextBox.Text) -or
+        if ([string]::IsNullOrWhiteSpace($breakglassUpn1TextBox.Text) -or
             [string]::IsNullOrWhiteSpace($breakglassUpn2TextBox.Text) -or
             [string]::IsNullOrWhiteSpace($groupNameTextBox.Text)) {
-            [System.Windows.MessageBox]::Show('Tenant, both account fields, and group name are required.', $script:AppName, 'OK', 'Warning') | Out-Null
+            [System.Windows.MessageBox]::Show('Both account fields and group name are required. Tenant can be blank and will be resolved after sign-in.', $script:AppName, 'OK', 'Warning') | Out-Null
             return
         }
 

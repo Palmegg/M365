@@ -8,6 +8,10 @@ The tool uses Microsoft Graph PowerShell modules. It does not use the deprecated
 
 - WPF GUI with tenant, UPN, group, dry-run, and action choices.
 - Connects to Microsoft Graph PowerShell.
+- Tenant field is optional. If it is blank, the `.onmicrosoft.com` domain is resolved from the signed-in tenant.
+- Disconnects existing Graph PowerShell context and uses process-scoped context for each run.
+- Includes naming preset buttons for `svr_ea01` / `svr_ea02` and `adm_ea01` / `adm_ea02`.
+- Looks for existing potential emergency access accounts and warns if likely candidates are found.
 - Checks whether two breakglass accounts exist.
 - Creates missing breakglass accounts when selected.
 - Forces breakglass account UPNs to the tenant `.onmicrosoft.com` domain.
@@ -45,9 +49,11 @@ The script requests these delegated Microsoft Graph scopes:
 - `Domain.Read.All`
 - `User.ReadWrite.All`
 - `Group.ReadWrite.All`
+- `RoleManagement.Read.Directory`
 - `Policy.ReadWrite.Authorization`
 
 `Policy.ReadWrite.Authorization` is required when disabling administrator SSPR through the authorization policy endpoint.
+`RoleManagement.Read.Directory` is used to confirm Global Administrator role membership.
 
 Microsoft references:
 
@@ -72,8 +78,8 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 
 Recommended first run:
 
-1. Enter the tenant initial domain, for example `contoso.onmicrosoft.com`.
-2. Enter both breakglass UPNs or prefixes, for example `svr_ea01` and `svr_ea02`.
+1. Optionally enter the tenant ID or domain. Leave it blank to resolve the tenant after sign-in.
+2. Enter both breakglass UPNs or prefixes, for example `svr_ea01` and `svr_ea02`, or use one of the preset buttons.
 3. Keep `Dry-run mode` enabled.
 4. Review the GUI log and generated report.
 5. Run again with dry-run disabled when the planned actions are correct.
