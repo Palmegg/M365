@@ -34,14 +34,14 @@ The tool should:
 - Optionally disable admin SSPR tenant-wide.
 - Generate a confidential HTML report.
 - Avoid writing generated passwords to normal logs.
-- Support dry-run.
+- Support report mode.
 - Prompt before changes.
 - Log actions.
 
 ## Current Implementation Notes
 
 - GUI supports account prefixes like `svr_ea01` and converts them to `svr_ea01@tenant.onmicrosoft.com` after resolving the tenant domain.
-- Tenant field is now optional. If blank, Graph sign-in determines the tenant and `Get-MgDomain` resolves the `.onmicrosoft.com` domain.
+- Tenant field was removed from the GUI. Graph sign-in determines the tenant and `Get-MgDomain` resolves the `.onmicrosoft.com` domain.
 - Graph login disconnects any existing context first and uses process-scoped context when supported.
 - `Run setup` no longer uses `BackgroundWorker`. It starts the same script in a separate PowerShell worker process using `-WorkerMode -ConfigPath <json>`.
 - Worker process writes to the same log file as the GUI. GUI polls that log file while the worker runs.
@@ -55,6 +55,8 @@ The tool should:
 - The old `$timer` StrictMode bug was fixed by using `$script:WorkerTimer`.
 - `Browse...` button is wired to `System.Windows.Forms.FolderBrowserDialog`.
 - Naming preset buttons exist for `svr_ea01 / svr_ea02` and `adm_ea01 / adm_ea02`.
+- `Save account names` button and debounced text input logging write `Updated account names to: <account1> / <account2>` to the run log.
+- GUI shows `Report mode (no changes)` instead of `Dry-run mode`.
 - The script scans for potential existing emergency access accounts and warns/logs if it finds candidates.
 - After creating users or the CA exclusion group, the script re-queries Microsoft Graph and validates object ids before continuing. This avoids Graph SDK responses without `Id` breaking group membership steps.
 
@@ -71,6 +73,7 @@ The tool should:
 ## Important Security Decisions
 
 - Do not use `breakglass` in generated account UPN presets because it is too descriptive.
+- Created account display names use the account prefix/local part only, not `Breakglass`.
 - Generated initial passwords are only written to the confidential HTML report, not normal logs.
 - Existing account passwords cannot be retrieved and should be shown as unavailable in the report.
 - Report is marked `CONFIDENTIAL` and includes warning to move passwords to an approved password manager or physical emergency procedure, then remove local files.
@@ -88,11 +91,11 @@ Do not stage or modify those unless the user asks.
 ## Suggested Next Checks
 
 - Run `.\Invoke-EntraBreakglassSetup.ps1`.
-- Leave tenant blank.
 - Click `Use svr_ea01 / svr_ea02`.
+- Or type account names manually and click `Save account names`.
 - Select output folder with `Browse...`.
 - Leave `Fallback: device code sign-in` disabled for tenants requiring FIDO/passkey. Native browser sign-in should open a Microsoft login window/browser where the FIDO key can be used.
 - Keep `Run in current terminal` enabled if the worker PowerShell window stays blank or sign-in prompts are not visible.
-- Keep dry-run enabled for first test.
+- Keep `Report mode (no changes)` enabled for first test.
 - Click `Run setup`.
 - Confirm whether Graph sign-in/passkey flow opens visibly and whether the GUI log keeps updating.

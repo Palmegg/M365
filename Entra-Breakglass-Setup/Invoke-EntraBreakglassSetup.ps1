@@ -6,7 +6,7 @@
 .DESCRIPTION
     This script uses Microsoft Graph PowerShell only. It never deletes users, groups,
     or Conditional Access policies. Every change is gated by a confirmation prompt,
-    supports dry-run mode, and is written to a local log file.
+    supports report mode, and is written to a local log file.
 #>
 
 [CmdletBinding()]
@@ -41,6 +41,8 @@ $script:WorkerConfigPath = $null
 $script:WorkerTimer = $null
 $script:ActiveRunButton = $null
 $script:LastLogTextLength = 0
+$script:LastAccountNameLogValue = ''
+$script:AccountNameUpdateTimer = $null
 
 New-Item -ItemType Directory -Force -Path $script:LogDirectory, $script:ReportDirectory | Out-Null
 
@@ -61,7 +63,7 @@ function Write-Log {
         [Parameter(Mandatory)]
         [string] $Message,
 
-        [ValidateSet('INFO', 'WARN', 'ERROR', 'DRYRUN')]
+        [ValidateSet('INFO', 'WARN', 'ERROR', 'DRYRUN', 'REPORT')]
         [string] $Level = 'INFO'
     )
 
@@ -117,29 +119,44 @@ function Add-RunResult {
     Write-Log -Message $Message
 }
 
+function Show-AppMessageBox {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string] $Message,
+        [string] $Title = $script:AppName,
+        [string] $Button = 'OK',
+        [string] $Image = 'Information'
+    )
+
+    return Invoke-UiThread -ScriptBlock {
+        if ($script:MainWindow) {
+            try {
+                $script:MainWindow.WindowState = 'Normal'
+                $script:MainWindow.Activate() | Out-Null
+                return [System.Windows.MessageBox]::Show($script:MainWindow, $Message, $Title, $Button, $Image)
+            }
+            catch {
+                Write-Log -Level WARN -Message "Could not show owned message box: $($_.Exception.Message)"
+            }
+        }
+
+        return [System.Windows.MessageBox]::Show($Message, $Title, $Button, $Image)
+    }
+}
+
 function Show-Warning {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string] $Message)
 
     Write-Log -Message $Message -Level WARN
-    Invoke-UiThread -ScriptBlock {
-        [System.Windows.MessageBox]::Show($Message, $script:AppName, 'OK', 'Warning') | Out-Null
-        return $null
-    } | Out-Null
+    Show-AppMessageBox -Message $Message -Title $script:AppName -Button 'OK' -Image 'Warning' | Out-Null
 }
 
 function Confirm-DependencyInstall {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string] $Message)
 
-    $answer = Invoke-UiThread -ScriptBlock {
-        [System.Windows.MessageBox]::Show(
-            $Message,
-            "$($script:AppName) - dependency setup",
-            'YesNo',
-            'Question'
-        )
-    }
+    $answer = Show-AppMessageBox -Message $Message -Title "$($script:AppName) - dependency setup" -Button 'YesNo' -Image 'Question'
 
     return ($answer -eq 'Yes')
 }
@@ -149,18 +166,11 @@ function Confirm-Change {
     param([Parameter(Mandatory)][string] $Message)
 
     if ($script:DryRun) {
-        Write-Log -Message "Dry-run: would ask for confirmation: $Message" -Level DRYRUN
+        Write-Log -Message "Report mode: would ask for confirmation: $Message" -Level REPORT
         return $false
     }
 
-    $answer = Invoke-UiThread -ScriptBlock {
-        [System.Windows.MessageBox]::Show(
-            $Message,
-            "$($script:AppName) - confirm change",
-            'YesNo',
-            'Question'
-        )
-    }
+    $answer = Show-AppMessageBox -Message $Message -Title "$($script:AppName) - confirm change" -Button 'YesNo' -Image 'Question'
 
     return ($answer -eq 'Yes')
 }
@@ -554,12 +564,12 @@ function Get-OrCreateBreakglassUser {
     }
 
     if ($script:DryRun) {
-        Write-Log -Level DRYRUN -Message "Would create breakglass account: $upn"
-        Add-RunResult "Dry-run: would create breakglass account: $upn"
+        Write-Log -Level REPORT -Message "Report mode: would create emergency access account: $upn"
+        Add-RunResult "Report mode: would create emergency access account: $upn"
         return [pscustomobject]@{
-            Id                = "dryrun-$upn"
+            Id                = "report-$upn"
             UserPrincipalName = $upn
-            DisplayName       = "Breakglass $upn"
+            DisplayName       = ($upn -split '@', 2)[0]
         }
     }
 
@@ -571,12 +581,13 @@ function Get-OrCreateBreakglassUser {
     $password = New-RandomPassword
     $mailNickname = (($upn -split '@', 2)[0] -replace '[^a-zA-Z0-9]', '')
     if ([string]::IsNullOrWhiteSpace($mailNickname)) {
-        $mailNickname = 'breakglass'
+        $mailNickname = 'eaacct'
     }
+    $displayName = ($upn -split '@', 2)[0]
 
     $newUserParams = @{
         AccountEnabled    = $true
-        DisplayName       = "Breakglass $upn"
+        DisplayName       = $displayName
         MailNickname      = $mailNickname
         UserPrincipalName = $upn
         PasswordProfile   = @{
@@ -634,10 +645,10 @@ function Get-OrCreateBreakglassGroup {
     }
 
     if ($script:DryRun) {
-        Write-Log -Level DRYRUN -Message "Would create security group: $GroupName"
-        Add-RunResult "Dry-run: would create security group: $GroupName"
+        Write-Log -Level REPORT -Message "Report mode: would create security group: $GroupName"
+        Add-RunResult "Report mode: would create security group: $GroupName"
         return [pscustomobject]@{
-            Id          = "dryrun-$GroupName"
+            Id          = "report-$GroupName"
             DisplayName = $GroupName
         }
     }
@@ -710,8 +721,8 @@ function Add-BreakglassUsersToGroup {
         }
 
         if ($script:DryRun) {
-            Write-Log -Level DRYRUN -Message "Would add '$userPrincipalName' to group '$groupDisplayName'."
-            Add-RunResult "Dry-run: would add '$userPrincipalName' to '$groupDisplayName'."
+            Write-Log -Level REPORT -Message "Report mode: would add '$userPrincipalName' to group '$groupDisplayName'."
+            Add-RunResult "Report mode: would add '$userPrincipalName' to '$groupDisplayName'."
             continue
         }
 
@@ -763,7 +774,7 @@ function Test-BreakglassGroupMembership {
             $results += [pscustomobject]@{
                 UserPrincipalName = $userPrincipalName
                 IsMember          = $false
-                Status            = 'Dry-run: membership not changed'
+                Status            = 'Report mode: membership not changed'
             }
         }
 
@@ -807,7 +818,7 @@ function Test-GlobalAdministratorMembership {
             $results += [pscustomobject]@{
                 UserPrincipalName = $userPrincipalName
                 IsGlobalAdmin     = $false
-                Status            = 'Dry-run: role membership not checked'
+                Status            = 'Report mode: role membership not checked'
             }
         }
 
@@ -866,7 +877,7 @@ function Get-AdminSSPRStatus {
     param()
 
     if ($script:DryRun) {
-        return 'Dry-run: not changed'
+        return 'Report mode: not changed'
     }
 
     try {
@@ -910,19 +921,13 @@ function Disable-AdminSSPR {
     [CmdletBinding()]
     param()
 
-    $warning = @'
-Admin SSPR can not be disabled only for the two breakglass accounts.
-This Graph authorization policy setting applies tenant-wide to administrators in administrator roles.
-'@
-    Show-Warning -Message $warning
-
     if ($script:DryRun) {
-        Write-Log -Level DRYRUN -Message 'Would disable administrator SSPR tenant-wide by setting authorizationPolicy.allowedToUseSSPR to false.'
-        Add-RunResult 'Dry-run: would disable administrator SSPR tenant-wide.'
+        Write-Log -Level REPORT -Message 'Report mode: would disable administrator SSPR by setting authorizationPolicy.allowedToUseSSPR to false.'
+        Add-RunResult 'Report mode: would disable administrator SSPR.'
         return
     }
 
-    if (-not (Confirm-Change -Message 'Disable administrator SSPR tenant-wide for administrator roles?')) {
+    if (-not (Confirm-Change -Message 'Disable administrator SSPR?')) {
         Add-RunResult 'Skipped administrator SSPR change after prompt.'
         return
     }
@@ -971,7 +976,7 @@ function Generate-Report {
             $secret.TemporaryPassword
         }
         elseif ($script:DryRun) {
-            'Dry-run: no password generated'
+            'Report mode: no password generated'
         }
         else {
             'Not generated in this run. Existing passwords can not be retrieved.'
@@ -1040,7 +1045,7 @@ function Generate-Report {
         <tr><th>Tenant name</th><td>$(ConvertTo-HtmlEncodedText $TenantName)</td></tr>
         <tr><th>Resolved .onmicrosoft.com domain</th><td>$(ConvertTo-HtmlEncodedText $OnMicrosoftDomain)</td></tr>
         <tr><th>Date and time of creation</th><td>$(ConvertTo-HtmlEncodedText $createdTimestamp)</td></tr>
-        <tr><th>Dry-run</th><td>$(ConvertTo-HtmlEncodedText $script:DryRun)</td></tr>
+        <tr><th>Report mode</th><td>$(ConvertTo-HtmlEncodedText $script:DryRun)</td></tr>
     </table>
 
     <h2>Breakglass Accounts</h2>
@@ -1126,7 +1131,7 @@ function Invoke-BreakglassSetup {
     $script:RunResults.Clear()
     $script:CreatedUserSecrets.Clear()
 
-    Write-Log -Message "Starting breakglass setup. Dry-run: $script:DryRun"
+    Write-Log -Message "Starting setup. Report mode: $script:DryRun"
 
     Connect-BreakglassGraph -TenantName $TenantName -UseDeviceCode $UseDeviceCode | Out-Null
     $onMicrosoftDomain = Resolve-OnMicrosoftDomain -TenantName $TenantName
@@ -1178,7 +1183,7 @@ function Invoke-BreakglassSetup {
     }
 
     Invoke-UiThread -ScriptBlock {
-        [System.Windows.MessageBox]::Show($summary, $script:AppName, 'OK', 'Information') | Out-Null
+        Show-AppMessageBox -Message $summary -Title $script:AppName -Button 'OK' -Image 'Information' | Out-Null
         return $null
     } | Out-Null
 }
@@ -1277,7 +1282,7 @@ function Start-BreakglassWorkerProcess {
             }
             else {
                 Write-Log -Level ERROR -Message "Worker process exited with code $exitCode. Review the log for details."
-                [System.Windows.MessageBox]::Show("Worker process exited with code $exitCode. Review the log for details.", "$($script:AppName) - error", 'OK', 'Error') | Out-Null
+                Show-AppMessageBox -Message "Worker process exited with code $exitCode. Review the log for details." -Title "$($script:AppName) - error" -Button 'OK' -Image 'Error' | Out-Null
             }
         }
     })
@@ -1297,9 +1302,9 @@ function Start-BreakglassWpfGui {
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Microsoft Entra Breakglass Setup"
         Height="780"
-        Width="980"
+        Width="1120"
         MinHeight="720"
-        MinWidth="900"
+        MinWidth="1000"
         WindowStartupLocation="CenterScreen"
         Background="#F6F8FA">
     <Grid Margin="18">
@@ -1318,9 +1323,9 @@ function Start-BreakglassWpfGui {
         <Border Grid.Row="1" BorderBrush="#D1D5DB" BorderThickness="1" Background="White" CornerRadius="6" Padding="16" Margin="0,0,0,14">
             <Grid>
                 <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="180"/>
+                    <ColumnDefinition Width="250"/>
                     <ColumnDefinition Width="*"/>
-                    <ColumnDefinition Width="220"/>
+                    <ColumnDefinition Width="260"/>
                     <ColumnDefinition Width="*"/>
                 </Grid.ColumnDefinitions>
                 <Grid.RowDefinitions>
@@ -1331,36 +1336,33 @@ function Start-BreakglassWpfGui {
                     <RowDefinition Height="Auto"/>
                     <RowDefinition Height="Auto"/>
                     <RowDefinition Height="Auto"/>
-                    <RowDefinition Height="Auto"/>
                 </Grid.RowDefinitions>
 
-                <TextBlock Grid.Row="0" Grid.Column="0" Text="Tenant ID/domain (optional)" VerticalAlignment="Center" Margin="0,0,10,10"/>
-                <TextBox x:Name="TenantNameTextBox" Grid.Row="0" Grid.Column="1" Grid.ColumnSpan="3" Height="28" Margin="0,0,0,10"/>
+                <TextBlock Grid.Row="0" Grid.Column="0" Text="Account 1 UPN or prefix" TextWrapping="Wrap" VerticalAlignment="Center" Margin="0,0,10,10"/>
+                <TextBox x:Name="BreakglassUpn1TextBox" Grid.Row="0" Grid.Column="1" Grid.ColumnSpan="3" Height="28" Margin="0,0,0,10"/>
 
-                <TextBlock Grid.Row="1" Grid.Column="0" Text="Breakglass account 1 UPN or prefix" VerticalAlignment="Center" Margin="0,0,10,10"/>
-                <TextBox x:Name="BreakglassUpn1TextBox" Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="3" Height="28" Margin="0,0,0,10"/>
+                <TextBlock Grid.Row="1" Grid.Column="0" Text="Account 2 UPN or prefix" TextWrapping="Wrap" VerticalAlignment="Center" Margin="0,0,10,10"/>
+                <TextBox x:Name="BreakglassUpn2TextBox" Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="3" Height="28" Margin="0,0,0,10"/>
 
-                <TextBlock Grid.Row="2" Grid.Column="0" Text="Breakglass account 2 UPN or prefix" VerticalAlignment="Center" Margin="0,0,10,10"/>
-                <TextBox x:Name="BreakglassUpn2TextBox" Grid.Row="2" Grid.Column="1" Grid.ColumnSpan="3" Height="28" Margin="0,0,0,10"/>
-
-                <TextBlock Grid.Row="3" Grid.Column="0" Text="Naming presets" VerticalAlignment="Center" Margin="0,0,10,10"/>
-                <StackPanel Grid.Row="3" Grid.Column="1" Grid.ColumnSpan="3" Orientation="Horizontal" Margin="0,0,0,10">
+                <TextBlock Grid.Row="2" Grid.Column="0" Text="Account names" VerticalAlignment="Center" Margin="0,0,10,10"/>
+                <StackPanel Grid.Row="2" Grid.Column="1" Grid.ColumnSpan="3" Orientation="Horizontal" Margin="0,0,0,10">
+                    <Button x:Name="SaveAccountNamesButton" Content="Save account names" Height="28" Width="150" Margin="0,0,8,0"/>
                     <Button x:Name="UseSvrEaPresetButton" Content="Use svr_ea01 / svr_ea02" Height="28" Width="170" Margin="0,0,8,0"/>
                     <Button x:Name="UseAdmEaPresetButton" Content="Use adm_ea01 / adm_ea02" Height="28" Width="170"/>
                 </StackPanel>
 
-                <TextBlock Grid.Row="4" Grid.Column="0" Text="Security group name" VerticalAlignment="Center" Margin="0,0,10,14"/>
-                <TextBox x:Name="GroupNameTextBox" Grid.Row="4" Grid.Column="1" Grid.ColumnSpan="3" Height="28" Text="CA-BreakGlassExclude" Margin="0,0,0,14"/>
+                <TextBlock Grid.Row="3" Grid.Column="0" Text="Security group name" VerticalAlignment="Center" Margin="0,0,10,14"/>
+                <TextBox x:Name="GroupNameTextBox" Grid.Row="3" Grid.Column="1" Grid.ColumnSpan="3" Height="28" Text="CA-BreakGlassExclude" Margin="0,0,0,14"/>
 
-                <TextBlock Grid.Row="5" Grid.Column="0" Text="Output folder" VerticalAlignment="Center" Margin="0,0,10,14"/>
-                <TextBox x:Name="OutputFolderTextBox" Grid.Row="5" Grid.Column="1" Grid.ColumnSpan="2" Height="28" Margin="0,0,8,14"/>
-                <Button x:Name="BrowseOutputFolderButton" Grid.Row="5" Grid.Column="3" Content="Browse..." Height="28" Width="90" HorizontalAlignment="Left" Margin="0,0,0,14"/>
+                <TextBlock Grid.Row="4" Grid.Column="0" Text="Output folder" VerticalAlignment="Center" Margin="0,0,10,14"/>
+                <TextBox x:Name="OutputFolderTextBox" Grid.Row="4" Grid.Column="1" Grid.ColumnSpan="2" Height="28" Margin="0,0,8,14"/>
+                <Button x:Name="BrowseOutputFolderButton" Grid.Row="4" Grid.Column="3" Content="Browse..." Height="28" Width="90" HorizontalAlignment="Left" Margin="0,0,0,14"/>
 
-                <CheckBox x:Name="CreateAccountsCheckBox" Grid.Row="6" Grid.Column="0" Grid.ColumnSpan="2" Content="Create accounts if missing" IsChecked="True" Margin="0,0,0,10"/>
-                <CheckBox x:Name="CreateGroupCheckBox" Grid.Row="6" Grid.Column="2" Grid.ColumnSpan="2" Content="Create group if missing" IsChecked="True" Margin="0,0,0,10"/>
-                <CheckBox x:Name="AddToGroupCheckBox" Grid.Row="7" Grid.Column="0" Grid.ColumnSpan="2" Content="Add accounts to group" IsChecked="True" Margin="0,0,0,0"/>
-                <CheckBox x:Name="DisableAdminSsprCheckBox" Grid.Row="7" Grid.Column="2" Content="Disable admin SSPR" Margin="0,0,0,0"/>
-                <CheckBox x:Name="GenerateDocumentationCheckBox" Grid.Row="7" Grid.Column="3" Content="Generate confidential documentation" IsChecked="True" Margin="0,0,0,0"/>
+                <CheckBox x:Name="CreateAccountsCheckBox" Grid.Row="5" Grid.Column="0" Grid.ColumnSpan="2" Content="Create accounts if missing" IsChecked="True" Margin="0,0,0,10"/>
+                <CheckBox x:Name="CreateGroupCheckBox" Grid.Row="5" Grid.Column="2" Grid.ColumnSpan="2" Content="Create group if missing" IsChecked="True" Margin="0,0,0,10"/>
+                <CheckBox x:Name="AddToGroupCheckBox" Grid.Row="6" Grid.Column="0" Grid.ColumnSpan="2" Content="Add accounts to group" IsChecked="True" Margin="0,0,0,0"/>
+                <CheckBox x:Name="DisableAdminSsprCheckBox" Grid.Row="6" Grid.Column="2" Content="Disable admin SSPR" Margin="0,0,0,0"/>
+                <CheckBox x:Name="GenerateDocumentationCheckBox" Grid.Row="6" Grid.Column="3" Content="Generate confidential documentation" IsChecked="True" Margin="0,0,0,0"/>
             </Grid>
         </Border>
 
@@ -1374,7 +1376,7 @@ function Start-BreakglassWpfGui {
                 <StackPanel Orientation="Horizontal" DockPanel.Dock="Right" HorizontalAlignment="Right">
                     <CheckBox x:Name="RunInCurrentTerminalCheckBox" Content="Run in current terminal" IsChecked="True" Margin="0,0,18,0"/>
                     <CheckBox x:Name="UseDeviceCodeCheckBox" Content="Fallback: device code sign-in" IsChecked="False" Margin="0,0,18,0"/>
-                    <CheckBox x:Name="DryRunCheckBox" Content="Dry-run mode" IsChecked="True"/>
+                    <CheckBox x:Name="DryRunCheckBox" Content="Report mode (no changes)" IsChecked="True"/>
                 </StackPanel>
             </DockPanel>
             <TextBox x:Name="LogTextBox" Grid.Row="1" IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" FontFamily="Consolas" FontSize="12" Background="#111827" Foreground="#E5E7EB" Padding="10"/>
@@ -1399,7 +1401,7 @@ function Start-BreakglassWpfGui {
 
         $exceptionMessage = "Unhandled WPF dispatcher error: $($EventArgs.Exception.Message)"
         Write-Log -Level ERROR -Message $exceptionMessage
-        [System.Windows.MessageBox]::Show($exceptionMessage, "$($script:AppName) - WPF error", 'OK', 'Error') | Out-Null
+        Show-AppMessageBox -Message $exceptionMessage -Title "$($script:AppName) - WPF error" -Button 'OK' -Image 'Error' | Out-Null
         $EventArgs.Handled = $true
     })
     $script:MainWindow.Add_Loaded({
@@ -1419,12 +1421,12 @@ function Start-BreakglassWpfGui {
         Write-Log -Message 'GUI closed.'
     })
 
-    $tenantNameTextBox = $script:MainWindow.FindName('TenantNameTextBox')
     $breakglassUpn1TextBox = $script:MainWindow.FindName('BreakglassUpn1TextBox')
     $breakglassUpn2TextBox = $script:MainWindow.FindName('BreakglassUpn2TextBox')
     $groupNameTextBox = $script:MainWindow.FindName('GroupNameTextBox')
     $outputFolderTextBox = $script:MainWindow.FindName('OutputFolderTextBox')
     $browseOutputFolderButton = $script:MainWindow.FindName('BrowseOutputFolderButton')
+    $saveAccountNamesButton = $script:MainWindow.FindName('SaveAccountNamesButton')
     $useSvrEaPresetButton = $script:MainWindow.FindName('UseSvrEaPresetButton')
     $useAdmEaPresetButton = $script:MainWindow.FindName('UseAdmEaPresetButton')
     $createAccountsCheckBox = $script:MainWindow.FindName('CreateAccountsCheckBox')
@@ -1444,16 +1446,47 @@ function Start-BreakglassWpfGui {
 
     Write-Log -Message "GUI started. Log file: $script:LogFile"
 
+    $logAccountNames = {
+        $accountNameSummary = '{0} / {1}' -f $breakglassUpn1TextBox.Text.Trim(), $breakglassUpn2TextBox.Text.Trim()
+        if ($accountNameSummary.Trim() -eq '/') {
+            return
+        }
+
+        if ($script:LastAccountNameLogValue -ne $accountNameSummary) {
+            $script:LastAccountNameLogValue = $accountNameSummary
+            Write-Log -Message "Updated account names to: $accountNameSummary"
+        }
+    }
+
+    $script:AccountNameUpdateTimer = New-Object System.Windows.Threading.DispatcherTimer
+    $script:AccountNameUpdateTimer.Interval = [TimeSpan]::FromMilliseconds(700)
+    $script:AccountNameUpdateTimer.Add_Tick({
+        $script:AccountNameUpdateTimer.Stop()
+        & $logAccountNames
+    })
+
+    $scheduleAccountNameLog = {
+        $script:AccountNameUpdateTimer.Stop()
+        $script:AccountNameUpdateTimer.Start()
+    }
+
+    $breakglassUpn1TextBox.Add_TextChanged($scheduleAccountNameLog)
+    $breakglassUpn2TextBox.Add_TextChanged($scheduleAccountNameLog)
+
+    $saveAccountNamesButton.Add_Click({
+        & $logAccountNames
+    })
+
     $useSvrEaPresetButton.Add_Click({
         $breakglassUpn1TextBox.Text = 'svr_ea01'
         $breakglassUpn2TextBox.Text = 'svr_ea02'
-        Write-Log -Message 'Applied naming preset: svr_ea01 / svr_ea02.'
+        & $logAccountNames
     })
 
     $useAdmEaPresetButton.Add_Click({
         $breakglassUpn1TextBox.Text = 'adm_ea01'
         $breakglassUpn2TextBox.Text = 'adm_ea02'
-        Write-Log -Message 'Applied naming preset: adm_ea01 / adm_ea02.'
+        & $logAccountNames
     })
 
     $browseOutputFolderButton.Add_Click({
@@ -1479,12 +1512,12 @@ function Start-BreakglassWpfGui {
         if ([string]::IsNullOrWhiteSpace($breakglassUpn1TextBox.Text) -or
             [string]::IsNullOrWhiteSpace($breakglassUpn2TextBox.Text) -or
             [string]::IsNullOrWhiteSpace($groupNameTextBox.Text)) {
-            [System.Windows.MessageBox]::Show('Both account fields and group name are required. Tenant can be blank and will be resolved after sign-in.', $script:AppName, 'OK', 'Warning') | Out-Null
+            Show-AppMessageBox -Message 'Both account fields and group name are required.' -Title $script:AppName -Button 'OK' -Image 'Warning' | Out-Null
             return
         }
 
         $runConfig = @{
-            TenantName                = $tenantNameTextBox.Text.Trim()
+            TenantName                = ''
             BreakglassUpn1           = $breakglassUpn1TextBox.Text.Trim()
             BreakglassUpn2           = $breakglassUpn2TextBox.Text.Trim()
             GroupName                = $groupNameTextBox.Text.Trim()
@@ -1508,7 +1541,7 @@ function Start-BreakglassWpfGui {
             }
             catch {
                 Write-Log -Level ERROR -Message $_.Exception.Message
-                [System.Windows.MessageBox]::Show($_.Exception.Message, "$($script:AppName) - error", 'OK', 'Error') | Out-Null
+                Show-AppMessageBox -Message $_.Exception.Message -Title "$($script:AppName) - error" -Button 'OK' -Image 'Error' | Out-Null
             }
             finally {
                 $runButton.IsEnabled = $true
@@ -1557,7 +1590,7 @@ catch {
 
     try {
         Add-Type -AssemblyName PresentationFramework -ErrorAction SilentlyContinue
-        [System.Windows.MessageBox]::Show($message, "$($script:AppName) - startup error", 'OK', 'Error') | Out-Null
+        Show-AppMessageBox -Message $message -Title "$($script:AppName) - startup error" -Button 'OK' -Image 'Error' | Out-Null
     }
     catch {
         Write-Error $message
