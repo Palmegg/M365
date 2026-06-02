@@ -11,6 +11,7 @@ The tool uses Microsoft Graph PowerShell modules. It does not use the deprecated
 - Checks whether two breakglass accounts exist.
 - Creates missing breakglass accounts when selected.
 - Forces breakglass account UPNs to the tenant `.onmicrosoft.com` domain.
+- Accepts either full UPNs or account prefixes. For example, `svr_ea02` becomes `svr_ea02@tenant.onmicrosoft.com`.
 - Finds or creates the `CA-BreakGlassExclude` security group.
 - Adds the breakglass accounts to the group when selected.
 - Shows clear warnings for Conditional Access exclusions and admin SSPR scope.
@@ -18,6 +19,7 @@ The tool uses Microsoft Graph PowerShell modules. It does not use the deprecated
 - Generates a short Markdown report with actions and manual steps.
 - Logs every action to the local `logs` folder.
 - Prompts before every change unless dry-run mode is enabled.
+- Runs Graph work on a background worker thread so the WPF GUI stays responsive during sign-in and Graph operations.
 
 ## Requirements
 
@@ -71,7 +73,7 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 Recommended first run:
 
 1. Enter the tenant initial domain, for example `contoso.onmicrosoft.com`.
-2. Enter both breakglass UPNs.
+2. Enter both breakglass UPNs or prefixes, for example `svr_ea01` and `svr_ea02`.
 3. Keep `Dry-run mode` enabled.
 4. Review the GUI log and generated report.
 5. Run again with dry-run disabled when the planned actions are correct.

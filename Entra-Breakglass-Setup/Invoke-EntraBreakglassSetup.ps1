@@ -24,8 +24,20 @@ $script:CreatedUserSecrets = New-Object System.Collections.Generic.List[object]
 $script:DryRun = $true
 $script:MainWindow = $null
 $script:LogTextBox = $null
+$script:CurrentWorker = $null
 
 New-Item -ItemType Directory -Force -Path $script:LogDirectory, $script:ReportDirectory | Out-Null
+
+function Invoke-UiThread {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][scriptblock] $ScriptBlock)
+
+    if (-not $script:MainWindow -or -not $script:MainWindow.Dispatcher -or $script:MainWindow.Dispatcher.CheckAccess()) {
+        return (& $ScriptBlock)
+    }
+
+    return $script:MainWindow.Dispatcher.Invoke([Func[object]] { & $ScriptBlock })
+}
 
 function Write-Log {
     [CmdletBinding()]
@@ -41,8 +53,11 @@ function Write-Log {
     Add-Content -Path $script:LogFile -Value $line -Encoding UTF8
 
     if ($script:LogTextBox) {
-        $script:LogTextBox.AppendText($line + [Environment]::NewLine)
-        $script:LogTextBox.ScrollToEnd()
+        Invoke-UiThread -ScriptBlock {
+            $script:LogTextBox.AppendText($line + [Environment]::NewLine)
+            $script:LogTextBox.ScrollToEnd()
+            return $null
+        } | Out-Null
     }
 }
 
@@ -59,19 +74,24 @@ function Show-Warning {
     param([Parameter(Mandatory)][string] $Message)
 
     Write-Log -Message $Message -Level WARN
-    [System.Windows.MessageBox]::Show($Message, $script:AppName, 'OK', 'Warning') | Out-Null
+    Invoke-UiThread -ScriptBlock {
+        [System.Windows.MessageBox]::Show($Message, $script:AppName, 'OK', 'Warning') | Out-Null
+        return $null
+    } | Out-Null
 }
 
 function Confirm-DependencyInstall {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string] $Message)
 
-    $answer = [System.Windows.MessageBox]::Show(
-        $Message,
-        "$($script:AppName) - dependency setup",
-        'YesNo',
-        'Question'
-    )
+    $answer = Invoke-UiThread -ScriptBlock {
+        [System.Windows.MessageBox]::Show(
+            $Message,
+            "$($script:AppName) - dependency setup",
+            'YesNo',
+            'Question'
+        )
+    }
 
     return ($answer -eq 'Yes')
 }
@@ -85,12 +105,14 @@ function Confirm-Change {
         return $false
     }
 
-    $answer = [System.Windows.MessageBox]::Show(
-        $Message,
-        "$($script:AppName) - confirm change",
-        'YesNo',
-        'Question'
-    )
+    $answer = Invoke-UiThread -ScriptBlock {
+        [System.Windows.MessageBox]::Show(
+            $Message,
+            "$($script:AppName) - confirm change",
+            'YesNo',
+            'Question'
+        )
+    }
 
     return ($answer -eq 'Yes')
 }
@@ -247,15 +269,17 @@ function ConvertTo-OnMicrosoftUpn {
         [Parameter(Mandatory)][string] $OnMicrosoftDomain
     )
 
-    if ($InputUpn -notmatch '^[^@\s]+@[^@\s]+$') {
-        throw "UPN '$InputUpn' is not valid."
+    $trimmedInput = $InputUpn.Trim()
+
+    if ($trimmedInput -notmatch '^[^@\s]+(@[^@\s]+)?$') {
+        throw "UPN or account prefix '$InputUpn' is not valid."
     }
 
-    $localPart = ($InputUpn -split '@', 2)[0]
+    $localPart = ($trimmedInput -split '@', 2)[0]
     $targetUpn = ('{0}@{1}' -f $localPart, $OnMicrosoftDomain).ToLowerInvariant()
 
-    if ($InputUpn.ToLowerInvariant() -ne $targetUpn) {
-        Write-Log -Level WARN -Message "UPN '$InputUpn' was adjusted to '$targetUpn' because breakglass accounts must use the .onmicrosoft.com domain."
+    if ($trimmedInput.ToLowerInvariant() -ne $targetUpn) {
+        Write-Log -Level WARN -Message "Account input '$InputUpn' was adjusted to '$targetUpn' because breakglass accounts must use the .onmicrosoft.com domain."
     }
 
     return $targetUpn
@@ -588,12 +612,15 @@ function Invoke-BreakglassSetup {
             "{0}`r`nTemporary password: {1}`r`n" -f $_.UserPrincipalName, $_.TemporaryPassword
         }) -join "`r`n"
 
-        [System.Windows.MessageBox]::Show(
-            "Temporary passwords for newly created accounts are shown once and are not stored in logs or reports.`r`n`r`n$secretText",
-            "$($script:AppName) - temporary passwords",
-            'OK',
-            'Information'
-        ) | Out-Null
+        Invoke-UiThread -ScriptBlock {
+            [System.Windows.MessageBox]::Show(
+                "Temporary passwords for newly created accounts are shown once and are not stored in logs or reports.`r`n`r`n$secretText",
+                "$($script:AppName) - temporary passwords",
+                'OK',
+                'Information'
+            ) | Out-Null
+            return $null
+        } | Out-Null
     }
 
     $summary = "Completed. Log: $script:LogFile"
@@ -601,7 +628,10 @@ function Invoke-BreakglassSetup {
         $summary += "`r`nReport: $reportPath"
     }
 
-    [System.Windows.MessageBox]::Show($summary, $script:AppName, 'OK', 'Information') | Out-Null
+    Invoke-UiThread -ScriptBlock {
+        [System.Windows.MessageBox]::Show($summary, $script:AppName, 'OK', 'Information') | Out-Null
+        return $null
+    } | Out-Null
 }
 
 function Start-BreakglassWpfGui {
@@ -653,10 +683,10 @@ function Start-BreakglassWpfGui {
                 <TextBlock Grid.Row="0" Grid.Column="0" Text="Tenant name / domain" VerticalAlignment="Center" Margin="0,0,10,10"/>
                 <TextBox x:Name="TenantNameTextBox" Grid.Row="0" Grid.Column="1" Grid.ColumnSpan="3" Height="28" Margin="0,0,0,10"/>
 
-                <TextBlock Grid.Row="1" Grid.Column="0" Text="Breakglass account 1 UPN" VerticalAlignment="Center" Margin="0,0,10,10"/>
+                <TextBlock Grid.Row="1" Grid.Column="0" Text="Breakglass account 1 UPN or prefix" VerticalAlignment="Center" Margin="0,0,10,10"/>
                 <TextBox x:Name="BreakglassUpn1TextBox" Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="3" Height="28" Margin="0,0,0,10"/>
 
-                <TextBlock Grid.Row="2" Grid.Column="0" Text="Breakglass account 2 UPN" VerticalAlignment="Center" Margin="0,0,10,10"/>
+                <TextBlock Grid.Row="2" Grid.Column="0" Text="Breakglass account 2 UPN or prefix" VerticalAlignment="Center" Margin="0,0,10,10"/>
                 <TextBox x:Name="BreakglassUpn2TextBox" Grid.Row="2" Grid.Column="1" Grid.ColumnSpan="3" Height="28" Margin="0,0,0,10"/>
 
                 <TextBlock Grid.Row="3" Grid.Column="0" Text="Security group name" VerticalAlignment="Center" Margin="0,0,10,14"/>
@@ -716,35 +746,61 @@ function Start-BreakglassWpfGui {
     Write-Log -Message "GUI started. Log file: $script:LogFile"
 
     $runButton.Add_Click({
-        try {
-            if ([string]::IsNullOrWhiteSpace($tenantNameTextBox.Text) -or
-                [string]::IsNullOrWhiteSpace($breakglassUpn1TextBox.Text) -or
-                [string]::IsNullOrWhiteSpace($breakglassUpn2TextBox.Text) -or
-                [string]::IsNullOrWhiteSpace($groupNameTextBox.Text)) {
-                [System.Windows.MessageBox]::Show('Tenant, both UPNs, and group name are required.', $script:AppName, 'OK', 'Warning') | Out-Null
-                return
-            }
+        if ([string]::IsNullOrWhiteSpace($tenantNameTextBox.Text) -or
+            [string]::IsNullOrWhiteSpace($breakglassUpn1TextBox.Text) -or
+            [string]::IsNullOrWhiteSpace($breakglassUpn2TextBox.Text) -or
+            [string]::IsNullOrWhiteSpace($groupNameTextBox.Text)) {
+            [System.Windows.MessageBox]::Show('Tenant, both account fields, and group name are required.', $script:AppName, 'OK', 'Warning') | Out-Null
+            return
+        }
 
-            $runButton.IsEnabled = $false
-            Invoke-BreakglassSetup `
-                -TenantName $tenantNameTextBox.Text.Trim() `
-                -BreakglassUpn1 $breakglassUpn1TextBox.Text.Trim() `
-                -BreakglassUpn2 $breakglassUpn2TextBox.Text.Trim() `
-                -GroupName $groupNameTextBox.Text.Trim() `
-                -CreateAccountsIfMissing ([bool] $createAccountsCheckBox.IsChecked) `
-                -CreateGroupIfMissing ([bool] $createGroupCheckBox.IsChecked) `
-                -AddAccountsToGroup ([bool] $addToGroupCheckBox.IsChecked) `
-                -DisableAdminSspr ([bool] $disableAdminSsprCheckBox.IsChecked) `
-                -GenerateDocumentation ([bool] $generateDocumentationCheckBox.IsChecked) `
-                -DryRun ([bool] $dryRunCheckBox.IsChecked)
+        $runConfig = @{
+            TenantName                = $tenantNameTextBox.Text.Trim()
+            BreakglassUpn1           = $breakglassUpn1TextBox.Text.Trim()
+            BreakglassUpn2           = $breakglassUpn2TextBox.Text.Trim()
+            GroupName                = $groupNameTextBox.Text.Trim()
+            CreateAccountsIfMissing  = [bool] $createAccountsCheckBox.IsChecked
+            CreateGroupIfMissing     = [bool] $createGroupCheckBox.IsChecked
+            AddAccountsToGroup       = [bool] $addToGroupCheckBox.IsChecked
+            DisableAdminSspr         = [bool] $disableAdminSsprCheckBox.IsChecked
+            GenerateDocumentation    = [bool] $generateDocumentationCheckBox.IsChecked
+            DryRun                   = [bool] $dryRunCheckBox.IsChecked
         }
-        catch {
-            Write-Log -Level ERROR -Message $_.Exception.Message
-            [System.Windows.MessageBox]::Show($_.Exception.Message, "$($script:AppName) - error", 'OK', 'Error') | Out-Null
-        }
-        finally {
-            $runButton.IsEnabled = $true
-        }
+
+        $runButton.IsEnabled = $false
+        $runButton.Content = 'Running...'
+        Write-Log -Message 'Starting setup on a background worker thread so the GUI stays responsive.'
+
+        $worker = New-Object System.ComponentModel.BackgroundWorker
+        $script:CurrentWorker = $worker
+        $worker.add_DoWork({
+            param($sender, $eventArgs)
+
+            $config = [hashtable] $eventArgs.Argument
+            Invoke-BreakglassSetup @config
+        })
+
+        $worker.add_RunWorkerCompleted({
+            param($sender, $eventArgs)
+
+            Invoke-UiThread -ScriptBlock {
+                $runButton.IsEnabled = $true
+                $runButton.Content = 'Run setup'
+
+                if ($eventArgs.Error) {
+                    Write-Log -Level ERROR -Message $eventArgs.Error.Message
+                    [System.Windows.MessageBox]::Show($eventArgs.Error.Message, "$($script:AppName) - error", 'OK', 'Error') | Out-Null
+                }
+                else {
+                    Write-Log -Message 'Background worker completed.'
+                }
+
+                $script:CurrentWorker = $null
+                return $null
+            } | Out-Null
+        })
+
+        $worker.RunWorkerAsync($runConfig)
     })
 
     $clearLogButton.Add_Click({
