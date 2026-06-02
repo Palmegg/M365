@@ -57,7 +57,7 @@ The tool should:
 - Naming preset buttons exist for `svr_ea01 / svr_ea02` and `adm_ea01 / adm_ea02`.
 - `Save account names` button and debounced text input logging write `Updated account names to: <account1> / <account2>` to the run log.
 - GUI shows `Report mode (no changes)` instead of `Dry-run mode`.
-- Report mode HTML includes existing potential emergency access accounts discovered in the tenant scan.
+- Report mode HTML includes existing potential emergency access accounts discovered in the tenant scan, plus whether each candidate is already a member of the CA exclusion group.
 - GUI layout is wider and more dynamic with wrapping account action buttons, wrapping run options, and a scrollable setup field area.
 - The script scans for potential existing emergency access accounts and warns/logs if it finds candidates.
 - After creating users or the CA exclusion group, the script re-queries Microsoft Graph and validates object ids before continuing. This avoids Graph SDK responses without `Id` breaking group membership steps.

@@ -14,7 +14,7 @@ The tool uses Microsoft Graph PowerShell modules. It does not use the deprecated
 - Keeps device-code sign-in available as a fallback option, but not as the default.
 - Includes a Save account names button and naming preset buttons for `svr_ea01` / `svr_ea02` and `adm_ea01` / `adm_ea02`.
 - Looks for existing potential emergency access accounts and warns if likely candidates are found.
-- Includes existing potential emergency access accounts in the confidential report, including in report mode.
+- Includes existing potential emergency access accounts in the confidential report, including their membership status in the CA exclusion group.
 - Checks whether two breakglass accounts exist.
 - Creates missing breakglass accounts when selected.
 - Forces breakglass account UPNs to the tenant `.onmicrosoft.com` domain.

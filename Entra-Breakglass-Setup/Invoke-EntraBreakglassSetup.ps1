@@ -807,6 +807,81 @@ function Test-BreakglassGroupMembership {
     return $results
 }
 
+function Test-DiscoveredAccountGroupMembership {
+    [CmdletBinding()]
+    param(
+        [AllowNull()] $Group,
+        [Parameter(Mandatory)][object[]] $DiscoveredAccounts
+    )
+
+    $results = @()
+    $groupId = Get-GraphObjectId -InputObject $Group
+    $groupDisplayName = Get-GraphObjectDisplayName -InputObject $Group
+    if ([string]::IsNullOrWhiteSpace($groupDisplayName)) {
+        $groupDisplayName = 'selected group'
+    }
+
+    if (-not $DiscoveredAccounts -or $DiscoveredAccounts.Count -eq 0) {
+        return $results
+    }
+
+    $memberIds = @()
+    $membershipStatus = 'Not checked'
+    $canCheckMembership = $false
+
+    if (-not $Group -or [string]::IsNullOrWhiteSpace($groupId) -or $groupId -like 'report-*') {
+        $membershipStatus = "Group '$groupDisplayName' is not available for membership lookup."
+    }
+    else {
+        try {
+            $members = @(Get-MgGroupMember -GroupId $groupId -All -Property 'id' -ErrorAction Stop)
+            $memberIds = @($members | ForEach-Object { Get-GraphObjectId -InputObject $_ } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+            $canCheckMembership = $true
+        }
+        catch {
+            $membershipStatus = "Could not check membership: $($_.Exception.Message)"
+            Write-Log -Level WARN -Message "Could not check discovered account group membership for '$groupDisplayName': $($_.Exception.Message)"
+        }
+    }
+
+    foreach ($candidate in ($DiscoveredAccounts | Where-Object { $_ })) {
+        $candidateId = Get-GraphObjectId -InputObject $candidate
+        $candidateUpn = Get-GraphObjectUserPrincipalName -InputObject $candidate
+        $candidateDisplayName = Get-GraphObjectDisplayName -InputObject $candidate
+        $candidateEnabled = Get-GraphObjectPropertyValue -InputObject $candidate -PropertyName @('AccountEnabled', 'accountEnabled')
+
+        if ([string]::IsNullOrWhiteSpace($candidateId)) {
+            $results += [pscustomobject]@{
+                UserPrincipalName = $candidateUpn
+                DisplayName       = $candidateDisplayName
+                AccountEnabled    = $candidateEnabled
+                ObjectId          = $candidateId
+                IsMember          = $false
+                Status            = 'User object id not available'
+            }
+            continue
+        }
+
+        $isMember = $false
+        $status = $membershipStatus
+        if ($canCheckMembership) {
+            $isMember = ($memberIds -contains $candidateId)
+            $status = if ($isMember) { "Confirmed member of '$groupDisplayName'" } else { "Not member of '$groupDisplayName'" }
+        }
+
+        $results += [pscustomobject]@{
+            UserPrincipalName = $candidateUpn
+            DisplayName       = $candidateDisplayName
+            AccountEnabled    = $candidateEnabled
+            ObjectId          = $candidateId
+            IsMember          = $isMember
+            Status            = $status
+        }
+    }
+
+    return $results
+}
+
 function Test-GlobalAdministratorMembership {
     [CmdletBinding()]
     param([Parameter(Mandatory)][object[]] $Users)
@@ -948,6 +1023,7 @@ function Generate-Report {
         [Parameter(Mandatory)][string] $GroupName,
         [AllowEmptyString()][string] $OutputDirectory,
         [object[]] $DiscoveredAccounts = @(),
+        [object[]] $DiscoveredAccountMembershipStatus = @(),
         [Parameter(Mandatory)][object[]] $GroupMembershipStatus,
         [Parameter(Mandatory)][object[]] $GlobalAdministratorStatus,
         [Parameter(Mandatory)][string] $AdminSSPRStatus
@@ -971,20 +1047,31 @@ function Generate-Report {
         $groupObjectId = 'Not available'
     }
 
-    $discoveredAccountRows = foreach ($candidate in @($DiscoveredAccounts | Where-Object { $_ })) {
-        $candidateUpn = Get-GraphObjectUserPrincipalName -InputObject $candidate
-        $candidateDisplayName = Get-GraphObjectDisplayName -InputObject $candidate
-        $candidateEnabled = Get-GraphObjectPropertyValue -InputObject $candidate -PropertyName @('AccountEnabled', 'accountEnabled')
-        $candidateId = Get-GraphObjectId -InputObject $candidate
+    $discoveredMembershipList = @($DiscoveredAccountMembershipStatus | Where-Object { $_ })
+    if ($discoveredMembershipList.Count -eq 0 -and @($DiscoveredAccounts | Where-Object { $_ }).Count -gt 0) {
+        $discoveredMembershipList = foreach ($candidate in @($DiscoveredAccounts | Where-Object { $_ })) {
+            [pscustomobject]@{
+                UserPrincipalName = Get-GraphObjectUserPrincipalName -InputObject $candidate
+                DisplayName       = Get-GraphObjectDisplayName -InputObject $candidate
+                AccountEnabled    = Get-GraphObjectPropertyValue -InputObject $candidate -PropertyName @('AccountEnabled', 'accountEnabled')
+                ObjectId          = Get-GraphObjectId -InputObject $candidate
+                IsMember          = $false
+                Status            = 'Membership not checked'
+            }
+        }
+    }
 
-        '<tr><td>{0}</td><td>{1}</td><td>{2}</td><td>{3}</td></tr>' -f `
-            (ConvertTo-HtmlEncodedText $candidateUpn),
-            (ConvertTo-HtmlEncodedText $candidateDisplayName),
-            (ConvertTo-HtmlEncodedText $candidateEnabled),
-            (ConvertTo-HtmlEncodedText $candidateId)
+    $discoveredAccountRows = foreach ($candidateStatus in $discoveredMembershipList) {
+        '<tr><td>{0}</td><td>{1}</td><td>{2}</td><td>{3}</td><td>{4}</td><td>{5}</td></tr>' -f `
+            (ConvertTo-HtmlEncodedText $candidateStatus.UserPrincipalName),
+            (ConvertTo-HtmlEncodedText $candidateStatus.DisplayName),
+            (ConvertTo-HtmlEncodedText $candidateStatus.AccountEnabled),
+            (ConvertTo-HtmlEncodedText $candidateStatus.ObjectId),
+            (ConvertTo-HtmlEncodedText $candidateStatus.IsMember),
+            (ConvertTo-HtmlEncodedText $candidateStatus.Status)
     }
     if (-not $discoveredAccountRows -or $discoveredAccountRows.Count -eq 0) {
-        $discoveredAccountRows = @('<tr><td colspan="4">No existing emergency access candidates found.</td></tr>')
+        $discoveredAccountRows = @('<tr><td colspan="6">No existing emergency access candidates found.</td></tr>')
     }
 
     $passwordRows = foreach ($user in $userList) {
@@ -1075,7 +1162,7 @@ function Generate-Report {
     <h2>Existing Account Discovery</h2>
     <p class="muted">Accounts below were found by scanning the signed-in tenant for likely emergency access naming patterns.</p>
     <table>
-        <tr><th>User principal name</th><th>Display name</th><th>Enabled</th><th>Object id</th></tr>
+        <tr><th>User principal name</th><th>Display name</th><th>Enabled</th><th>Object id</th><th>Member of exclusion group</th><th>Status</th></tr>
         $($discoveredAccountRows -join [Environment]::NewLine)
     </table>
 
@@ -1188,6 +1275,7 @@ function Invoke-BreakglassSetup {
 
     $users = @($user1, $user2) | Where-Object { $_ }
     $groupMembershipStatus = @(Test-BreakglassGroupMembership -Group $group -Users $users)
+    $discoveredAccountMembershipStatus = @(Test-DiscoveredAccountGroupMembership -Group $group -DiscoveredAccounts $discoveredAccounts)
     $globalAdministratorStatus = @(Test-GlobalAdministratorMembership -Users $users)
     $adminSSPRStatus = Get-AdminSSPRStatus
 
@@ -1203,6 +1291,7 @@ function Invoke-BreakglassSetup {
         -GroupName $GroupName `
         -OutputDirectory $OutputDirectory `
         -DiscoveredAccounts $discoveredAccounts `
+        -DiscoveredAccountMembershipStatus $discoveredAccountMembershipStatus `
         -GroupMembershipStatus $groupMembershipStatus `
         -GlobalAdministratorStatus $globalAdministratorStatus `
         -AdminSSPRStatus $adminSSPRStatus
