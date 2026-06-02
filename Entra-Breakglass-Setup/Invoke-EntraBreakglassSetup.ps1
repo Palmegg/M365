@@ -62,6 +62,20 @@ function Show-Warning {
     [System.Windows.MessageBox]::Show($Message, $script:AppName, 'OK', 'Warning') | Out-Null
 }
 
+function Confirm-DependencyInstall {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string] $Message)
+
+    $answer = [System.Windows.MessageBox]::Show(
+        $Message,
+        "$($script:AppName) - dependency setup",
+        'YesNo',
+        'Question'
+    )
+
+    return ($answer -eq 'Yes')
+}
+
 function Confirm-Change {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string] $Message)
@@ -81,6 +95,50 @@ function Confirm-Change {
     return ($answer -eq 'Yes')
 }
 
+function Initialize-PowerShellGalleryAccess {
+    [CmdletBinding()]
+    param()
+
+    # Older Windows PowerShell builds may default to TLS versions that PowerShell Gallery rejects.
+    [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+
+    if (-not (Get-PackageProvider -Name NuGet -ErrorAction SilentlyContinue)) {
+        if (-not (Confirm-DependencyInstall -Message 'The NuGet package provider is required to install Microsoft Graph PowerShell modules. Install NuGet for the current user now?')) {
+            throw 'NuGet package provider is missing and installation was cancelled.'
+        }
+
+        Write-Log -Message 'Installing NuGet package provider for CurrentUser.'
+        Install-PackageProvider -Name NuGet -MinimumVersion '2.8.5.201' -Scope CurrentUser -Force -ErrorAction Stop | Out-Null
+    }
+
+    if (-not (Get-PSRepository -Name PSGallery -ErrorAction SilentlyContinue)) {
+        if (-not (Confirm-DependencyInstall -Message 'PowerShell Gallery is not registered on this PC. Register the default PSGallery repository now?')) {
+            throw 'PowerShell Gallery is not registered and registration was cancelled.'
+        }
+
+        Write-Log -Message 'Registering default PowerShell Gallery repository.'
+        Register-PSRepository -Default -ErrorAction Stop
+    }
+}
+
+function Install-RequiredGraphModule {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string] $ModuleName)
+
+    Initialize-PowerShellGalleryAccess
+
+    Write-Log -Message "Installing '$ModuleName' from PowerShell Gallery for CurrentUser."
+    Install-Module `
+        -Name $ModuleName `
+        -Repository PSGallery `
+        -Scope CurrentUser `
+        -AllowClobber `
+        -Force `
+        -ErrorAction Stop
+
+    Add-RunResult "Installed PowerShell module: $ModuleName"
+}
+
 function Invoke-RequiredModuleCheck {
     [CmdletBinding()]
     param()
@@ -92,11 +150,25 @@ function Invoke-RequiredModuleCheck {
         'Microsoft.Graph.Identity.DirectoryManagement'
     )
 
-    foreach ($moduleName in $requiredModules) {
+    $missingModules = @(foreach ($moduleName in $requiredModules) {
         if (-not (Get-Module -ListAvailable -Name $moduleName)) {
-            throw "Missing PowerShell module '$moduleName'. Install Microsoft.Graph with: Install-Module Microsoft.Graph -Scope CurrentUser"
+            $moduleName
+        }
+    })
+
+    if ($missingModules.Count -gt 0) {
+        $moduleList = ($missingModules -join [Environment]::NewLine)
+        if (-not (Confirm-DependencyInstall -Message "The following Microsoft Graph PowerShell modules are missing and must be installed for the current user:$([Environment]::NewLine)$([Environment]::NewLine)$moduleList$([Environment]::NewLine)$([Environment]::NewLine)Install them now?")) {
+            throw "Missing required Microsoft Graph PowerShell modules: $($missingModules -join ', ')"
         }
 
+        foreach ($moduleName in $missingModules) {
+            Install-RequiredGraphModule -ModuleName $moduleName
+        }
+    }
+
+    foreach ($moduleName in $requiredModules) {
+        Write-Log -Message "Importing PowerShell module: $moduleName"
         Import-Module $moduleName -ErrorAction Stop
     }
 }

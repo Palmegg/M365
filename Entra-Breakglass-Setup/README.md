@@ -22,15 +22,18 @@ The tool uses Microsoft Graph PowerShell modules. It does not use the deprecated
 ## Requirements
 
 - Windows PowerShell 5.1 or newer.
-- Microsoft Graph PowerShell SDK.
+- Internet access to PowerShell Gallery on the first run if Microsoft Graph PowerShell modules are missing.
 - An account with sufficient Entra ID role permissions to create users, create groups, update group membership, and update authorization policy settings.
 - Admin consent for the delegated Microsoft Graph permissions listed below.
 
-Install Graph PowerShell if needed:
+The script checks for the required Microsoft Graph PowerShell modules when `Run setup` is clicked. If modules are missing, it prompts to install them for the current user:
 
-```powershell
-Install-Module Microsoft.Graph -Scope CurrentUser
-```
+- `Microsoft.Graph.Authentication`
+- `Microsoft.Graph.Users`
+- `Microsoft.Graph.Groups`
+- `Microsoft.Graph.Identity.DirectoryManagement`
+
+On a blank PC, the script also checks for the NuGet package provider and the default PowerShell Gallery registration, then prompts before setting them up.
 
 ## Graph permissions
 
@@ -55,6 +58,13 @@ Microsoft references:
 Run the script from PowerShell:
 
 ```powershell
+.\Invoke-EntraBreakglassSetup.ps1
+```
+
+If execution policy blocks local scripts, use a process-scoped bypass for this PowerShell window only:
+
+```powershell
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 .\Invoke-EntraBreakglassSetup.ps1
 ```
 
