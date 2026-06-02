@@ -15,6 +15,15 @@ param(
     [string] $ConfigPath
 )
 
+if (-not $WorkerMode -and [System.Threading.Thread]::CurrentThread.GetApartmentState() -ne [System.Threading.ApartmentState]::STA) {
+    $windowsPowerShell = Join-Path -Path $env:SystemRoot -ChildPath 'System32\WindowsPowerShell\v1.0\powershell.exe'
+    if ((Test-Path -Path $windowsPowerShell) -and -not [string]::IsNullOrWhiteSpace($PSCommandPath)) {
+        Write-Host 'Restarting Microsoft Entra Breakglass Setup in STA Windows PowerShell for WPF compatibility...' -ForegroundColor Cyan
+        & $windowsPowerShell -NoProfile -STA -ExecutionPolicy Bypass -File $PSCommandPath
+        exit $LASTEXITCODE
+    }
+}
+
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
@@ -1217,6 +1226,12 @@ function Start-BreakglassWpfGui {
 
     $reader = New-Object System.Xml.XmlNodeReader $xaml
     $script:MainWindow = [Windows.Markup.XamlReader]::Load($reader)
+    $script:MainWindow.Add_ContentRendered({
+        $script:MainWindow.Activate() | Out-Null
+        $script:MainWindow.Topmost = $true
+        $script:MainWindow.Topmost = $false
+        $script:MainWindow.Focus() | Out-Null
+    })
 
     $tenantNameTextBox = $script:MainWindow.FindName('TenantNameTextBox')
     $breakglassUpn1TextBox = $script:MainWindow.FindName('BreakglassUpn1TextBox')
@@ -1335,9 +1350,31 @@ function Start-BreakglassWpfGui {
     $script:MainWindow.ShowDialog() | Out-Null
 }
 
-if ($WorkerMode) {
-    Invoke-BreakglassWorkerMode -WorkerConfigPath $ConfigPath
+try {
+    if ($WorkerMode) {
+        Invoke-BreakglassWorkerMode -WorkerConfigPath $ConfigPath
+    }
+    else {
+        Start-BreakglassWpfGui
+    }
 }
-else {
-    Start-BreakglassWpfGui
+catch {
+    $message = "Startup failed: $($_.Exception.Message)"
+    try {
+        Write-Log -Level ERROR -Message $message
+    }
+    catch {
+        $fallbackLog = Join-Path -Path $PSScriptRoot -ChildPath ("BreakglassStartupError_{0}.log" -f (Get-Date -Format 'yyyyMMdd_HHmmss'))
+        Set-Content -Path $fallbackLog -Value $message -Encoding UTF8
+    }
+
+    try {
+        Add-Type -AssemblyName PresentationFramework -ErrorAction SilentlyContinue
+        [System.Windows.MessageBox]::Show($message, "$($script:AppName) - startup error", 'OK', 'Error') | Out-Null
+    }
+    catch {
+        Write-Error $message
+    }
+
+    throw
 }

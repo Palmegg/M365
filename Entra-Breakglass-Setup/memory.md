@@ -49,6 +49,8 @@ The tool should:
 - GUI now uses native Microsoft Graph interactive browser sign-in by default, because FIDO/passkey sign-in must happen in the Microsoft login window or browser.
 - GUI keeps `Fallback: device code sign-in`, disabled by default. Use it only if native browser sign-in cannot open.
 - GUI has `Run in current terminal`, enabled by default, so sign-in prompts stay attached to the VS Code / PowerShell terminal that launched the GUI.
+- Startup now auto-relaunches in STA Windows PowerShell when started from a non-STA shell, because WPF can close or fail silently without STA.
+- Startup exceptions are logged and shown in a MessageBox instead of disappearing immediately.
 - Internal Graph connection helper is named `Connect-BreakglassGraph` because Microsoft Graph PowerShell can expose a `Connect-Graph` alias on existing PCs. That alias shadowed the original helper and caused `A parameter cannot be found that matches parameter name 'TenantName'`.
 - The old `$timer` StrictMode bug was fixed by using `$script:WorkerTimer`.
 - `Browse...` button is wired to `System.Windows.Forms.FolderBrowserDialog`.

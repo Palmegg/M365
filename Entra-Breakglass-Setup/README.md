@@ -34,6 +34,8 @@ The tool uses Microsoft Graph PowerShell modules. It does not use the deprecated
 - An account with sufficient Entra ID role permissions to create users, create groups, update group membership, and update authorization policy settings.
 - Admin consent for the delegated Microsoft Graph permissions listed below.
 
+If the script is launched from a non-STA shell, it automatically restarts itself in STA Windows PowerShell because WPF requires an STA thread.
+
 The script checks for the required Microsoft Graph PowerShell modules when `Run setup` is clicked. If modules are missing, it prompts to install them for the current user:
 
 - `Microsoft.Graph.Authentication`
