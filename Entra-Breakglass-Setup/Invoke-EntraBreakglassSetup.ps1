@@ -238,7 +238,9 @@ function Connect-Graph {
     [CmdletBinding()]
     param(
         [AllowEmptyString()]
-        [string] $TenantName
+        [string] $TenantName,
+
+        [bool] $UseDeviceCode
     )
 
     Invoke-RequiredModuleCheck
@@ -269,6 +271,15 @@ function Connect-Graph {
 
     if ((Get-Command Connect-MgGraph -ErrorAction Stop).Parameters.ContainsKey('ContextScope')) {
         $connectParams.ContextScope = 'Process'
+    }
+
+    if ($UseDeviceCode) {
+        if (-not (Get-Command Connect-MgGraph -ErrorAction Stop).Parameters.ContainsKey('UseDeviceCode')) {
+            throw 'This installed Microsoft.Graph.Authentication module does not support Connect-MgGraph -UseDeviceCode. Update Microsoft.Graph and try again.'
+        }
+
+        $connectParams.UseDeviceCode = $true
+        Write-Log -Message 'Using device code sign-in. Follow the code instructions in the worker PowerShell window and complete passkey sign-in in the browser.'
     }
 
     if (-not [string]::IsNullOrWhiteSpace($TenantName)) {
@@ -917,6 +928,7 @@ function Invoke-BreakglassSetup {
         [bool] $DisableAdminSspr,
         [bool] $GenerateDocumentation,
         [string] $OutputDirectory,
+        [bool] $UseDeviceCode,
         [bool] $DryRun
     )
 
@@ -926,7 +938,7 @@ function Invoke-BreakglassSetup {
 
     Write-Log -Message "Starting breakglass setup. Dry-run: $script:DryRun"
 
-    Connect-Graph -TenantName $TenantName | Out-Null
+    Connect-Graph -TenantName $TenantName -UseDeviceCode $UseDeviceCode | Out-Null
     $onMicrosoftDomain = Resolve-OnMicrosoftDomain -TenantName $TenantName
     Find-PotentialBreakglassAccounts -OnMicrosoftDomain $onMicrosoftDomain | Out-Null
 
@@ -1010,6 +1022,7 @@ function Invoke-BreakglassWorkerMode {
         DisableAdminSspr        = [bool] $configObject.DisableAdminSspr
         GenerateDocumentation   = [bool] $configObject.GenerateDocumentation
         OutputDirectory         = [string] $configObject.OutputDirectory
+        UseDeviceCode           = [bool] $configObject.UseDeviceCode
         DryRun                  = [bool] $configObject.DryRun
     }
 
@@ -1168,7 +1181,10 @@ function Start-BreakglassWpfGui {
             </Grid.RowDefinitions>
             <DockPanel Grid.Row="0" Margin="0,0,0,8">
                 <TextBlock Text="Run log" FontSize="16" FontWeight="SemiBold" Foreground="#1F2937" DockPanel.Dock="Left"/>
-                <CheckBox x:Name="DryRunCheckBox" Content="Dry-run mode" IsChecked="True" DockPanel.Dock="Right" HorizontalAlignment="Right"/>
+                <StackPanel Orientation="Horizontal" DockPanel.Dock="Right" HorizontalAlignment="Right">
+                    <CheckBox x:Name="UseDeviceCodeCheckBox" Content="Use device code sign-in" IsChecked="True" Margin="0,0,18,0"/>
+                    <CheckBox x:Name="DryRunCheckBox" Content="Dry-run mode" IsChecked="True"/>
+                </StackPanel>
             </DockPanel>
             <TextBox x:Name="LogTextBox" Grid.Row="1" IsReadOnly="True" AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" FontFamily="Consolas" FontSize="12" Background="#111827" Foreground="#E5E7EB" Padding="10"/>
         </Grid>
@@ -1201,6 +1217,7 @@ function Start-BreakglassWpfGui {
     $addToGroupCheckBox = $script:MainWindow.FindName('AddToGroupCheckBox')
     $disableAdminSsprCheckBox = $script:MainWindow.FindName('DisableAdminSsprCheckBox')
     $generateDocumentationCheckBox = $script:MainWindow.FindName('GenerateDocumentationCheckBox')
+    $useDeviceCodeCheckBox = $script:MainWindow.FindName('UseDeviceCodeCheckBox')
     $dryRunCheckBox = $script:MainWindow.FindName('DryRunCheckBox')
     $runButton = $script:MainWindow.FindName('RunButton')
     $clearLogButton = $script:MainWindow.FindName('ClearLogButton')
@@ -1261,6 +1278,7 @@ function Start-BreakglassWpfGui {
             DisableAdminSspr         = [bool] $disableAdminSsprCheckBox.IsChecked
             GenerateDocumentation    = [bool] $generateDocumentationCheckBox.IsChecked
             OutputDirectory          = $outputFolderTextBox.Text.Trim()
+            UseDeviceCode            = [bool] $useDeviceCodeCheckBox.IsChecked
             DryRun                   = [bool] $dryRunCheckBox.IsChecked
         }
 
