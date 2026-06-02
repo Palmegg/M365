@@ -10,7 +10,10 @@
 #>
 
 [CmdletBinding()]
-param()
+param(
+    [switch] $WorkerMode,
+    [string] $ConfigPath
+)
 
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
@@ -24,8 +27,9 @@ $script:CreatedUserSecrets = New-Object System.Collections.Generic.List[object]
 $script:DryRun = $true
 $script:MainWindow = $null
 $script:LogTextBox = $null
-$script:CurrentWorker = $null
-$script:MainRunspace = [System.Management.Automation.Runspaces.Runspace]::DefaultRunspace
+$script:WorkerProcess = $null
+$script:WorkerConfigPath = $null
+$script:LastLogTextLength = 0
 
 New-Item -ItemType Directory -Force -Path $script:LogDirectory, $script:ReportDirectory | Out-Null
 
@@ -57,8 +61,40 @@ function Write-Log {
         Invoke-UiThread -ScriptBlock {
             $script:LogTextBox.AppendText($line + [Environment]::NewLine)
             $script:LogTextBox.ScrollToEnd()
+            try {
+                $script:LastLogTextLength = (Get-Content -Path $script:LogFile -Raw -Encoding UTF8 -ErrorAction Stop).Length
+            }
+            catch {
+                $script:LastLogTextLength = 0
+            }
             return $null
         } | Out-Null
+    }
+}
+
+function Sync-LogViewFromFile {
+    [CmdletBinding()]
+    param()
+
+    if (-not $script:LogTextBox -or -not (Test-Path -Path $script:LogFile)) {
+        return
+    }
+
+    try {
+        $content = Get-Content -Path $script:LogFile -Raw -Encoding UTF8 -ErrorAction Stop
+        if ($content.Length -lt $script:LastLogTextLength) {
+            $script:LastLogTextLength = 0
+        }
+
+        if ($content.Length -gt $script:LastLogTextLength) {
+            $newText = $content.Substring($script:LastLogTextLength)
+            $script:LogTextBox.AppendText($newText)
+            $script:LogTextBox.ScrollToEnd()
+            $script:LastLogTextLength = $content.Length
+        }
+    }
+    catch {
+        # The worker process may be writing the log at this exact moment. The next tick will retry.
     }
 }
 
@@ -886,6 +922,104 @@ function Invoke-BreakglassSetup {
     } | Out-Null
 }
 
+function Invoke-BreakglassWorkerMode {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string] $WorkerConfigPath)
+
+    Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase
+
+    if (-not (Test-Path -Path $WorkerConfigPath)) {
+        throw "Worker config file was not found: $WorkerConfigPath"
+    }
+
+    $configObject = Get-Content -Path $WorkerConfigPath -Raw -Encoding UTF8 | ConvertFrom-Json
+
+    if (-not [string]::IsNullOrWhiteSpace($configObject.LogFile)) {
+        $script:LogFile = $configObject.LogFile
+    }
+
+    Write-Log -Message 'Worker process started.'
+
+    $runConfig = @{
+        TenantName               = [string] $configObject.TenantName
+        BreakglassUpn1           = [string] $configObject.BreakglassUpn1
+        BreakglassUpn2           = [string] $configObject.BreakglassUpn2
+        GroupName                = [string] $configObject.GroupName
+        CreateAccountsIfMissing = [bool] $configObject.CreateAccountsIfMissing
+        CreateGroupIfMissing    = [bool] $configObject.CreateGroupIfMissing
+        AddAccountsToGroup      = [bool] $configObject.AddAccountsToGroup
+        DisableAdminSspr        = [bool] $configObject.DisableAdminSspr
+        GenerateDocumentation   = [bool] $configObject.GenerateDocumentation
+        OutputDirectory         = [string] $configObject.OutputDirectory
+        DryRun                  = [bool] $configObject.DryRun
+    }
+
+    Invoke-BreakglassSetup @runConfig
+    Write-Log -Message 'Worker process completed.'
+}
+
+function Start-BreakglassWorkerProcess {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][hashtable] $RunConfig,
+        [Parameter(Mandatory)] $RunButton
+    )
+
+    $workerConfig = @{} + $RunConfig
+    $workerConfig.LogFile = $script:LogFile
+
+    $script:WorkerConfigPath = Join-Path -Path $script:LogDirectory -ChildPath ("WorkerConfig_{0}.json" -f (Get-Date -Format 'yyyyMMdd_HHmmss'))
+    $workerConfig | ConvertTo-Json -Depth 5 | Set-Content -Path $script:WorkerConfigPath -Encoding UTF8
+
+    $powerShellExe = Join-Path -Path $PSHOME -ChildPath 'powershell.exe'
+    if (-not (Test-Path -Path $powerShellExe)) {
+        $powerShellExe = (Get-Command powershell.exe -ErrorAction Stop).Source
+    }
+
+    $arguments = @(
+        '-NoProfile',
+        '-Sta',
+        '-ExecutionPolicy', 'Bypass',
+        '-File', ('"{0}"' -f $PSCommandPath),
+        '-WorkerMode',
+        '-ConfigPath', ('"{0}"' -f $script:WorkerConfigPath)
+    ) -join ' '
+
+    Write-Log -Message 'Starting setup in a separate PowerShell worker process so the GUI stays responsive.'
+    $script:WorkerProcess = Start-Process -FilePath $powerShellExe -ArgumentList $arguments -WindowStyle Hidden -PassThru
+
+    $timer = New-Object System.Windows.Threading.DispatcherTimer
+    $timer.Interval = [TimeSpan]::FromSeconds(1)
+    $timer.Add_Tick({
+        Sync-LogViewFromFile
+
+        if (-not $script:WorkerProcess) {
+            return
+        }
+
+        if ($script:WorkerProcess.HasExited) {
+            $timer.Stop()
+            Sync-LogViewFromFile
+            $exitCode = $script:WorkerProcess.ExitCode
+            $script:WorkerProcess.Dispose()
+            $script:WorkerProcess = $null
+
+            $RunButton.IsEnabled = $true
+            $RunButton.Content = 'Run setup'
+
+            if ($exitCode -eq 0) {
+                Write-Log -Message 'Worker process completed successfully.'
+            }
+            else {
+                Write-Log -Level ERROR -Message "Worker process exited with code $exitCode. Review the log for details."
+                [System.Windows.MessageBox]::Show("Worker process exited with code $exitCode. Review the log for details.", "$($script:AppName) - error", 'OK', 'Error') | Out-Null
+            }
+        }
+    })
+
+    $timer.Start()
+}
+
 function Start-BreakglassWpfGui {
     [CmdletBinding()]
     param()
@@ -1050,39 +1184,7 @@ function Start-BreakglassWpfGui {
 
         $runButton.IsEnabled = $false
         $runButton.Content = 'Running...'
-        Write-Log -Message 'Starting setup on a background worker thread so the GUI stays responsive.'
-
-        $worker = New-Object System.ComponentModel.BackgroundWorker
-        $script:CurrentWorker = $worker
-        $worker.add_DoWork({
-            param($sender, $eventArgs)
-
-            [System.Management.Automation.Runspaces.Runspace]::DefaultRunspace = $script:MainRunspace
-            $config = [hashtable] $eventArgs.Argument
-            Invoke-BreakglassSetup @config
-        })
-
-        $worker.add_RunWorkerCompleted({
-            param($sender, $eventArgs)
-
-            Invoke-UiThread -ScriptBlock {
-                $runButton.IsEnabled = $true
-                $runButton.Content = 'Run setup'
-
-                if ($eventArgs.Error) {
-                    Write-Log -Level ERROR -Message $eventArgs.Error.Message
-                    [System.Windows.MessageBox]::Show($eventArgs.Error.Message, "$($script:AppName) - error", 'OK', 'Error') | Out-Null
-                }
-                else {
-                    Write-Log -Message 'Background worker completed.'
-                }
-
-                $script:CurrentWorker = $null
-                return $null
-            } | Out-Null
-        })
-
-        $worker.RunWorkerAsync($runConfig)
+        Start-BreakglassWorkerProcess -RunConfig $runConfig -RunButton $runButton
     })
 
     $clearLogButton.Add_Click({
@@ -1101,4 +1203,9 @@ function Start-BreakglassWpfGui {
     $script:MainWindow.ShowDialog() | Out-Null
 }
 
-Start-BreakglassWpfGui
+if ($WorkerMode) {
+    Invoke-BreakglassWorkerMode -WorkerConfigPath $ConfigPath
+}
+else {
+    Start-BreakglassWpfGui
+}
