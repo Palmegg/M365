@@ -48,6 +48,7 @@ The tool should:
 - Worker process is launched with `WindowStyle Normal` so Graph/passkey authentication UI can be seen.
 - GUI has `Use device code sign-in`, enabled by default, because Conditional Access requiring passkey/FIDO2 can block the regular Microsoft Graph PowerShell interactive login with "this app does not support it".
 - GUI has `Run in current terminal`, enabled by default, so the device-code prompt is printed in the VS Code / PowerShell terminal that launched the GUI instead of disappearing in a worker window.
+- Internal Graph connection helper is named `Connect-BreakglassGraph` because Microsoft Graph PowerShell can expose a `Connect-Graph` alias on existing PCs. That alias shadowed the original helper and caused `A parameter cannot be found that matches parameter name 'TenantName'`.
 - The old `$timer` StrictMode bug was fixed by using `$script:WorkerTimer`.
 - `Browse...` button is wired to `System.Windows.Forms.FolderBrowserDialog`.
 - Naming preset buttons exist for `svr_ea01 / svr_ea02` and `adm_ea01 / adm_ea02`.
@@ -60,6 +61,7 @@ The tool should:
 - `Browse...` did nothing: fixed by adding click handler.
 - `There is no Runspace available`: fixed by removing `BackgroundWorker` and using worker process mode.
 - `The variable '$timer' cannot be retrieved because it has not been set`: fixed by using `$script:WorkerTimer`.
+- `A parameter cannot be found that matches parameter name 'TenantName'`: fixed by renaming the internal connection helper to avoid a `Connect-Graph` alias collision from Microsoft Graph PowerShell.
 
 ## Important Security Decisions
 

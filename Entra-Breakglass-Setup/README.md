@@ -22,10 +22,10 @@ The tool uses Microsoft Graph PowerShell modules. It does not use the deprecated
 - Adds the breakglass accounts to the group when selected.
 - Shows clear warnings for Conditional Access exclusions and admin SSPR scope.
 - Can disable administrator SSPR tenant-wide when selected.
-- Generates a short Markdown report with actions and manual steps.
+- Generates a confidential HTML report with actions, confirmations, manual steps, and newly generated initial passwords.
 - Logs every action to the local `logs` folder.
 - Prompts before every change unless dry-run mode is enabled.
-- Runs Graph work on a background worker thread so the WPF GUI stays responsive during sign-in and Graph operations.
+- Can run Graph work in the current terminal for visible device-code sign-in, or in a separate worker process when preferred.
 
 ## Requirements
 
@@ -94,7 +94,7 @@ Recommended first run:
 - Conditional Access policies are not modified by this script.
 - You must manually exclude `CA-BreakGlassExclude` from every relevant Conditional Access policy.
 - Administrator SSPR cannot be disabled only for the two breakglass accounts. The setting applies tenant-wide to administrators in administrator roles.
-- Temporary passwords for newly created accounts are shown once in the GUI and are not written to logs or reports.
+- Temporary passwords for newly created accounts are written only to the confidential HTML report and are never written to normal logs.
 
 ## Manual steps to complete
 
@@ -108,4 +108,4 @@ Recommended first run:
 ## Output folders
 
 - `logs`: timestamped run logs.
-- `reports`: generated Markdown reports.
+- `reports`: generated confidential HTML reports.

@@ -234,7 +234,9 @@ function Invoke-RequiredModuleCheck {
     }
 }
 
-function Connect-Graph {
+# Microsoft Graph PowerShell can expose a Connect-Graph alias on some systems.
+# Use an internal, unique helper name so existing Graph modules cannot shadow it.
+function Connect-BreakglassGraph {
     [CmdletBinding()]
     param(
         [AllowEmptyString()]
@@ -942,7 +944,7 @@ function Invoke-BreakglassSetup {
 
     Write-Log -Message "Starting breakglass setup. Dry-run: $script:DryRun"
 
-    Connect-Graph -TenantName $TenantName -UseDeviceCode $UseDeviceCode | Out-Null
+    Connect-BreakglassGraph -TenantName $TenantName -UseDeviceCode $UseDeviceCode | Out-Null
     $onMicrosoftDomain = Resolve-OnMicrosoftDomain -TenantName $TenantName
     Find-PotentialBreakglassAccounts -OnMicrosoftDomain $onMicrosoftDomain | Out-Null
 
