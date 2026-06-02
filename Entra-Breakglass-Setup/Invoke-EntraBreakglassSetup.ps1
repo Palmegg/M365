@@ -281,10 +281,17 @@ function Connect-BreakglassGraph {
         }
 
         $connectParams.UseDeviceCode = $true
-        Write-Log -Message 'Using device code sign-in. Follow the code instructions in the PowerShell terminal and complete passkey sign-in in the browser.'
+        Write-Log -Message 'Using device code sign-in fallback. Follow the code instructions in the PowerShell terminal.'
         Write-Host ''
-        Write-Host 'Microsoft Graph device code sign-in is starting.' -ForegroundColor Cyan
-        Write-Host 'If a code is shown below, open https://microsoft.com/devicelogin and complete sign-in with your passkey.' -ForegroundColor Cyan
+        Write-Host 'Microsoft Graph device code sign-in fallback is starting.' -ForegroundColor Cyan
+        Write-Host 'If a code is shown below, open https://microsoft.com/devicelogin and complete sign-in.' -ForegroundColor Cyan
+        Write-Host ''
+    }
+    else {
+        Write-Log -Message 'Using native Microsoft Graph interactive browser sign-in. A Microsoft sign-in window or browser tab should open; complete sign-in with your FIDO key/passkey.'
+        Write-Host ''
+        Write-Host 'Microsoft Graph interactive browser sign-in is starting.' -ForegroundColor Cyan
+        Write-Host 'Complete sign-in in the Microsoft login window/browser and use your FIDO key/passkey when prompted.' -ForegroundColor Cyan
         Write-Host ''
     }
 
@@ -1189,7 +1196,7 @@ function Start-BreakglassWpfGui {
                 <TextBlock Text="Run log" FontSize="16" FontWeight="SemiBold" Foreground="#1F2937" DockPanel.Dock="Left"/>
                 <StackPanel Orientation="Horizontal" DockPanel.Dock="Right" HorizontalAlignment="Right">
                     <CheckBox x:Name="RunInCurrentTerminalCheckBox" Content="Run in current terminal" IsChecked="True" Margin="0,0,18,0"/>
-                    <CheckBox x:Name="UseDeviceCodeCheckBox" Content="Use device code sign-in" IsChecked="True" Margin="0,0,18,0"/>
+                    <CheckBox x:Name="UseDeviceCodeCheckBox" Content="Fallback: device code sign-in" IsChecked="False" Margin="0,0,18,0"/>
                     <CheckBox x:Name="DryRunCheckBox" Content="Dry-run mode" IsChecked="True"/>
                 </StackPanel>
             </DockPanel>
@@ -1295,7 +1302,7 @@ function Start-BreakglassWpfGui {
 
         if ([bool] $runInCurrentTerminalCheckBox.IsChecked) {
             try {
-                Write-Log -Message 'Running setup in the current PowerShell session so device-code sign-in is visible in the terminal.'
+                Write-Log -Message 'Running setup in the current PowerShell session so sign-in prompts are visible.'
                 Invoke-BreakglassSetup @runConfig
             }
             catch {

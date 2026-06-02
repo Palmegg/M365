@@ -46,8 +46,9 @@ The tool should:
 - `Run setup` no longer uses `BackgroundWorker`. It starts the same script in a separate PowerShell worker process using `-WorkerMode -ConfigPath <json>`.
 - Worker process writes to the same log file as the GUI. GUI polls that log file while the worker runs.
 - Worker process is launched with `WindowStyle Normal` so Graph/passkey authentication UI can be seen.
-- GUI has `Use device code sign-in`, enabled by default, because Conditional Access requiring passkey/FIDO2 can block the regular Microsoft Graph PowerShell interactive login with "this app does not support it".
-- GUI has `Run in current terminal`, enabled by default, so the device-code prompt is printed in the VS Code / PowerShell terminal that launched the GUI instead of disappearing in a worker window.
+- GUI now uses native Microsoft Graph interactive browser sign-in by default, because FIDO/passkey sign-in must happen in the Microsoft login window or browser.
+- GUI keeps `Fallback: device code sign-in`, disabled by default. Use it only if native browser sign-in cannot open.
+- GUI has `Run in current terminal`, enabled by default, so sign-in prompts stay attached to the VS Code / PowerShell terminal that launched the GUI.
 - Internal Graph connection helper is named `Connect-BreakglassGraph` because Microsoft Graph PowerShell can expose a `Connect-Graph` alias on existing PCs. That alias shadowed the original helper and caused `A parameter cannot be found that matches parameter name 'TenantName'`.
 - The old `$timer` StrictMode bug was fixed by using `$script:WorkerTimer`.
 - `Browse...` button is wired to `System.Windows.Forms.FolderBrowserDialog`.
@@ -86,8 +87,8 @@ Do not stage or modify those unless the user asks.
 - Leave tenant blank.
 - Click `Use svr_ea01 / svr_ea02`.
 - Select output folder with `Browse...`.
-- Keep `Use device code sign-in` enabled when passkey/FIDO2 is required by Conditional Access.
-- Keep `Run in current terminal` enabled if the worker PowerShell window stays blank and does not show the device-code prompt.
+- Leave `Fallback: device code sign-in` disabled for tenants requiring FIDO/passkey. Native browser sign-in should open a Microsoft login window/browser where the FIDO key can be used.
+- Keep `Run in current terminal` enabled if the worker PowerShell window stays blank or sign-in prompts are not visible.
 - Keep dry-run enabled for first test.
 - Click `Run setup`.
 - Confirm whether Graph sign-in/passkey flow opens visibly and whether the GUI log keeps updating.

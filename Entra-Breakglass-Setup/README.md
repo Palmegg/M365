@@ -10,8 +10,8 @@ The tool uses Microsoft Graph PowerShell modules. It does not use the deprecated
 - Connects to Microsoft Graph PowerShell.
 - Tenant field is optional. If it is blank, the `.onmicrosoft.com` domain is resolved from the signed-in tenant.
 - Disconnects existing Graph PowerShell context and uses process-scoped context for each run.
-- Uses device code sign-in by default, which is usually more reliable when Conditional Access requires passkey/FIDO2 sign-in.
-- Runs in the current terminal by default so the device-code prompt is visible in the PowerShell session that launched the GUI.
+- Uses native Microsoft Graph interactive browser sign-in by default so FIDO/passkey sign-in can happen in the Microsoft login window or browser.
+- Keeps device-code sign-in available as a fallback option, but not as the default.
 - Includes naming preset buttons for `svr_ea01` / `svr_ea02` and `adm_ea01` / `adm_ea02`.
 - Looks for existing potential emergency access accounts and warns if likely candidates are found.
 - Checks whether two breakglass accounts exist.
@@ -25,7 +25,7 @@ The tool uses Microsoft Graph PowerShell modules. It does not use the deprecated
 - Generates a confidential HTML report with actions, confirmations, manual steps, and newly generated initial passwords.
 - Logs every action to the local `logs` folder.
 - Prompts before every change unless dry-run mode is enabled.
-- Can run Graph work in the current terminal for visible device-code sign-in, or in a separate worker process when preferred.
+- Can run Graph work in the current terminal for visible sign-in prompts, or in a separate worker process when preferred.
 
 ## Requirements
 
@@ -82,8 +82,8 @@ Recommended first run:
 
 1. Optionally enter the tenant ID or domain. Leave it blank to resolve the tenant after sign-in.
 2. Enter both breakglass UPNs or prefixes, for example `svr_ea01` and `svr_ea02`, or use one of the preset buttons.
-3. Keep `Run in current terminal` enabled so the device-code prompt appears in the PowerShell terminal.
-4. Keep `Use device code sign-in` enabled if Conditional Access requires passkey/FIDO2.
+3. Keep `Run in current terminal` enabled so sign-in prompts stay attached to the PowerShell session that launched the GUI.
+4. Leave `Fallback: device code sign-in` disabled unless native browser sign-in cannot open.
 5. Keep `Dry-run mode` enabled.
 6. Review the GUI log and generated report.
 7. Run again with dry-run disabled when the planned actions are correct.
