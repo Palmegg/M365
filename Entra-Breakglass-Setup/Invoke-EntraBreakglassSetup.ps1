@@ -25,6 +25,7 @@ $script:DryRun = $true
 $script:MainWindow = $null
 $script:LogTextBox = $null
 $script:CurrentWorker = $null
+$script:MainRunspace = [System.Management.Automation.Runspaces.Runspace]::DefaultRunspace
 
 New-Item -ItemType Directory -Force -Path $script:LogDirectory, $script:ReportDirectory | Out-Null
 
@@ -471,6 +472,149 @@ function Add-BreakglassUsersToGroup {
     }
 }
 
+function Test-BreakglassGroupMembership {
+    [CmdletBinding()]
+    param(
+        [AllowNull()] $Group,
+        [Parameter(Mandatory)][object[]] $Users
+    )
+
+    $results = @()
+    if (-not $Group -or -not $Group.Id) {
+        foreach ($user in ($Users | Where-Object { $_ })) {
+            $results += [pscustomobject]@{
+                UserPrincipalName = $user.UserPrincipalName
+                IsMember          = $false
+                Status            = 'Group not available'
+            }
+        }
+
+        return $results
+    }
+
+    if ($script:DryRun) {
+        foreach ($user in ($Users | Where-Object { $_ })) {
+            $results += [pscustomobject]@{
+                UserPrincipalName = $user.UserPrincipalName
+                IsMember          = $false
+                Status            = 'Dry-run: membership not changed'
+            }
+        }
+
+        return $results
+    }
+
+    $members = Get-MgGroupMember -GroupId $Group.Id -All -Property 'id' -ErrorAction Stop
+    foreach ($user in ($Users | Where-Object { $_ -and $_.Id })) {
+        $isMember = ($members.Id -contains $user.Id)
+        $results += [pscustomobject]@{
+            UserPrincipalName = $user.UserPrincipalName
+            IsMember          = $isMember
+            Status            = $(if ($isMember) { 'Confirmed member' } else { 'Not confirmed as member' })
+        }
+    }
+
+    return $results
+}
+
+function Test-GlobalAdministratorMembership {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][object[]] $Users)
+
+    $results = @()
+
+    if ($script:DryRun) {
+        foreach ($user in ($Users | Where-Object { $_ })) {
+            $results += [pscustomobject]@{
+                UserPrincipalName = $user.UserPrincipalName
+                IsGlobalAdmin     = $false
+                Status            = 'Dry-run: role membership not checked'
+            }
+        }
+
+        return $results
+    }
+
+    try {
+        $roleDefinitionFilter = [uri]::EscapeDataString("displayName eq 'Global Administrator'")
+        $roleDefinitionResponse = Invoke-MgGraphRequest -Method GET -Uri "https://graph.microsoft.com/v1.0/roleManagement/directory/roleDefinitions?`$filter=$roleDefinitionFilter" -ErrorAction Stop
+        $globalAdminRole = @($roleDefinitionResponse.value) | Select-Object -First 1
+
+        if (-not $globalAdminRole) {
+            throw 'Global Administrator role definition was not returned by Microsoft Graph.'
+        }
+
+        foreach ($user in ($Users | Where-Object { $_ -and $_.Id })) {
+            $assignmentFilter = [uri]::EscapeDataString("principalId eq '$($user.Id)' and roleDefinitionId eq '$($globalAdminRole.id)'")
+            $assignmentResponse = Invoke-MgGraphRequest -Method GET -Uri "https://graph.microsoft.com/v1.0/roleManagement/directory/roleAssignments?`$filter=$assignmentFilter" -ErrorAction Stop
+            $isGlobalAdmin = (@($assignmentResponse.value).Count -gt 0)
+
+            $results += [pscustomobject]@{
+                UserPrincipalName = $user.UserPrincipalName
+                IsGlobalAdmin     = $isGlobalAdmin
+                Status            = $(if ($isGlobalAdmin) { 'Confirmed Global Administrator' } else { 'Not confirmed as Global Administrator' })
+            }
+        }
+    }
+    catch {
+        Write-Log -Level WARN -Message "Could not confirm Global Administrator role membership: $($_.Exception.Message)"
+        foreach ($user in ($Users | Where-Object { $_ })) {
+            $results += [pscustomobject]@{
+                UserPrincipalName = $user.UserPrincipalName
+                IsGlobalAdmin     = $false
+                Status            = "Could not check: $($_.Exception.Message)"
+            }
+        }
+    }
+
+    return $results
+}
+
+function Get-AdminSSPRStatus {
+    [CmdletBinding()]
+    param()
+
+    if ($script:DryRun) {
+        return 'Dry-run: not changed'
+    }
+
+    try {
+        $policy = Invoke-MgGraphRequest -Method GET -Uri 'https://graph.microsoft.com/beta/policies/authorizationPolicy/authorizationPolicy' -ErrorAction Stop
+        if ($policy.allowedToUseSSPR -eq $true) {
+            return 'Enabled'
+        }
+
+        if ($policy.allowedToUseSSPR -eq $false) {
+            return 'Disabled'
+        }
+
+        return 'Unknown'
+    }
+    catch {
+        Write-Log -Level WARN -Message "Could not read Admin SSPR status: $($_.Exception.Message)"
+        return "Unknown: $($_.Exception.Message)"
+    }
+}
+
+function ConvertTo-HtmlEncodedText {
+    [CmdletBinding()]
+    param([AllowNull()][object] $Value)
+
+    if ($null -eq $Value) {
+        return ''
+    }
+
+    return [System.Net.WebUtility]::HtmlEncode([string] $Value)
+}
+
+function New-HtmlList {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string[]] $Items)
+
+    $encodedItems = $Items | ForEach-Object { '<li>{0}</li>' -f (ConvertTo-HtmlEncodedText $_) }
+    return "<ul>$($encodedItems -join [Environment]::NewLine)</ul>"
+}
+
 function Disable-AdminSSPR {
     [CmdletBinding()]
     param()
@@ -502,55 +646,167 @@ function Generate-Report {
     param(
         [Parameter(Mandatory)][string] $TenantName,
         [Parameter(Mandatory)][string] $OnMicrosoftDomain,
-        [Parameter(Mandatory)][string[]] $RequestedUpns,
-        [Parameter(Mandatory)][string] $GroupName
+        [Parameter(Mandatory)][object[]] $Users,
+        [AllowNull()] $Group,
+        [Parameter(Mandatory)][string] $GroupName,
+        [AllowEmptyString()][string] $OutputDirectory,
+        [Parameter(Mandatory)][object[]] $GroupMembershipStatus,
+        [Parameter(Mandatory)][object[]] $GlobalAdministratorStatus,
+        [Parameter(Mandatory)][string] $AdminSSPRStatus
     )
 
-    $reportPath = Join-Path -Path $script:ReportDirectory -ChildPath ("BreakglassReport_{0}.md" -f (Get-Date -Format 'yyyyMMdd_HHmmss'))
+    if ([string]::IsNullOrWhiteSpace($OutputDirectory)) {
+        $OutputDirectory = $script:ReportDirectory
+    }
+
+    New-Item -ItemType Directory -Force -Path $OutputDirectory | Out-Null
+
+    $reportPath = Join-Path -Path $OutputDirectory -ChildPath ("BreakglassReport_{0}.html" -f (Get-Date -Format 'yyyyMMdd_HHmmss'))
+    $createdTimestamp = Get-Date -Format 'yyyy-MM-dd HH:mm:ss'
+    $userList = @($Users | Where-Object { $_ })
+    $account1 = $userList | Select-Object -First 1
+    $account2 = $userList | Select-Object -Skip 1 -First 1
+    $account1Upn = if ($account1) { $account1.UserPrincipalName } else { 'Not available' }
+    $account2Upn = if ($account2) { $account2.UserPrincipalName } else { 'Not available' }
+    $groupObjectId = if ($Group -and $Group.Id) { $Group.Id } else { 'Not available' }
+
+    $passwordRows = foreach ($user in $userList) {
+        $secret = $script:CreatedUserSecrets | Where-Object { $_.UserPrincipalName -eq $user.UserPrincipalName } | Select-Object -First 1
+        $passwordText = if ($secret) {
+            $secret.TemporaryPassword
+        }
+        elseif ($script:DryRun) {
+            'Dry-run: no password generated'
+        }
+        else {
+            'Not generated in this run. Existing passwords can not be retrieved.'
+        }
+
+        '<tr><td>{0}</td><td class="secret">{1}</td></tr>' -f (ConvertTo-HtmlEncodedText $user.UserPrincipalName), (ConvertTo-HtmlEncodedText $passwordText)
+    }
+
+    $groupRows = foreach ($status in $GroupMembershipStatus) {
+        '<tr><td>{0}</td><td>{1}</td><td>{2}</td></tr>' -f `
+            (ConvertTo-HtmlEncodedText $status.UserPrincipalName),
+            (ConvertTo-HtmlEncodedText $status.IsMember),
+            (ConvertTo-HtmlEncodedText $status.Status)
+    }
+
+    $globalAdminRows = foreach ($status in $GlobalAdministratorStatus) {
+        '<tr><td>{0}</td><td>{1}</td><td>{2}</td></tr>' -f `
+            (ConvertTo-HtmlEncodedText $status.UserPrincipalName),
+            (ConvertTo-HtmlEncodedText $status.IsGlobalAdmin),
+            (ConvertTo-HtmlEncodedText $status.Status)
+    }
+
+    $actionItems = @($script:RunResults | ForEach-Object { [string] $_ })
+    if ($actionItems.Count -eq 0) {
+        $actionItems = @('No actions recorded.')
+    }
     $manualSteps = @(
-        'Register one separate FIDO2 security key per breakglass account.',
-        'Store the FIDO2 keys physically separated and securely.',
-        "Exclude the '$GroupName' group from all Conditional Access policies.",
-        'Configure alerting on sign-in for both breakglass accounts.',
-        'Test the accounts periodically.',
-        'Never use the accounts for daily administration.'
+        'Register FIDO2 key on each account.',
+        'Exclude the group from all Conditional Access policies.',
+        'Configure login alerting.',
+        'Complete login test.',
+        'Store credentials securely.'
     )
 
     $content = @"
-# Microsoft Entra Breakglass Setup Report
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>CONFIDENTIAL - Microsoft Entra Breakglass Setup Report</title>
+    <style>
+        body { font-family: Segoe UI, Arial, sans-serif; margin: 32px; color: #111827; line-height: 1.45; }
+        .banner { background: #7f1d1d; color: #fff; padding: 14px 18px; font-size: 22px; font-weight: 700; letter-spacing: 1px; }
+        .warning { border: 2px solid #b45309; background: #fffbeb; padding: 14px 18px; margin: 18px 0; }
+        h1 { margin-top: 22px; }
+        h2 { border-bottom: 1px solid #d1d5db; padding-bottom: 6px; margin-top: 28px; }
+        table { border-collapse: collapse; width: 100%; margin: 10px 0 18px 0; }
+        th, td { border: 1px solid #d1d5db; padding: 8px 10px; text-align: left; vertical-align: top; }
+        th { background: #f3f4f6; }
+        .secret { font-family: Consolas, monospace; font-weight: 700; color: #7f1d1d; }
+        .muted { color: #4b5563; }
+        @media print { body { margin: 18mm; } .banner { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
+    </style>
+</head>
+<body>
+    <div class="banner">CONFIDENTIAL</div>
+    <h1>Microsoft Entra Breakglass Setup Report</h1>
+    <div class="warning">
+        <strong>Credential handling warning:</strong>
+        Move generated initial passwords to an approved password manager or approved physical emergency procedure immediately.
+        After transfer, remove this local file and any local copies according to your security process.
+    </div>
 
-Generated: $(Get-Date -Format 'yyyy-MM-dd HH:mm:ss')
-Tenant input: $TenantName
-Resolved .onmicrosoft.com domain: $OnMicrosoftDomain
-Dry-run: $script:DryRun
+    <h2>Tenant and Creation Details</h2>
+    <table>
+        <tr><th>Tenant name</th><td>$(ConvertTo-HtmlEncodedText $TenantName)</td></tr>
+        <tr><th>Resolved .onmicrosoft.com domain</th><td>$(ConvertTo-HtmlEncodedText $OnMicrosoftDomain)</td></tr>
+        <tr><th>Date and time of creation</th><td>$(ConvertTo-HtmlEncodedText $createdTimestamp)</td></tr>
+        <tr><th>Dry-run</th><td>$(ConvertTo-HtmlEncodedText $script:DryRun)</td></tr>
+    </table>
 
-## Requested accounts
+    <h2>Breakglass Accounts</h2>
+    <table>
+        <tr><th>Breakglass Account 1 UPN</th><td>$(ConvertTo-HtmlEncodedText $account1Upn)</td></tr>
+        <tr><th>Breakglass Account 2 UPN</th><td>$(ConvertTo-HtmlEncodedText $account2Upn)</td></tr>
+    </table>
 
-$($RequestedUpns | ForEach-Object { "- $_" } | Out-String)
-## Security group
+    <h2>Generated Initial Passwords</h2>
+    <p class="muted">Passwords are included only for accounts created in this run. Existing account passwords cannot be retrieved.</p>
+    <table>
+        <tr><th>Account</th><th>Generated initial password</th></tr>
+        $($passwordRows -join [Environment]::NewLine)
+    </table>
 
-- $GroupName
+    <h2>Conditional Access Exclusion Group</h2>
+    <table>
+        <tr><th>Group name</th><td>$(ConvertTo-HtmlEncodedText $GroupName)</td></tr>
+        <tr><th>Group object id</th><td>$(ConvertTo-HtmlEncodedText $groupObjectId)</td></tr>
+    </table>
 
-## Actions
+    <h2>Group Membership Confirmation</h2>
+    <table>
+        <tr><th>Account</th><th>Member</th><th>Status</th></tr>
+        $($groupRows -join [Environment]::NewLine)
+    </table>
 
-$($script:RunResults | ForEach-Object { "- $_" } | Out-String)
-## Critical manual steps
+    <h2>Global Administrator Role Confirmation</h2>
+    <table>
+        <tr><th>Account</th><th>Global Administrator</th><th>Status</th></tr>
+        $($globalAdminRows -join [Environment]::NewLine)
+    </table>
 
-$($manualSteps | ForEach-Object { "- $_" } | Out-String)
-## Important warnings
+    <h2>Admin SSPR Status</h2>
+    <table>
+        <tr><th>Status</th><td>$(ConvertTo-HtmlEncodedText $AdminSSPRStatus)</td></tr>
+    </table>
 
-- The script does not delete users, groups, or Conditional Access policies.
-- The '$GroupName' group must be manually excluded from all relevant Conditional Access policies.
-- Administrator SSPR can not be disabled only for the two breakglass accounts. If changed, it applies tenant-wide to administrators in administrator roles.
-- Temporary passwords for newly created users are not written to this report or the log.
+    <h2>Actions Performed</h2>
+    $(New-HtmlList -Items $actionItems)
 
-## Log file
+    <h2>Manual Follow-Up Tasks</h2>
+    $(New-HtmlList -Items $manualSteps)
 
-$script:LogFile
+    <h2>Important Warnings</h2>
+    $(New-HtmlList -Items @(
+        'The script does not delete users, groups, or Conditional Access policies.',
+        "The '$GroupName' group must be manually excluded from all relevant Conditional Access policies.",
+        'Administrator SSPR can not be disabled only for the two breakglass accounts. If changed, it applies tenant-wide to administrators in administrator roles.',
+        'Generated passwords are not written to the normal log file.'
+    ))
+
+    <h2>Log File</h2>
+    <p>$(ConvertTo-HtmlEncodedText $script:LogFile)</p>
+</body>
+</html>
 "@
 
     Set-Content -Path $reportPath -Value $content -Encoding UTF8
-    Add-RunResult "Generated report: $reportPath"
+    Add-RunResult "Generated confidential HTML report: $reportPath"
+    Start-Process -FilePath $reportPath
     return $reportPath
 }
 
@@ -566,6 +822,7 @@ function Invoke-BreakglassSetup {
         [bool] $AddAccountsToGroup,
         [bool] $DisableAdminSspr,
         [bool] $GenerateDocumentation,
+        [string] $OutputDirectory,
         [bool] $DryRun
     )
 
@@ -598,34 +855,29 @@ function Invoke-BreakglassSetup {
         Disable-AdminSSPR
     }
 
-    $reportPath = $null
-    if ($GenerateDocumentation) {
-        $reportPath = Generate-Report `
-            -TenantName $TenantName `
-            -OnMicrosoftDomain $onMicrosoftDomain `
-            -RequestedUpns @($BreakglassUpn1, $BreakglassUpn2) `
-            -GroupName $GroupName
+    $users = @($user1, $user2) | Where-Object { $_ }
+    $groupMembershipStatus = @(Test-BreakglassGroupMembership -Group $group -Users $users)
+    $globalAdministratorStatus = @(Test-GlobalAdministratorMembership -Users $users)
+    $adminSSPRStatus = Get-AdminSSPRStatus
+
+    if (-not $GenerateDocumentation) {
+        Add-RunResult 'Confidential documentation generation is required and was generated even though the GUI option was cleared.'
     }
 
-    if ($script:CreatedUserSecrets.Count -gt 0) {
-        $secretText = ($script:CreatedUserSecrets | ForEach-Object {
-            "{0}`r`nTemporary password: {1}`r`n" -f $_.UserPrincipalName, $_.TemporaryPassword
-        }) -join "`r`n"
-
-        Invoke-UiThread -ScriptBlock {
-            [System.Windows.MessageBox]::Show(
-                "Temporary passwords for newly created accounts are shown once and are not stored in logs or reports.`r`n`r`n$secretText",
-                "$($script:AppName) - temporary passwords",
-                'OK',
-                'Information'
-            ) | Out-Null
-            return $null
-        } | Out-Null
-    }
+    $reportPath = Generate-Report `
+        -TenantName $TenantName `
+        -OnMicrosoftDomain $onMicrosoftDomain `
+        -Users $users `
+        -Group $group `
+        -GroupName $GroupName `
+        -OutputDirectory $OutputDirectory `
+        -GroupMembershipStatus $groupMembershipStatus `
+        -GlobalAdministratorStatus $globalAdministratorStatus `
+        -AdminSSPRStatus $adminSSPRStatus
 
     $summary = "Completed. Log: $script:LogFile"
     if ($reportPath) {
-        $summary += "`r`nReport: $reportPath"
+        $summary += "`r`nConfidential report: $reportPath"
     }
 
     Invoke-UiThread -ScriptBlock {
@@ -639,6 +891,7 @@ function Start-BreakglassWpfGui {
     param()
 
     Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase
+    Add-Type -AssemblyName System.Windows.Forms
 
     [xml] $xaml = @'
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
@@ -678,6 +931,7 @@ function Start-BreakglassWpfGui {
                     <RowDefinition Height="Auto"/>
                     <RowDefinition Height="Auto"/>
                     <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
                 </Grid.RowDefinitions>
 
                 <TextBlock Grid.Row="0" Grid.Column="0" Text="Tenant name / domain" VerticalAlignment="Center" Margin="0,0,10,10"/>
@@ -692,11 +946,15 @@ function Start-BreakglassWpfGui {
                 <TextBlock Grid.Row="3" Grid.Column="0" Text="Security group name" VerticalAlignment="Center" Margin="0,0,10,14"/>
                 <TextBox x:Name="GroupNameTextBox" Grid.Row="3" Grid.Column="1" Grid.ColumnSpan="3" Height="28" Text="CA-BreakGlassExclude" Margin="0,0,0,14"/>
 
-                <CheckBox x:Name="CreateAccountsCheckBox" Grid.Row="4" Grid.Column="0" Grid.ColumnSpan="2" Content="Create accounts if missing" IsChecked="True" Margin="0,0,0,10"/>
-                <CheckBox x:Name="CreateGroupCheckBox" Grid.Row="4" Grid.Column="2" Grid.ColumnSpan="2" Content="Create group if missing" IsChecked="True" Margin="0,0,0,10"/>
-                <CheckBox x:Name="AddToGroupCheckBox" Grid.Row="5" Grid.Column="0" Grid.ColumnSpan="2" Content="Add accounts to group" IsChecked="True" Margin="0,0,0,0"/>
-                <CheckBox x:Name="DisableAdminSsprCheckBox" Grid.Row="5" Grid.Column="2" Content="Disable admin SSPR" Margin="0,0,0,0"/>
-                <CheckBox x:Name="GenerateDocumentationCheckBox" Grid.Row="5" Grid.Column="3" Content="Generate documentation / summary" IsChecked="True" Margin="0,0,0,0"/>
+                <TextBlock Grid.Row="4" Grid.Column="0" Text="Output folder" VerticalAlignment="Center" Margin="0,0,10,14"/>
+                <TextBox x:Name="OutputFolderTextBox" Grid.Row="4" Grid.Column="1" Grid.ColumnSpan="2" Height="28" Margin="0,0,8,14"/>
+                <Button x:Name="BrowseOutputFolderButton" Grid.Row="4" Grid.Column="3" Content="Browse..." Height="28" Width="90" HorizontalAlignment="Left" Margin="0,0,0,14"/>
+
+                <CheckBox x:Name="CreateAccountsCheckBox" Grid.Row="5" Grid.Column="0" Grid.ColumnSpan="2" Content="Create accounts if missing" IsChecked="True" Margin="0,0,0,10"/>
+                <CheckBox x:Name="CreateGroupCheckBox" Grid.Row="5" Grid.Column="2" Grid.ColumnSpan="2" Content="Create group if missing" IsChecked="True" Margin="0,0,0,10"/>
+                <CheckBox x:Name="AddToGroupCheckBox" Grid.Row="6" Grid.Column="0" Grid.ColumnSpan="2" Content="Add accounts to group" IsChecked="True" Margin="0,0,0,0"/>
+                <CheckBox x:Name="DisableAdminSsprCheckBox" Grid.Row="6" Grid.Column="2" Content="Disable admin SSPR" Margin="0,0,0,0"/>
+                <CheckBox x:Name="GenerateDocumentationCheckBox" Grid.Row="6" Grid.Column="3" Content="Generate confidential documentation" IsChecked="True" Margin="0,0,0,0"/>
             </Grid>
         </Border>
 
@@ -731,6 +989,8 @@ function Start-BreakglassWpfGui {
     $breakglassUpn1TextBox = $script:MainWindow.FindName('BreakglassUpn1TextBox')
     $breakglassUpn2TextBox = $script:MainWindow.FindName('BreakglassUpn2TextBox')
     $groupNameTextBox = $script:MainWindow.FindName('GroupNameTextBox')
+    $outputFolderTextBox = $script:MainWindow.FindName('OutputFolderTextBox')
+    $browseOutputFolderButton = $script:MainWindow.FindName('BrowseOutputFolderButton')
     $createAccountsCheckBox = $script:MainWindow.FindName('CreateAccountsCheckBox')
     $createGroupCheckBox = $script:MainWindow.FindName('CreateGroupCheckBox')
     $addToGroupCheckBox = $script:MainWindow.FindName('AddToGroupCheckBox')
@@ -742,8 +1002,28 @@ function Start-BreakglassWpfGui {
     $openLogButton = $script:MainWindow.FindName('OpenLogButton')
     $exitButton = $script:MainWindow.FindName('ExitButton')
     $script:LogTextBox = $script:MainWindow.FindName('LogTextBox')
+    $outputFolderTextBox.Text = $script:ReportDirectory
 
     Write-Log -Message "GUI started. Log file: $script:LogFile"
+
+    $browseOutputFolderButton.Add_Click({
+        $folderDialog = New-Object System.Windows.Forms.FolderBrowserDialog
+        $folderDialog.Description = 'Select folder for the confidential breakglass report'
+        $folderDialog.ShowNewFolderButton = $true
+
+        if (-not [string]::IsNullOrWhiteSpace($outputFolderTextBox.Text) -and (Test-Path -Path $outputFolderTextBox.Text)) {
+            $folderDialog.SelectedPath = $outputFolderTextBox.Text
+        }
+        else {
+            $folderDialog.SelectedPath = $script:ReportDirectory
+        }
+
+        $result = $folderDialog.ShowDialog()
+        if ($result -eq [System.Windows.Forms.DialogResult]::OK) {
+            $outputFolderTextBox.Text = $folderDialog.SelectedPath
+            Write-Log -Message "Output folder selected: $($folderDialog.SelectedPath)"
+        }
+    })
 
     $runButton.Add_Click({
         if ([string]::IsNullOrWhiteSpace($tenantNameTextBox.Text) -or
@@ -764,6 +1044,7 @@ function Start-BreakglassWpfGui {
             AddAccountsToGroup       = [bool] $addToGroupCheckBox.IsChecked
             DisableAdminSspr         = [bool] $disableAdminSsprCheckBox.IsChecked
             GenerateDocumentation    = [bool] $generateDocumentationCheckBox.IsChecked
+            OutputDirectory          = $outputFolderTextBox.Text.Trim()
             DryRun                   = [bool] $dryRunCheckBox.IsChecked
         }
 
@@ -776,6 +1057,7 @@ function Start-BreakglassWpfGui {
         $worker.add_DoWork({
             param($sender, $eventArgs)
 
+            [System.Management.Automation.Runspaces.Runspace]::DefaultRunspace = $script:MainRunspace
             $config = [hashtable] $eventArgs.Argument
             Invoke-BreakglassSetup @config
         })
