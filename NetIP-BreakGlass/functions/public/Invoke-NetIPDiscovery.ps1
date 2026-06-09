@@ -46,11 +46,11 @@ function Invoke-NetIPDiscovery {
             "Conditional Access policies: $($policies.Count)",
             "Policies der allerede ekskluderer gruppen: $($already.Count)"
         )
-        $sync.Form.Dispatcher.BeginInvoke([action]{
+        $sync.Form.Dispatcher.Invoke([action]{
             $sync.WPFDiscoverySummary.Text = $summary
             $sync.WPFDiscoveryList.Text = ($lines -join [Environment]::NewLine)
             Invoke-NetIPWPFButton -Name 'WPFStepDiscovery'
-        }) | Out-Null
+        })
         Write-NetIPStatus -Message 'Discovery er færdig.'
     }
 }

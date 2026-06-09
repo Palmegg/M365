@@ -41,10 +41,10 @@ $($plan.Warnings -join [Environment]::NewLine)
 JSON:
 $($plan | ConvertTo-Json -Depth 30)
 "@
-        $sync.Form.Dispatcher.BeginInvoke([action]{
+        $sync.Form.Dispatcher.Invoke([action]{
             $sync.WPFPlanText.Text = $text
             Invoke-NetIPWPFButton -Name 'WPFStepPlan'
-        }) | Out-Null
+        })
         Write-NetIPStatus -Message 'Plan er genereret.'
     }
 }

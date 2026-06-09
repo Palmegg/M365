@@ -426,7 +426,9 @@ function Invoke-NetIPRunspace {
         return
     }
     $sync.UI.ProcessRunning = $true
-    if ($sync.WPFProgressBar) { $sync.WPFProgressBar.IsIndeterminate = $true }
+    if ($sync.WPFProgressBar) {
+        $sync.WPFProgressBar.Dispatcher.Invoke([action]{ $sync.WPFProgressBar.IsIndeterminate = $true })
+    }
     $ps = [PowerShell]::Create()
     $ps.RunspacePool = $sync.Runspace
     [void]$ps.AddScript({
@@ -439,19 +441,19 @@ function Invoke-NetIPRunspace {
             Write-NetIPLog -Level ERROR -Message (ConvertTo-NetIPRedactedError -ErrorRecord $_)
             $sync.State.Errors += $friendly
             if ($sync.Form) {
-                $sync.Form.Dispatcher.BeginInvoke([action]{
+                $sync.Form.Dispatcher.Invoke([action]{
                     $sync.WPFStatusText.Text = $friendly
                     [System.Windows.MessageBox]::Show($friendly, $sync.App.Name, 'OK', 'Error') | Out-Null
-                }) | Out-Null
+                })
             }
         }
         finally {
             $sync.UI.ProcessRunning = $false
             if ($sync.Form) {
-                $sync.Form.Dispatcher.BeginInvoke([action]{
+                $sync.Form.Dispatcher.Invoke([action]{
                     $sync.WPFProgressBar.IsIndeterminate = $false
                     Update-NetIPUIState
-                }) | Out-Null
+                })
             }
         }
     }).AddArgument($ScriptBlock).AddArgument($ArgumentList) | Out-Null
@@ -823,12 +825,17 @@ function Write-NetIPLog {
         Add-Content -LiteralPath $logFile -Value $line -Encoding UTF8
     }
     if ($sync.WPFExecutionLog) {
-        $callback = [System.Action[string]]{
-            param($message)
+        $appendLog = {
             $sync.WPFExecutionLog.AppendText($message + [Environment]::NewLine)
             $sync.WPFExecutionLog.ScrollToEnd()
         }
-        $sync.WPFExecutionLog.Dispatcher.BeginInvoke($callback, $line) | Out-Null
+        $message = $line
+        if ($sync.WPFExecutionLog.Dispatcher.CheckAccess()) {
+            & $appendLog
+        }
+        else {
+            $sync.WPFExecutionLog.Dispatcher.Invoke([System.Action]$appendLog)
+        }
     }
 }
 
@@ -841,12 +848,18 @@ function Write-NetIPStatus {
 
     Write-NetIPLog -Message $Message
     if ($sync.WPFStatusText) {
-        $callback = [System.Action[string,bool]]{
-            param($statusMessage, $isBusy)
+        $statusMessage = $Message
+        $isBusy = [bool] $Busy
+        $updateStatus = {
             $sync.WPFStatusText.Text = $statusMessage
             $sync.WPFProgressBar.IsIndeterminate = $isBusy
         }
-        $sync.WPFStatusText.Dispatcher.BeginInvoke($callback, $Message, [bool]$Busy) | Out-Null
+        if ($sync.WPFStatusText.Dispatcher.CheckAccess()) {
+            & $updateStatus
+        }
+        else {
+            $sync.WPFStatusText.Dispatcher.Invoke([System.Action]$updateStatus)
+        }
     }
 }
 
@@ -1009,11 +1022,11 @@ Vil du fortsætte?
             $sync.State.CreatedPasswords = $createdPasswords
             Show-NetIPCreatedPasswordsOnce -CreatedPasswords $createdPasswords
         }
-        $sync.Form.Dispatcher.BeginInvoke([action]{
+        $sync.Form.Dispatcher.Invoke([action]{
             $sync.WPFOutputFolder.Text = $sync.State.OutputFolder
             $sync.WPFHandoffPath.Text = $sync.State.HandoffPath
             Invoke-NetIPWPFButton -Name 'WPFStepHandoff'
-        }) | Out-Null
+        })
         Write-NetIPStatus -Message 'Konfiguration er anvendt, og handoff er genereret.'
     }
 }
@@ -1061,10 +1074,10 @@ $($plan.Warnings -join [Environment]::NewLine)
 JSON:
 $($plan | ConvertTo-Json -Depth 30)
 "@
-        $sync.Form.Dispatcher.BeginInvoke([action]{
+        $sync.Form.Dispatcher.Invoke([action]{
             $sync.WPFPlanText.Text = $text
             Invoke-NetIPWPFButton -Name 'WPFStepPlan'
-        }) | Out-Null
+        })
         Write-NetIPStatus -Message 'Plan er genereret.'
     }
 }
@@ -1153,11 +1166,11 @@ function Invoke-NetIPDiscovery {
             "Conditional Access policies: $($policies.Count)",
             "Policies der allerede ekskluderer gruppen: $($already.Count)"
         )
-        $sync.Form.Dispatcher.BeginInvoke([action]{
+        $sync.Form.Dispatcher.Invoke([action]{
             $sync.WPFDiscoverySummary.Text = $summary
             $sync.WPFDiscoveryList.Text = ($lines -join [Environment]::NewLine)
             Invoke-NetIPWPFButton -Name 'WPFStepDiscovery'
-        }) | Out-Null
+        })
         Write-NetIPStatus -Message 'Discovery er færdig.'
     }
 }

@@ -13,11 +13,16 @@ function Write-NetIPLog {
         Add-Content -LiteralPath $logFile -Value $line -Encoding UTF8
     }
     if ($sync.WPFExecutionLog) {
-        $callback = [System.Action[string]]{
-            param($message)
+        $appendLog = {
             $sync.WPFExecutionLog.AppendText($message + [Environment]::NewLine)
             $sync.WPFExecutionLog.ScrollToEnd()
         }
-        $sync.WPFExecutionLog.Dispatcher.BeginInvoke($callback, $line) | Out-Null
+        $message = $line
+        if ($sync.WPFExecutionLog.Dispatcher.CheckAccess()) {
+            & $appendLog
+        }
+        else {
+            $sync.WPFExecutionLog.Dispatcher.Invoke([System.Action]$appendLog)
+        }
     }
 }

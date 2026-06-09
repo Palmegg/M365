@@ -7,11 +7,17 @@ function Write-NetIPStatus {
 
     Write-NetIPLog -Message $Message
     if ($sync.WPFStatusText) {
-        $callback = [System.Action[string,bool]]{
-            param($statusMessage, $isBusy)
+        $statusMessage = $Message
+        $isBusy = [bool] $Busy
+        $updateStatus = {
             $sync.WPFStatusText.Text = $statusMessage
             $sync.WPFProgressBar.IsIndeterminate = $isBusy
         }
-        $sync.WPFStatusText.Dispatcher.BeginInvoke($callback, $Message, [bool]$Busy) | Out-Null
+        if ($sync.WPFStatusText.Dispatcher.CheckAccess()) {
+            & $updateStatus
+        }
+        else {
+            $sync.WPFStatusText.Dispatcher.Invoke([System.Action]$updateStatus)
+        }
     }
 }

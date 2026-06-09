@@ -119,11 +119,11 @@ Vil du fortsætte?
             $sync.State.CreatedPasswords = $createdPasswords
             Show-NetIPCreatedPasswordsOnce -CreatedPasswords $createdPasswords
         }
-        $sync.Form.Dispatcher.BeginInvoke([action]{
+        $sync.Form.Dispatcher.Invoke([action]{
             $sync.WPFOutputFolder.Text = $sync.State.OutputFolder
             $sync.WPFHandoffPath.Text = $sync.State.HandoffPath
             Invoke-NetIPWPFButton -Name 'WPFStepHandoff'
-        }) | Out-Null
+        })
         Write-NetIPStatus -Message 'Konfiguration er anvendt, og handoff er genereret.'
     }
 }
