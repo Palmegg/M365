@@ -25,7 +25,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 $script:AppName = 'NetIP Entra Break Glass Configurator'
-$script:AppVersion = '1.0.14'
+$script:AppVersion = '1.0.15'
 $script:ProjectRoot = Split-Path -Parent $PSCommandPath
 if ([string]::IsNullOrWhiteSpace($script:ProjectRoot)) {
     $script:ProjectRoot = (Get-Location).Path
@@ -1198,6 +1198,11 @@ function Get-ObjectPropertyValue {
         if ($InputObject.Contains($Name)) {
             return $InputObject[$Name]
         }
+        foreach ($key in $InputObject.Keys) {
+            if ([string] $key -ieq $Name) {
+                return $InputObject[$key]
+            }
+        }
         return $null
     }
 
@@ -1206,7 +1211,63 @@ function Get-ObjectPropertyValue {
         return $property.Value
     }
 
+    foreach ($candidateProperty in $InputObject.PSObject.Properties) {
+        if ($candidateProperty.Name -ieq $Name) {
+            return $candidateProperty.Value
+        }
+    }
+
+    foreach ($bagName in @('AdditionalProperties', 'additionalProperties')) {
+        $bagProperty = $InputObject.PSObject.Properties[$bagName]
+        if (-not $bagProperty -or -not $bagProperty.Value) {
+            continue
+        }
+
+        $bag = $bagProperty.Value
+        if ($bag -is [System.Collections.IDictionary]) {
+            if ($bag.Contains($Name)) {
+                return $bag[$Name]
+            }
+            foreach ($key in $bag.Keys) {
+                if ([string] $key -ieq $Name) {
+                    return $bag[$key]
+                }
+            }
+        }
+        else {
+            $nestedProperty = $bag.PSObject.Properties[$Name]
+            if ($nestedProperty) {
+                return $nestedProperty.Value
+            }
+            foreach ($candidateProperty in $bag.PSObject.Properties) {
+                if ($candidateProperty.Name -ieq $Name) {
+                    return $candidateProperty.Value
+                }
+            }
+        }
+    }
+
     return $null
+}
+
+function Format-NullableBoolean {
+    [CmdletBinding()]
+    param([AllowNull()] $Value)
+
+    if ($null -eq $Value -or [string]::IsNullOrWhiteSpace([string] $Value)) {
+        return 'Ukendt'
+    }
+
+    if ($Value -is [bool]) {
+        return [string] $Value
+    }
+
+    $text = ([string] $Value).Trim()
+    if ($text -match '^(?i:true|false)$') {
+        return $text.Substring(0,1).ToUpperInvariant() + $text.Substring(1).ToLowerInvariant()
+    }
+
+    return $text
 }
 
 function Get-OnMicrosoftDomain {
@@ -1631,6 +1692,20 @@ function Get-DirectoryObjectSummary {
     }
 }
 
+function Get-DirectoryUserSummary {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string] $ObjectId)
+
+    if ($script:State.Mock) { return $null }
+    try {
+        return Invoke-GraphRequestSafe -Method GET -Uri ("https://graph.microsoft.com/v1.0/users/{0}?`$select=id,displayName,userPrincipalName,accountEnabled" -f [uri]::EscapeDataString($ObjectId)) -SuppressErrorLog
+    }
+    catch {
+        Write-AppLog -Level WARN -Message "Kunne ikke læse user object $ObjectId under discovery: $(ConvertTo-RedactedError $_)"
+        return $null
+    }
+}
+
 function Add-DiscoveryCandidate {
     [CmdletBinding()]
     param(
@@ -1642,6 +1717,7 @@ function Add-DiscoveryCandidate {
         [AllowNull()][string] $UserPrincipalName,
         [AllowNull()][string] $ObjectId,
         [AllowNull()][string] $Role,
+        [AllowNull()][string] $AccountEnabled,
         [AllowNull()][string] $Notes
     )
 
@@ -1658,6 +1734,7 @@ function Add-DiscoveryCandidate {
         UserPrincipalName = $UserPrincipalName
         ObjectId          = $ObjectId
         Role              = $Role
+        AccountEnabled    = $AccountEnabled
         Notes             = $Notes
     }) | Out-Null
 }
@@ -1669,7 +1746,7 @@ function Find-ExistingEmergencyAccessCandidates {
     $candidates = New-Object System.Collections.Generic.List[object]
     $seen = @{}
     if ($script:State.Mock) {
-        Add-DiscoveryCandidate -Candidates $candidates -Seen $seen -Source 'Mock' -Type 'User' -DisplayName 'Emergency Access 01' -UserPrincipalName 'svc_ea01@example.onmicrosoft.com' -ObjectId 'mock-user-1' -Role 'Global Administrator' -Notes 'Mock discovery candidate'
+        Add-DiscoveryCandidate -Candidates $candidates -Seen $seen -Source 'Mock' -Type 'User' -DisplayName 'Emergency Access 01' -UserPrincipalName 'svc_ea01@example.onmicrosoft.com' -ObjectId 'mock-user-1' -Role 'Global Administrator' -AccountEnabled 'True' -Notes 'Mock discovery candidate'
         return $candidates.ToArray()
     }
 
@@ -1696,8 +1773,8 @@ function Find-ExistingEmergencyAccessCandidates {
                             $memberId = [string] (Get-ObjectPropertyValue -InputObject $member -Name 'id')
                             $memberDisplayName = [string] (Get-ObjectPropertyValue -InputObject $member -Name 'displayName')
                             $memberUpn = [string] (Get-ObjectPropertyValue -InputObject $member -Name 'userPrincipalName')
-                            $memberAccountEnabled = Get-ObjectPropertyValue -InputObject $member -Name 'accountEnabled'
-                            Add-DiscoveryCandidate -Candidates $candidates -Seen $seen -Source "Member of GA group: $principalDisplayName" -Type 'User' -DisplayName $memberDisplayName -UserPrincipalName $memberUpn -ObjectId $memberId -Role 'Global Administrator via group' -Notes ('accountEnabled={0}' -f $memberAccountEnabled)
+                            $memberAccountEnabled = Format-NullableBoolean -Value (Get-ObjectPropertyValue -InputObject $member -Name 'accountEnabled')
+                            Add-DiscoveryCandidate -Candidates $candidates -Seen $seen -Source "Member of GA group: $principalDisplayName" -Type 'User' -DisplayName $memberDisplayName -UserPrincipalName $memberUpn -ObjectId $memberId -Role 'Global Administrator via group' -AccountEnabled $memberAccountEnabled -Notes ('accountEnabled={0}' -f $memberAccountEnabled)
                         }
                     }
                 }
@@ -1706,7 +1783,16 @@ function Find-ExistingEmergencyAccessCandidates {
                 }
             }
             elseif ($odataType -like '*user') {
-                Add-DiscoveryCandidate -Candidates $candidates -Seen $seen -Source 'Direct Global Administrator assignment' -Type 'User' -DisplayName $principalDisplayName -UserPrincipalName $principalUpn -ObjectId $principalId -Role 'Global Administrator' -Notes ('accountEnabled={0}' -f $principalAccountEnabled)
+                if ($null -eq $principalAccountEnabled -or [string]::IsNullOrWhiteSpace([string] $principalAccountEnabled)) {
+                    $userSummary = Get-DirectoryUserSummary -ObjectId $principalId
+                    if ($userSummary) {
+                        $principalDisplayName = [string] (Get-ObjectPropertyValue -InputObject $userSummary -Name 'displayName')
+                        $principalUpn = [string] (Get-ObjectPropertyValue -InputObject $userSummary -Name 'userPrincipalName')
+                        $principalAccountEnabled = Get-ObjectPropertyValue -InputObject $userSummary -Name 'accountEnabled'
+                    }
+                }
+                $principalAccountEnabled = Format-NullableBoolean -Value $principalAccountEnabled
+                Add-DiscoveryCandidate -Candidates $candidates -Seen $seen -Source 'Direct Global Administrator assignment' -Type 'User' -DisplayName $principalDisplayName -UserPrincipalName $principalUpn -ObjectId $principalId -Role 'Global Administrator' -AccountEnabled $principalAccountEnabled -Notes ('accountEnabled={0}' -f $principalAccountEnabled)
             }
             else {
                 Add-DiscoveryCandidate -Candidates $candidates -Seen $seen -Source 'Global Administrator assignment' -Type $odataType -DisplayName $principalDisplayName -UserPrincipalName '' -ObjectId $principalId -Role 'Global Administrator' -Notes 'Non-user principal'
@@ -1721,7 +1807,8 @@ function Find-ExistingEmergencyAccessCandidates {
                 $upn = ConvertTo-BreakGlassUpn -Prefix $prefix -OnMicrosoftDomain $targetDomain
                 $targetUser = Get-BreakGlassUser -UserPrincipalName $upn
                 if ($targetUser) {
-                    Add-DiscoveryCandidate -Candidates $candidates -Seen $seen -Source 'Configured target account exists' -Type 'User' -DisplayName ([string](Get-ObjectPropertyValue -InputObject $targetUser -Name 'displayName')) -UserPrincipalName ([string](Get-ObjectPropertyValue -InputObject $targetUser -Name 'userPrincipalName')) -ObjectId ([string](Get-ObjectPropertyValue -InputObject $targetUser -Name 'id')) -Role '' -Notes ('accountEnabled={0}' -f (Get-ObjectPropertyValue -InputObject $targetUser -Name 'accountEnabled'))
+                    $targetAccountEnabled = Format-NullableBoolean -Value (Get-ObjectPropertyValue -InputObject $targetUser -Name 'accountEnabled')
+                    Add-DiscoveryCandidate -Candidates $candidates -Seen $seen -Source 'Configured target account exists' -Type 'User' -DisplayName ([string](Get-ObjectPropertyValue -InputObject $targetUser -Name 'displayName')) -UserPrincipalName ([string](Get-ObjectPropertyValue -InputObject $targetUser -Name 'userPrincipalName')) -ObjectId ([string](Get-ObjectPropertyValue -InputObject $targetUser -Name 'id')) -Role '' -AccountEnabled $targetAccountEnabled -Notes ('accountEnabled={0}' -f $targetAccountEnabled)
                 }
             }
             catch {
@@ -1743,7 +1830,8 @@ function Find-ExistingEmergencyAccessCandidates {
             $filter = [uri]::EscapeDataString($filterText)
             $matches = @(Invoke-GraphGetAllPages -Uri "https://graph.microsoft.com/v1.0/users?`$filter=$filter&`$select=id,displayName,userPrincipalName,accountEnabled")
             foreach ($match in $matches) {
-                Add-DiscoveryCandidate -Candidates $candidates -Seen $seen -Source "Name/UPN pattern: $filterText" -Type 'User' -DisplayName ([string](Get-ObjectPropertyValue -InputObject $match -Name 'displayName')) -UserPrincipalName ([string](Get-ObjectPropertyValue -InputObject $match -Name 'userPrincipalName')) -ObjectId ([string](Get-ObjectPropertyValue -InputObject $match -Name 'id')) -Role '' -Notes ('accountEnabled={0}' -f (Get-ObjectPropertyValue -InputObject $match -Name 'accountEnabled'))
+                $matchedAccountEnabled = Format-NullableBoolean -Value (Get-ObjectPropertyValue -InputObject $match -Name 'accountEnabled')
+                Add-DiscoveryCandidate -Candidates $candidates -Seen $seen -Source "Name/UPN pattern: $filterText" -Type 'User' -DisplayName ([string](Get-ObjectPropertyValue -InputObject $match -Name 'displayName')) -UserPrincipalName ([string](Get-ObjectPropertyValue -InputObject $match -Name 'userPrincipalName')) -ObjectId ([string](Get-ObjectPropertyValue -InputObject $match -Name 'id')) -Role '' -AccountEnabled $matchedAccountEnabled -Notes ('accountEnabled={0}' -f $matchedAccountEnabled)
             }
         }
         catch {
@@ -2657,7 +2745,7 @@ function Invoke-BreakGlassConfiguration {
             id                = [string] (Get-ObjectPropertyValue -InputObject $_ -Name 'id')
             userPrincipalName = [string] (Get-ObjectPropertyValue -InputObject $_ -Name 'userPrincipalName')
             displayName       = [string] (Get-ObjectPropertyValue -InputObject $_ -Name 'displayName')
-            accountEnabled    = Get-ObjectPropertyValue -InputObject $_ -Name 'accountEnabled'
+            accountEnabled    = Format-NullableBoolean -Value (Get-ObjectPropertyValue -InputObject $_ -Name 'accountEnabled')
         }
     })
     $result | Add-Member -MemberType NoteProperty -Name Users -Value ([object]$resultUsers)
@@ -2681,7 +2769,8 @@ function Invoke-BreakGlassConfiguration {
     $script:State['Result'] = $result
     New-JsonReport -Result $result -OutputFolder $output | Out-Null
     New-HtmlReport -Result $result -OutputFolder $output | Out-Null
-    Write-ExecutionStep -Status DONE -Message "Rapport genereret: $(Join-Path -Path $output -ChildPath 'report.html')"
+    New-HandoverHtmlDocument -Result $result -OutputFolder $output | Out-Null
+    Write-ExecutionStep -Status DONE -Message "Rapporter genereret: $(Join-Path -Path $output -ChildPath 'report.html') og $(Join-Path -Path $output -ChildPath 'handover.html')"
     Show-CreatedPasswordsOnce
     Write-ExecutionStep -Status DONE -Message ("Kørsel færdig i {0} mode" -f $(if ($apply) { 'Configuration' } else { 'Report only' }))
     Write-AppLog -Level PASS -Message 'Konfiguration/rapportering fuldført.'
@@ -2906,6 +2995,113 @@ function New-HtmlReport {
 "@
     Set-Content -Path $path -Value $content -Encoding UTF8
     Write-AppLog -Message "HTML rapport genereret: $path"
+    return $path
+}
+
+function New-HandoverHtmlDocument {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] $Result,
+        [Parameter(Mandatory)][string] $OutputFolder
+    )
+
+    $path = Join-Path -Path $OutputFolder -ChildPath 'handover.html'
+    $usersTable = New-HtmlTable -Items @($Result.Users | Select-Object displayName,userPrincipalName,accountEnabled,id)
+    $membershipTable = New-HtmlTable -Items @($Result.Membership)
+    $roleTable = New-HtmlTable -Items @($Result.RoleAssignments)
+    $rmauMembershipTable = New-HtmlTable -Items @($Result.RmauMembership)
+    $rmauAdminMembershipTable = New-HtmlTable -Items @($Result.RmauAdminMembership)
+    $rmauScopedRoleTable = New-HtmlTable -Items @($Result.RmauScopedRoleAssignments)
+    $caExclusionTable = New-HtmlTable -Items @($Result.ExistingCaExclusions)
+    $monitoringTable = New-HtmlTable -Items @($Result.Monitoring.Entries)
+    $fidoTable = New-HtmlTable -Items @($Result.Fido2 | Select-Object UserPrincipalName,HasFido2,Count)
+    $content = @"
+<!doctype html>
+<html lang="da">
+<head>
+  <meta charset="utf-8">
+  <title>CONFIDENTIAL - Break Glass Handover</title>
+  <style>
+    body { font-family: Segoe UI, Arial, sans-serif; margin: 32px; color: #111827; line-height: 1.45; }
+    .banner { background: #7f1d1d; color: #fff; padding: 14px 18px; font-size: 22px; font-weight: 700; letter-spacing: 1px; }
+    .note { border: 2px solid #b45309; background: #fffbeb; padding: 14px 18px; margin: 18px 0; }
+    h1 { margin-top: 22px; }
+    h2 { border-bottom: 1px solid #d1d5db; padding-bottom: 6px; margin-top: 28px; }
+    table { border-collapse: collapse; width: 100%; margin: 10px 0 18px 0; }
+    th, td { border: 1px solid #d1d5db; padding: 8px 10px; text-align: left; vertical-align: top; }
+    th { background: #f3f4f6; }
+    .muted { color: #4b5563; }
+  </style>
+</head>
+<body>
+  <div class="banner">CONFIDENTIAL - HANDOVER</div>
+  <h1>Break Glass handover</h1>
+  <div class="note"><strong>Vigtigt:</strong> Dette dokument er kun overlevering for de to konfigurerede Break Glass-konti. Det indeholder ikke midlertidige passwords. Credentials og FIDO2 keys skal opbevares efter godkendt nødprocedure.</div>
+  <h2>Tenant</h2>
+  <table>
+    <tr><th>Tenant ID</th><td>$(ConvertTo-HtmlEncoded $Result.TenantId)</td></tr>
+    <tr><th>Tenant navn</th><td>$(ConvertTo-HtmlEncoded $Result.TenantDisplayName)</td></tr>
+    <tr><th>onmicrosoft.com</th><td>$(ConvertTo-HtmlEncoded $Result.OnMicrosoftDomain)</td></tr>
+    <tr><th>Oprettet/kørt</th><td>$(ConvertTo-HtmlEncoded $Result.Timestamp)</td></tr>
+    <tr><th>Operator</th><td>$(ConvertTo-HtmlEncoded $Result.Operator)</td></tr>
+  </table>
+  <h2>Break Glass konti</h2>
+  $usersTable
+  <h2>Role-assignable Break Glass gruppe</h2>
+  <table>
+    <tr><th>DisplayName</th><td>$(ConvertTo-HtmlEncoded (Get-ReportProperty -Object $Result.Group -Name 'displayName'))</td></tr>
+    <tr><th>ID</th><td>$(ConvertTo-HtmlEncoded (Get-ReportProperty -Object $Result.Group -Name 'id'))</td></tr>
+    <tr><th>MailNickname</th><td>$(ConvertTo-HtmlEncoded (Get-ReportProperty -Object $Result.Group -Name 'mailNickname'))</td></tr>
+  </table>
+  <h2>Gruppemedlemskab</h2>
+  $membershipTable
+  <h2>Global Administrator assignment</h2>
+  $roleTable
+  <h2>RMAU/RBAU beskyttelse</h2>
+  <p class="muted">RMAU/RBAU-beskyttelsen beskytter Break Glass-konti og BG-gruppen. Kun medlemmer af RMAU admin-gruppen får scoped User Administrator og Groups Administrator rettigheder til at administrere de beskyttede objekter.</p>
+  <table>
+    <tr><th>RMAU</th><td>$(ConvertTo-HtmlEncoded (Get-ReportProperty -Object $Result.RMAU -Name 'displayName'))</td></tr>
+    <tr><th>RMAU ID</th><td>$(ConvertTo-HtmlEncoded (Get-ReportProperty -Object $Result.RMAU -Name 'id'))</td></tr>
+    <tr><th>RMAU admin-gruppe</th><td>$(ConvertTo-HtmlEncoded (Get-ReportProperty -Object $Result.RmauAdminGroup -Name 'displayName'))</td></tr>
+    <tr><th>RMAU admin-gruppe ID</th><td>$(ConvertTo-HtmlEncoded (Get-ReportProperty -Object $Result.RmauAdminGroup -Name 'id'))</td></tr>
+  </table>
+  <h2>RMAU medlemskab</h2>
+  $rmauMembershipTable
+  <h2>RMAU admin-medlemskab</h2>
+  $rmauAdminMembershipTable
+  <h2>Scoped RMAU administratorroller</h2>
+  $rmauScopedRoleTable
+  <h2>Authentication strength</h2>
+  <table>
+    <tr><th>DisplayName</th><td>$(ConvertTo-HtmlEncoded (Get-ReportProperty -Object $Result.AuthenticationStrength -Name 'displayName'))</td></tr>
+    <tr><th>ID</th><td>$(ConvertTo-HtmlEncoded (Get-ReportProperty -Object $Result.AuthenticationStrength -Name 'id'))</td></tr>
+  </table>
+  <h2>Conditional Access</h2>
+  <table>
+    <tr><th>Dedikeret policy</th><td>$(ConvertTo-HtmlEncoded (Get-ReportProperty -Object $Result.ConditionalAccess -Name 'displayName'))</td></tr>
+    <tr><th>Policy ID</th><td>$(ConvertTo-HtmlEncoded (Get-ReportProperty -Object $Result.ConditionalAccess -Name 'id'))</td></tr>
+    <tr><th>State</th><td>$(ConvertTo-HtmlEncoded (Get-ReportProperty -Object $Result.ConditionalAccess -Name 'state'))</td></tr>
+  </table>
+  <h2>Conditional Access exclusions</h2>
+  $caExclusionTable
+  <h2>FIDO2 status</h2>
+  $fidoTable
+  <h2>Azure Monitor / Log Analytics</h2>
+  $monitoringTable
+  <h2>Manuelle overleveringspunkter</h2>
+  <ul>
+    <li>Registrer en separat FIDO2/FIDO key for hver Break Glass-konto.</li>
+    <li>Flyt credentials til godkendt password manager eller fysisk nødprocedure.</li>
+    <li>Opbevar FIDO2 keys fysisk adskilt og sikkert.</li>
+    <li>Bekræft at sign-in og object-change alerting virker.</li>
+    <li>Test kontiene periodisk og dokumenter testdato.</li>
+    <li>Brug aldrig kontiene til daglig administration.</li>
+  </ul>
+</body>
+</html>
+"@
+    Set-Content -Path $path -Value $content -Encoding UTF8
+    Write-AppLog -Message "Handover dokument genereret: $path"
     return $path
 }
 
@@ -3252,6 +3448,37 @@ function Resolve-ReportPathFromUi {
         Select-Object -First 1
     if ($latestReport) {
         return $latestReport.FullName
+    }
+
+    return ''
+}
+
+function Resolve-HandoverPathFromUi {
+    [CmdletBinding()]
+    param()
+
+    $candidatePaths = New-Object System.Collections.Generic.List[string]
+    if ($script:Ui.ContainsKey('HandoverPathText') -and $script:Ui.HandoverPathText -and -not [string]::IsNullOrWhiteSpace($script:Ui.HandoverPathText.Text)) {
+        $candidatePaths.Add($script:Ui.HandoverPathText.Text.Trim()) | Out-Null
+    }
+    if (-not [string]::IsNullOrWhiteSpace($script:SessionOutputFolder)) {
+        $candidatePaths.Add((Join-Path -Path $script:SessionOutputFolder -ChildPath 'handover.html')) | Out-Null
+    }
+    if ($script:State.Contains('OutputFolder') -and -not [string]::IsNullOrWhiteSpace([string] $script:State.OutputFolder)) {
+        $candidatePaths.Add((Join-Path -Path ([string] $script:State.OutputFolder) -ChildPath 'handover.html')) | Out-Null
+    }
+
+    foreach ($path in @($candidatePaths.ToArray() | Select-Object -Unique)) {
+        if (-not [string]::IsNullOrWhiteSpace($path) -and (Test-Path -LiteralPath $path -PathType Leaf)) {
+            return $path
+        }
+    }
+
+    $latestHandover = Get-ChildItem -LiteralPath $script:DefaultOutputRoot -Filter 'handover.html' -File -Recurse -ErrorAction SilentlyContinue |
+        Sort-Object LastWriteTime -Descending |
+        Select-Object -First 1
+    if ($latestHandover) {
+        return $latestHandover.FullName
     }
 
     return ''
@@ -4119,8 +4346,11 @@ function Start-BreakGlassWizard {
                     <TextBox x:Name="OutputFolderText" IsReadOnly="True" Margin="0,4,0,10"/>
                     <TextBlock Text="Rapportfil:" Margin="0,6,0,0"/>
                     <TextBox x:Name="ReportPathText" IsReadOnly="True" Margin="0,4,0,10"/>
+                    <TextBlock Text="Handover-fil:" Margin="0,6,0,0"/>
+                    <TextBox x:Name="HandoverPathText" IsReadOnly="True" Margin="0,4,0,10"/>
                     <StackPanel Orientation="Horizontal">
                         <Button x:Name="OpenReportButton" Content="Åbn rapport" Height="32" Width="130" Margin="0,0,8,0"/>
+                        <Button x:Name="OpenHandoverButton" Content="Åbn handover" Height="32" Width="130" Margin="0,0,8,0"/>
                         <Button x:Name="OpenOutputFolderButton" Content="Åbn outputmappe" Height="32" Width="150"/>
                     </StackPanel>
                     <TextBlock TextWrapping="Wrap" Margin="0,16,0,0" Foreground="#92400E" Text="Reminder: registrer én separat FIDO2 key pr. konto, opbevar keys fysisk adskilt og sikkert, ekskluder ikke break-glass-kontiene fra overvågning, og test kontiene periodisk."/>
@@ -4157,7 +4387,7 @@ function Start-BreakGlassWizard {
         'RunDiscoveryButton','DiscoverySummary','DiscoveryList','UserPrefix1','UserPrefix2','DisplayName1','DisplayName2','GroupDisplayName','RmauDisplayName','RmauAdminGroupDisplayName','RmauAdminPickerPanel','AddRmauAdminButton','RmauAdminPickerStatus','AuthStrengthName','CaPolicyName','CaState',
         'ExcludeExistingCa','AaguidInputPanel','AddAaguidButton','ModeStatusText','DisableMonitoring','UseExistingWorkspace','SubscriptionIdLabel','SubscriptionId','ResourceGroupName','WorkspaceNameLabel','WorkspaceName','AzureRegion','DiagnosticSettingName',
         'ActionGroupName','AlertEmails','CreateSignInAlert','CreateAuditAlert','BuildPlanButton','ExportPlanButton','ApplyButton','PlanText','ProgressBar','ExecutionStepList','ExecutionLog','OpenSecurityInfoButton',
-        'ValidateFidoButton','FidoResults','RunValidationButton','ValidationList','OutputFolderText','ReportPathText','OpenReportButton','OpenOutputFolderButton','BackButton','NextButton','CloseButton','BackgroundStatus','StatusProgress','FooterStatus','WizardTabs'
+        'ValidateFidoButton','FidoResults','RunValidationButton','ValidationList','OutputFolderText','ReportPathText','HandoverPathText','OpenReportButton','OpenHandoverButton','OpenOutputFolderButton','BackButton','NextButton','CloseButton','BackgroundStatus','StatusProgress','FooterStatus','WizardTabs'
     )) {
     $script:Ui[$name] = $script:MainWindow.FindName($name)
     }
@@ -4402,6 +4632,18 @@ function Start-BreakGlassWizard {
         }
     })
 
+    $script:Ui.OpenHandoverButton.Add_Click({
+        $handoverPath = Resolve-HandoverPathFromUi
+        if ($handoverPath -and (Test-Path -LiteralPath $handoverPath -PathType Leaf)) {
+            $script:Ui.HandoverPathText.Text = $handoverPath
+            $script:Ui.OutputFolderText.Text = Split-Path -Parent $handoverPath
+            Start-Process $handoverPath
+        }
+        else {
+            Show-AppMessage -Message 'Handover-dokumentet er ikke genereret endnu.' -Icon 'Information' | Out-Null
+        }
+    })
+
     $script:Ui.CloseButton.Add_Click({ $script:MainWindow.Close() })
 
     $script:LogPollTimer = New-Object System.Windows.Threading.DispatcherTimer
@@ -4536,7 +4778,9 @@ function Start-BreakGlassWizard {
             Set-UiBusy -Busy $false
             $script:Ui.OutputFolderText.Text = $script:SessionOutputFolder
             $reportPath = if ($script:SessionOutputFolder) { Join-Path -Path $script:SessionOutputFolder -ChildPath 'report.html' } else { '' }
+            $handoverPath = if ($script:SessionOutputFolder) { Join-Path -Path $script:SessionOutputFolder -ChildPath 'handover.html' } else { '' }
             $script:Ui.ReportPathText.Text = $reportPath
+            $script:Ui.HandoverPathText.Text = $handoverPath
             if ($exitCode -eq 0) {
                 Set-WizardMaxStep -Step 8
                 Set-WizardStep -Step 8
@@ -4544,8 +4788,12 @@ function Start-BreakGlassWizard {
                 if ($resolvedReportPath -and (Test-Path -LiteralPath $resolvedReportPath -PathType Leaf)) {
                     $script:Ui.ReportPathText.Text = $resolvedReportPath
                     $script:Ui.OutputFolderText.Text = Split-Path -Parent $resolvedReportPath
+                    $resolvedHandoverPath = Resolve-HandoverPathFromUi
+                    if ($resolvedHandoverPath -and (Test-Path -LiteralPath $resolvedHandoverPath -PathType Leaf)) {
+                        $script:Ui.HandoverPathText.Text = $resolvedHandoverPath
+                    }
                     Start-Process $resolvedReportPath
-                    Set-UiStatus -Message 'Worker færdig. Rapporten er klar, og FIDO2-reminderen står i sidste trin.'
+                    Set-UiStatus -Message 'Worker færdig. Rapport og handover er klar, og FIDO2-reminderen står i sidste trin.'
                 }
                 else {
                     Set-UiStatus -Message 'Worker færdig, men report.html blev ikke fundet. Se live-loggen for detaljer.'
