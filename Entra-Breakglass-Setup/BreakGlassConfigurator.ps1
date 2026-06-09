@@ -25,7 +25,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 $script:AppName = 'NetIP Entra Break Glass Configurator'
-$script:AppVersion = '1.0.2'
+$script:AppVersion = '1.0.3'
 $script:ProjectRoot = Split-Path -Parent $PSCommandPath
 if ([string]::IsNullOrWhiteSpace($script:ProjectRoot)) {
     $script:ProjectRoot = (Get-Location).Path
@@ -3297,11 +3297,6 @@ function Move-WizardNext {
         1 {
             if (-not $script:State.GraphConnected) {
                 Show-AppMessage -Message 'Forbind til Microsoft Graph før du fortsætter.' -Icon 'Warning' | Out-Null
-                return
-            }
-            if (-not $script:State.AzureConnected -and -not [bool] $script:Ui.DisableMonitoring.IsChecked) {
-                Show-AppMessage -Message 'Azure Monitor/Log Analytics er slået til. Forbind til Azure og vælg en subscription før du fortsætter, eller slå monitoring fra i konfigurationen.' -Icon 'Warning' | Out-Null
-                Set-UiStatus -Message 'Azure mangler. Connect til Azure før wizard kan fortsætte med monitoring slået til.'
                 return
             }
             Invoke-PrecheckFromUi | Out-Null
