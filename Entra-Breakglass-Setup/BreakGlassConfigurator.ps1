@@ -25,7 +25,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 $script:AppName = 'NetIP Entra Break Glass Configurator'
-$script:AppVersion = '1.0.10'
+$script:AppVersion = '1.0.11'
 $script:ProjectRoot = Split-Path -Parent $PSCommandPath
 if ([string]::IsNullOrWhiteSpace($script:ProjectRoot)) {
     $script:ProjectRoot = (Get-Location).Path
@@ -2898,12 +2898,19 @@ function New-AaguidInputRow {
     $removeButton.Content = 'Fjern'
     $removeButton.Width = 70
     $removeButton.Height = 26
+    $removeButton.Tag = $row
     $removeButton.Add_Click({
+        param($sender, $eventArgs)
+        $targetRow = $sender.Tag
         if ($script:Ui.AaguidInputPanel.Children.Count -gt 1) {
-            $script:Ui.AaguidInputPanel.Children.Remove($row)
+            $script:Ui.AaguidInputPanel.Children.Remove($targetRow)
         }
         else {
-            $textBox.Text = ''
+            foreach ($child in $targetRow.Children) {
+                if ($child.Tag -eq 'AaguidInput') {
+                    $child.Text = ''
+                }
+            }
         }
     })
     $row.Children.Add($removeButton) | Out-Null
@@ -2959,13 +2966,20 @@ function New-RmauAdminComboRow {
     $removeButton.Content = 'Fjern'
     $removeButton.Width = 70
     $removeButton.Height = 26
+    $removeButton.Tag = $row
     $removeButton.Add_Click({
+        param($sender, $eventArgs)
+        $targetRow = $sender.Tag
         if ($script:Ui.RmauAdminPickerPanel.Children.Count -gt 1) {
-            $script:Ui.RmauAdminPickerPanel.Children.Remove($row)
+            $script:Ui.RmauAdminPickerPanel.Children.Remove($targetRow)
             Update-RmauAdminPickerOptions
         }
         else {
-            $combo.SelectedIndex = -1
+            foreach ($child in $targetRow.Children) {
+                if ($child.Tag -eq 'RmauAdminCombo') {
+                    $child.SelectedIndex = -1
+                }
+            }
         }
     })
     $row.Children.Add($removeButton) | Out-Null
@@ -3607,9 +3621,9 @@ function Start-BreakGlassWizard {
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="NetIP Entra Break Glass Configurator"
         Height="820"
-        Width="1180"
+        Width="1320"
         MinHeight="760"
-        MinWidth="1050"
+        MinWidth="1180"
         WindowStartupLocation="CenterScreen"
         Background="#F5F7FA">
     <Grid Margin="16">
@@ -3718,10 +3732,10 @@ function Start-BreakGlassWizard {
                 <ScrollViewer VerticalScrollBarVisibility="Auto">
                     <Grid Margin="18">
                         <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="260"/>
+                            <ColumnDefinition Width="220"/>
                             <ColumnDefinition Width="*"/>
-                            <ColumnDefinition Width="260"/>
-                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="210"/>
+                            <ColumnDefinition Width="1.4*"/>
                         </Grid.ColumnDefinitions>
                         <Grid.RowDefinitions>
                             <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
@@ -3729,7 +3743,7 @@ function Start-BreakGlassWizard {
                             <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
                             <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
                             <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
-                            <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
                         </Grid.RowDefinitions>
                         <TextBlock Grid.Row="0" Grid.Column="0" Text="Konto 1 prefix"/>
                         <TextBox x:Name="UserPrefix1" Grid.Row="0" Grid.Column="1" Text="svc_ea01" Margin="0,0,12,8"/>
@@ -3740,13 +3754,13 @@ function Start-BreakGlassWizard {
                         <TextBlock Grid.Row="1" Grid.Column="2" Text="Display name 2"/>
                         <TextBox x:Name="DisplayName2" Grid.Row="1" Grid.Column="3" Text="BreakGlass 02" Margin="0,0,0,8"/>
                         <TextBlock Grid.Row="2" Grid.Column="0" Text="Gruppe"/>
-                        <TextBox x:Name="GroupDisplayName" Grid.Row="2" Grid.Column="1" Text="GRP-ENTRA-BreakGlass-Admins" Margin="0,0,12,8"/>
+                        <TextBox x:Name="GroupDisplayName" Grid.Row="2" Grid.Column="1" Text="SG-BreakGlass-Admins" Margin="0,0,12,8"/>
                         <TextBlock Grid.Row="2" Grid.Column="2" Text="RMAU"/>
                         <TextBox x:Name="RmauDisplayName" Grid.Row="2" Grid.Column="3" Text="RMAU-BreakGlass-Protection" Margin="0,0,0,8"/>
                         <TextBlock Grid.Row="3" Grid.Column="0" Text="Authentication strength"/>
                         <TextBox x:Name="AuthStrengthName" Grid.Row="3" Grid.Column="1" Text="BreakGlass-FIDO2" Margin="0,0,12,8"/>
                         <TextBlock Grid.Row="3" Grid.Column="2" Text="CA policy navn"/>
-                        <TextBox x:Name="CaPolicyName" Grid.Row="3" Grid.Column="3" Text="[NETIP365 CA000] Global-IdentityProtection-AnyApp-AnyPlatform-MFA" Margin="0,0,0,8"/>
+                        <TextBox x:Name="CaPolicyName" Grid.Row="3" Grid.Column="3" Text="[NETIP365 CA999] IdentityProtection-AnyApp-AnyPlatform-BreakGlassAccounts" Margin="0,0,0,8"/>
                         <TextBlock Grid.Row="4" Grid.Column="0" Text="CA state"/>
                         <ComboBox x:Name="CaState" Grid.Row="4" Grid.Column="1" SelectedIndex="0" Margin="0,0,12,8">
                             <ComboBoxItem Content="reportOnly"/>
@@ -3781,14 +3795,14 @@ function Start-BreakGlassWizard {
                         <CheckBox x:Name="CreateSignInAlert" Grid.Row="12" Grid.Column="0" Grid.ColumnSpan="2" Content="Opret sign-in alert" IsChecked="True" Margin="0,0,0,8"/>
                         <CheckBox x:Name="CreateAuditAlert" Grid.Row="12" Grid.Column="2" Grid.ColumnSpan="2" Content="Opret audit/change alert" IsChecked="True" Margin="0,0,0,8"/>
                         <TextBlock Grid.Row="13" Grid.Column="0" Text="RMAU admin-gruppe"/>
-                        <TextBox x:Name="RmauAdminGroupDisplayName" Grid.Row="13" Grid.Column="1" Text="SG-BreakGlass-RMAU-Admins" Margin="0,0,12,8"/>
-                        <TextBlock Grid.Row="13" Grid.Column="2" Text="RMAU admin brugere"/>
-                        <StackPanel Grid.Row="13" Grid.Column="3" Margin="0,0,0,8">
+                        <TextBox x:Name="RmauAdminGroupDisplayName" Grid.Row="13" Grid.Column="1" Grid.ColumnSpan="3" Text="SG-BreakGlass-RMAU-Admins" Margin="0,0,0,8"/>
+                        <TextBlock Grid.Row="14" Grid.Column="0" Text="RMAU admin brugere"/>
+                        <StackPanel Grid.Row="14" Grid.Column="1" Grid.ColumnSpan="3" Margin="0,0,0,8">
                             <StackPanel x:Name="RmauAdminPickerPanel"/>
                             <Button x:Name="AddRmauAdminButton" Content="+ Global Admin" Height="28" Width="115" HorizontalAlignment="Left"/>
                             <TextBlock x:Name="RmauAdminPickerStatus" Margin="0,6,0,0" Foreground="#4B5563"/>
                         </StackPanel>
-                        <TextBlock Grid.Row="14" Grid.Column="0" Grid.ColumnSpan="4" Foreground="#92400E" TextWrapping="Wrap" Text="RMAU/RBAU-beskyttelsen lægger BreakGlass-konti og BG-gruppen i en restricted management administrative unit. Kun medlemmer af RMAU admin-gruppen får scoped User Administrator og Groups Administrator rettigheder til at administrere de beskyttede objekter."/>
+                        <TextBlock Grid.Row="15" Grid.Column="0" Grid.ColumnSpan="4" Foreground="#92400E" TextWrapping="Wrap" Text="RMAU/RBAU-beskyttelsen lægger BreakGlass-konti og BG-gruppen i en restricted management administrative unit. Kun medlemmer af RMAU admin-gruppen får scoped User Administrator og Groups Administrator rettigheder til at administrere de beskyttede objekter."/>
                     </Grid>
                 </ScrollViewer>
             </TabItem>
