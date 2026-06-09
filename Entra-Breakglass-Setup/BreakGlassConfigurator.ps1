@@ -1,5 +1,4 @@
-﻿#requires -Version 5.1
-<#
+﻿<#
 .SYNOPSIS
     NetIP Entra Break Glass Configurator v1.
 
@@ -62,18 +61,23 @@ $script:RequiredGraphScopes = @(
     'Organization.Read.All'
 )
 
-$script:RequiredModules = @(
+$script:RequiredGraphModules = @(
     'Microsoft.Graph.Authentication',
     'Microsoft.Graph.Users',
     'Microsoft.Graph.Groups',
     'Microsoft.Graph.Identity.DirectoryManagement',
     'Microsoft.Graph.Identity.SignIns',
-    'Microsoft.Graph.Identity.Governance',
+    'Microsoft.Graph.Identity.Governance'
+)
+
+$script:RequiredAzModules = @(
     'Az.Accounts',
     'Az.Resources',
     'Az.OperationalInsights',
     'Az.Monitor'
 )
+
+$script:RequiredModules = @($script:RequiredGraphModules + $script:RequiredAzModules)
 
 $script:State = [ordered]@{
     Mock                         = [bool] $Mock
@@ -352,7 +356,7 @@ function Get-GraphModuleAlignmentStatus {
     param()
 
     $targetVersion = Get-GraphModuleTargetVersion
-    $graphModules = @($script:RequiredModules | Where-Object { $_ -like 'Microsoft.Graph.*' })
+    $graphModules = @($script:RequiredGraphModules)
     foreach ($module in $graphModules) {
         $found = Get-Module -ListAvailable -Name $module | Sort-Object Version -Descending | Select-Object -First 1
         $version = if ($found) { [version] $found.Version } else { [version] '0.0.0' }
@@ -452,9 +456,9 @@ function Install-RequiredModulesWithConsent {
 
 function Import-RequiredModules {
     [CmdletBinding()]
-    param()
+    param([string[]] $ModuleName = $script:RequiredModules)
 
-    foreach ($module in $script:RequiredModules) {
+    foreach ($module in $ModuleName) {
         Write-AppLog -Message "Importerer modul: $module"
         Import-Module $module -ErrorAction Stop
     }
@@ -655,7 +659,7 @@ function Invoke-ConnectionWorkerMode {
                     $brokenNames = @($graphStillBroken | ForEach-Object { $_.Name })
                     throw "Graph moduler er stadig ikke version-aligned: $($brokenNames -join ', ')"
                 }
-                Import-RequiredModules
+                Import-RequiredModules -ModuleName $script:RequiredGraphModules
             }
 
             Write-AppLog -Message 'Forbinder til Microsoft Graph.'
@@ -671,7 +675,7 @@ function Invoke-ConnectionWorkerMode {
 
         if ($config.Azure) {
             if (-not $script:State.Mock -and -not $config.Graph) {
-                Import-RequiredModules
+                Import-RequiredModules -ModuleName $script:RequiredAzModules
             }
             Write-AppLog -Message 'Forbinder til Azure Resource Manager.'
             Write-Host 'Forbinder til Azure Resource Manager. Gennemfør loginprompten...' -ForegroundColor Cyan
@@ -717,8 +721,9 @@ function Connect-AppGraph {
 
     Import-Module Microsoft.Graph.Authentication -ErrorAction Stop
     Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null
-    Write-AppLog -Message "Forbinder til Microsoft Graph med scopes: $($script:RequiredGraphScopes -join ', ')"
-    Connect-MgGraph -Scopes $script:RequiredGraphScopes -ContextScope Process -NoWelcome -ErrorAction Stop | Out-Null
+    [string[]] $requiredScopes = @($script:RequiredGraphScopes)
+    Write-AppLog -Message "Forbinder til Microsoft Graph med scopes: $($requiredScopes -join ', ')"
+    Connect-MgGraph -Scopes $requiredScopes -ContextScope ([Microsoft.Graph.PowerShell.Authentication.ContextScope]::Process) -NoWelcome -ErrorAction Stop | Out-Null
     $context = Get-MgContext
     if (-not $context) {
         throw 'Microsoft Graph context blev ikke returneret.'
@@ -2278,8 +2283,7 @@ function Ensure-AppModulesFromUi {
         Start-ModulePreparationWorker
         return $false
     }
-    Set-UiStatus -Message 'Importerer Microsoft Graph og Az moduler...' -Busy -Log
-    Import-RequiredModules
+    Set-UiStatus -Message 'Nødvendige PowerShell moduler findes.' -Busy -Log
     return $true
 }
 
@@ -2289,6 +2293,7 @@ function Connect-AllFromUi {
 
     Set-UiStatus -Message 'Starter samlet forbindelse...' -Busy -Log
     if (-not (Ensure-AppModulesFromUi)) { return $false }
+    Import-RequiredModules -ModuleName $script:RequiredGraphModules
     Set-UiStatus -Message 'Forbinder til Microsoft Graph. Gennemfør loginprompten, hvis den vises...' -Busy -Log
     Connect-AppGraph | Out-Null
     if (-not [bool] $script:Ui.DisableMonitoring.IsChecked) {
@@ -2476,10 +2481,11 @@ function Invoke-WorkerMode {
         }
     }
     if (-not $script:State.Mock) {
-        Import-RequiredModules
+        Import-RequiredModules -ModuleName $script:RequiredGraphModules
         Write-AppLog -Message 'Worker forbinder til Microsoft Graph. Et loginvindue kan blive vist.'
         Connect-AppGraph | Out-Null
         if (-not [bool] $worker.Config.DisableMonitoring) {
+            Import-RequiredModules -ModuleName $script:RequiredAzModules
             Write-AppLog -Message 'Worker forbinder til Azure Resource Manager. Et loginvindue kan blive vist.'
             Connect-AppAzure | Out-Null
         }
