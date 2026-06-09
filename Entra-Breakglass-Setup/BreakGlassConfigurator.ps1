@@ -25,7 +25,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 $script:AppName = 'NetIP Entra Break Glass Configurator'
-$script:AppVersion = '1.0.1'
+$script:AppVersion = '1.0.2'
 $script:ProjectRoot = Split-Path -Parent $PSCommandPath
 if ([string]::IsNullOrWhiteSpace($script:ProjectRoot)) {
     $script:ProjectRoot = (Get-Location).Path
@@ -1435,8 +1435,8 @@ function Get-DirectoryObjectSummary {
 function Add-DiscoveryCandidate {
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory)] [System.Collections.Generic.List[object]] $Candidates,
-        [Parameter(Mandatory)] [hashtable] $Seen,
+        [AllowNull()] [System.Collections.Generic.List[object]] $Candidates,
+        [AllowNull()] [hashtable] $Seen,
         [Parameter(Mandatory)][string] $Source,
         [Parameter(Mandatory)][string] $Type,
         [AllowNull()][string] $DisplayName,
@@ -1445,6 +1445,9 @@ function Add-DiscoveryCandidate {
         [AllowNull()][string] $Role,
         [AllowNull()][string] $Notes
     )
+
+    if ($null -eq $Candidates) { throw 'Discovery candidate list is not initialized.' }
+    if ($null -eq $Seen) { throw 'Discovery seen table is not initialized.' }
 
     $key = if ($ObjectId) { $ObjectId } elseif ($UserPrincipalName) { $UserPrincipalName.ToLowerInvariant() } else { "$Source|$DisplayName|$Type" }
     if ($Seen.ContainsKey($key)) { return }
