@@ -25,7 +25,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 $script:AppName = 'NetIP Entra Break Glass Configurator'
-$script:AppVersion = '1.0.13'
+$script:AppVersion = '1.0.14'
 $script:ProjectRoot = Split-Path -Parent $PSCommandPath
 if ([string]::IsNullOrWhiteSpace($script:ProjectRoot)) {
     $script:ProjectRoot = (Get-Location).Path
@@ -1348,7 +1348,82 @@ function Show-CreatedPasswordsOnce {
     foreach ($item in $script:State.CreatedPasswords) {
         $lines += ('{0}: {1}' -f $item.UserPrincipalName, $item.Password)
     }
-    Show-AppMessage -Message ($lines -join [Environment]::NewLine) -Title "$($script:AppName) - midlertidige adgangskoder" -Buttons 'OK' -Icon 'Warning' | Out-Null
+    $secretText = $lines -join [Environment]::NewLine
+
+    try {
+        Add-Type -AssemblyName PresentationFramework, PresentationCore, WindowsBase -ErrorAction Stop
+        $dialog = New-Object System.Windows.Window
+        $dialog.Title = "$($script:AppName) - midlertidige adgangskoder"
+        $dialog.Width = 760
+        $dialog.Height = 460
+        $dialog.MinWidth = 640
+        $dialog.MinHeight = 360
+        $dialog.WindowStartupLocation = 'CenterScreen'
+        $dialog.Topmost = $true
+
+        $root = New-Object System.Windows.Controls.Grid
+        $root.Margin = [System.Windows.Thickness]::new(14)
+        $root.RowDefinitions.Add((New-Object System.Windows.Controls.RowDefinition -Property @{ Height = [System.Windows.GridLength]::Auto })) | Out-Null
+        $root.RowDefinitions.Add((New-Object System.Windows.Controls.RowDefinition -Property @{ Height = [System.Windows.GridLength]::new(1, [System.Windows.GridUnitType]::Star) })) | Out-Null
+        $root.RowDefinitions.Add((New-Object System.Windows.Controls.RowDefinition -Property @{ Height = [System.Windows.GridLength]::Auto })) | Out-Null
+
+        $warning = New-Object System.Windows.Controls.TextBlock
+        $warning.Text = 'Midlertidige adgangskoder vises kun her. Kopiér dem straks til godkendt password manager eller nødprocedure.'
+        $warning.TextWrapping = 'Wrap'
+        $warning.FontWeight = 'SemiBold'
+        $warning.Margin = [System.Windows.Thickness]::new(0, 0, 0, 10)
+        $warning.Foreground = [System.Windows.Media.Brushes]::DarkRed
+        [System.Windows.Controls.Grid]::SetRow($warning, 0)
+        $root.Children.Add($warning) | Out-Null
+
+        $textBox = New-Object System.Windows.Controls.TextBox
+        $textBox.Text = $secretText
+        $textBox.IsReadOnly = $true
+        $textBox.AcceptsReturn = $true
+        $textBox.TextWrapping = 'NoWrap'
+        $textBox.VerticalScrollBarVisibility = 'Auto'
+        $textBox.HorizontalScrollBarVisibility = 'Auto'
+        $textBox.FontFamily = New-Object System.Windows.Media.FontFamily 'Consolas'
+        [System.Windows.Controls.Grid]::SetRow($textBox, 1)
+        $root.Children.Add($textBox) | Out-Null
+
+        $buttons = New-Object System.Windows.Controls.StackPanel
+        $buttons.Orientation = 'Horizontal'
+        $buttons.HorizontalAlignment = 'Right'
+        $buttons.Margin = [System.Windows.Thickness]::new(0, 12, 0, 0)
+        [System.Windows.Controls.Grid]::SetRow($buttons, 2)
+
+        $copyButton = New-Object System.Windows.Controls.Button
+        $copyButton.Content = 'Kopiér alle'
+        $copyButton.Width = 110
+        $copyButton.Height = 32
+        $copyButton.Margin = [System.Windows.Thickness]::new(0, 0, 8, 0)
+        $copyButton.Tag = $textBox
+        $copyButton.Add_Click({
+            param($sender, $eventArgs)
+            [System.Windows.Clipboard]::SetText($sender.Tag.Text)
+            $sender.Content = 'Kopieret'
+        })
+        $buttons.Children.Add($copyButton) | Out-Null
+
+        $closeButton = New-Object System.Windows.Controls.Button
+        $closeButton.Content = 'Luk'
+        $closeButton.Width = 90
+        $closeButton.Height = 32
+        $closeButton.Tag = $dialog
+        $closeButton.Add_Click({
+            param($sender, $eventArgs)
+            $sender.Tag.Close()
+        })
+        $buttons.Children.Add($closeButton) | Out-Null
+
+        $root.Children.Add($buttons) | Out-Null
+        $dialog.Content = $root
+        $dialog.ShowDialog() | Out-Null
+    }
+    catch {
+        Show-AppMessage -Message $secretText -Title "$($script:AppName) - midlertidige adgangskoder" -Buttons 'OK' -Icon 'Warning' | Out-Null
+    }
 }
 
 function Ensure-BreakGlassUser {
@@ -3489,12 +3564,21 @@ function Update-MonitoringUi {
         $script:Ui.SubscriptionId.Text = ''
     }
     if ($monitoringEnabled -and $useExisting) {
+        if ($script:Ui.ContainsKey('WorkspaceNameLabel') -and $script:Ui.WorkspaceNameLabel) {
+            $script:Ui.WorkspaceNameLabel.Text = 'Eksisterende workspace navn'
+        }
         Set-UiStatus -Message 'Eksisterende workspace valgt: indtast Subscription ID, resource group og workspace-navn.'
     }
     elseif ($monitoringEnabled) {
-        Set-UiStatus -Message 'Nyt workspace valgt: subscription hentes fra Azure-forbindelsen.'
+        if ($script:Ui.ContainsKey('WorkspaceNameLabel') -and $script:Ui.WorkspaceNameLabel) {
+            $script:Ui.WorkspaceNameLabel.Text = 'Opret eller brug workspace med navn'
+        }
+        Set-UiStatus -Message 'Workspace oprettes hvis det ikke findes. Hvis workspace-navnet allerede findes i resource group, bruges det.'
     }
     else {
+        if ($script:Ui.ContainsKey('WorkspaceNameLabel') -and $script:Ui.WorkspaceNameLabel) {
+            $script:Ui.WorkspaceNameLabel.Text = 'Workspace navn'
+        }
         Set-UiStatus -Message 'Monitoring er slået fra for denne kørsel.'
     }
     Update-ConnectionStatusUi
@@ -3953,7 +4037,7 @@ function Start-BreakGlassWizard {
                         <TextBox x:Name="SubscriptionId" Grid.Row="8" Grid.Column="1" Margin="0,0,12,8"/>
                         <TextBlock Grid.Row="8" Grid.Column="2" Text="Resource group"/>
                         <TextBox x:Name="ResourceGroupName" Grid.Row="8" Grid.Column="3" Text="rg-breakglass-monitoring" Margin="0,0,0,8"/>
-                        <TextBlock Grid.Row="9" Grid.Column="0" Text="Workspace navn"/>
+                        <TextBlock x:Name="WorkspaceNameLabel" Grid.Row="9" Grid.Column="0" Text="Opret eller brug workspace med navn"/>
                         <TextBox x:Name="WorkspaceName" Grid.Row="9" Grid.Column="1" Text="law-entra-breakglass" Margin="0,0,12,8"/>
                         <TextBlock Grid.Row="9" Grid.Column="2" Text="Azure region"/>
                         <TextBox x:Name="AzureRegion" Grid.Row="9" Grid.Column="3" Text="westeurope" Margin="0,0,0,8"/>
@@ -4071,7 +4155,7 @@ function Start-BreakGlassWizard {
     foreach ($name in @(
         'VersionBadge','UnderstandRisk','ReportModeRadio','ConfigureModeRadio','ConnectAllButton','GraphConnectionBadge','AzureConnectionBadge','GraphAccount','TenantId','TenantName','OnMicrosoftDomain','AzureAccount','SubscriptionIdDetected','ConnectionStatus','GraphScopesRequested','MonitoringConnectionRequirement',
         'RunDiscoveryButton','DiscoverySummary','DiscoveryList','UserPrefix1','UserPrefix2','DisplayName1','DisplayName2','GroupDisplayName','RmauDisplayName','RmauAdminGroupDisplayName','RmauAdminPickerPanel','AddRmauAdminButton','RmauAdminPickerStatus','AuthStrengthName','CaPolicyName','CaState',
-        'ExcludeExistingCa','AaguidInputPanel','AddAaguidButton','ModeStatusText','DisableMonitoring','UseExistingWorkspace','SubscriptionIdLabel','SubscriptionId','ResourceGroupName','WorkspaceName','AzureRegion','DiagnosticSettingName',
+        'ExcludeExistingCa','AaguidInputPanel','AddAaguidButton','ModeStatusText','DisableMonitoring','UseExistingWorkspace','SubscriptionIdLabel','SubscriptionId','ResourceGroupName','WorkspaceNameLabel','WorkspaceName','AzureRegion','DiagnosticSettingName',
         'ActionGroupName','AlertEmails','CreateSignInAlert','CreateAuditAlert','BuildPlanButton','ExportPlanButton','ApplyButton','PlanText','ProgressBar','ExecutionStepList','ExecutionLog','OpenSecurityInfoButton',
         'ValidateFidoButton','FidoResults','RunValidationButton','ValidationList','OutputFolderText','ReportPathText','OpenReportButton','OpenOutputFolderButton','BackButton','NextButton','CloseButton','BackgroundStatus','StatusProgress','FooterStatus','WizardTabs'
     )) {
