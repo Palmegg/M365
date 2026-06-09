@@ -25,7 +25,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 $script:AppName = 'NetIP Entra Break Glass Configurator'
-$script:AppVersion = '1.0.5'
+$script:AppVersion = '1.0.6'
 $script:ProjectRoot = Split-Path -Parent $PSCommandPath
 if ([string]::IsNullOrWhiteSpace($script:ProjectRoot)) {
     $script:ProjectRoot = (Get-Location).Path
@@ -954,7 +954,7 @@ function Connect-AppAzure {
 
     Import-Module Az.Accounts -ErrorAction Stop
     Connect-AzAccount -ErrorAction Stop | Out-Null
-    $context = Get-AzContext
+    $context = Resolve-AppAzureSubscriptionContext
     if (-not $context) {
         throw 'Azure context blev ikke returneret.'
     }
@@ -963,6 +963,97 @@ function Connect-AppAzure {
     Set-AppAzureContextState -Context $context
     Write-AppLog -Message "Azure forbundet som $($script:State.AzureAccount), subscription $($script:State.AzureSubscriptionName)."
     return $script:State
+}
+
+function Get-AzureSubscriptionObjectId {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)] $Subscription)
+
+    $subscriptionId = Get-ObjectPropertyValue -InputObject $Subscription -Name 'Id'
+    if (-not $subscriptionId) {
+        $subscriptionId = Get-ObjectPropertyValue -InputObject $Subscription -Name 'SubscriptionId'
+    }
+    if (-not $subscriptionId) {
+        $subscriptionId = Get-ObjectPropertyValue -InputObject $Subscription -Name 'Subscription'
+    }
+    return [string] $subscriptionId
+}
+
+function Get-AzureSubscriptionObjectName {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)] $Subscription)
+
+    $subscriptionName = Get-ObjectPropertyValue -InputObject $Subscription -Name 'Name'
+    if (-not $subscriptionName) {
+        $subscriptionName = Get-ObjectPropertyValue -InputObject $Subscription -Name 'SubscriptionName'
+    }
+    return [string] $subscriptionName
+}
+
+function Test-AzureContextHasSubscription {
+    [CmdletBinding()]
+    param([AllowNull()] $Context)
+
+    if (-not $Context) { return $false }
+    $subscription = Get-ObjectPropertyValue -InputObject $Context -Name 'Subscription'
+    if (-not $subscription) { return $false }
+    return -not [string]::IsNullOrWhiteSpace((Get-AzureSubscriptionObjectId -Subscription $subscription))
+}
+
+function Resolve-AppAzureSubscriptionContext {
+    [CmdletBinding()]
+    param([AllowNull()][string] $PreferredSubscriptionId)
+
+    $context = Get-AzContext -ErrorAction SilentlyContinue
+    if ([string]::IsNullOrWhiteSpace($PreferredSubscriptionId) -and (Test-AzureContextHasSubscription -Context $context)) {
+        return $context
+    }
+
+    $subscriptions = @(Get-AzSubscription -ErrorAction Stop)
+    if ($subscriptions.Count -eq 0) {
+        throw 'Azure-login lykkedes, men kontoen har ingen tilgængelige Azure subscriptions. Azure Monitor/Log Analytics kræver en subscription hvor workspace, action group og alerts kan oprettes. Slå monitoring fra, eller log ind med en konto der har adgang til en Azure subscription.'
+    }
+
+    $selectedSubscription = $null
+    if (-not [string]::IsNullOrWhiteSpace($PreferredSubscriptionId)) {
+        $selectedSubscription = $subscriptions | Where-Object { (Get-AzureSubscriptionObjectId -Subscription $_) -eq $PreferredSubscriptionId } | Select-Object -First 1
+        if (-not $selectedSubscription) {
+            throw "Subscription ID '$PreferredSubscriptionId' blev ikke fundet blandt de subscriptions kontoen har adgang til."
+        }
+    }
+    elseif ($subscriptions.Count -eq 1) {
+        $selectedSubscription = $subscriptions[0]
+        Write-Host ("Valgte eneste tilgængelige Azure subscription: {0} / {1}" -f (Get-AzureSubscriptionObjectName -Subscription $selectedSubscription), (Get-AzureSubscriptionObjectId -Subscription $selectedSubscription)) -ForegroundColor Cyan
+    }
+    else {
+        Write-Host ''
+        Write-Host 'Vælg Azure subscription til Log Analytics/Azure Monitor:' -ForegroundColor Yellow
+        for ($i = 0; $i -lt $subscriptions.Count; $i++) {
+            $subscription = $subscriptions[$i]
+            $subscriptionId = Get-AzureSubscriptionObjectId -Subscription $subscription
+            $subscriptionName = Get-AzureSubscriptionObjectName -Subscription $subscription
+            Write-Host (" [{0}] {1} / {2}" -f ($i + 1), $subscriptionName, $subscriptionId) -ForegroundColor Yellow
+        }
+        do {
+            $choice = Read-Host 'Skriv nummer på subscription'
+            $choiceNumber = 0
+            $validChoice = [int]::TryParse($choice, [ref] $choiceNumber) -and $choiceNumber -ge 1 -and $choiceNumber -le $subscriptions.Count
+            if (-not $validChoice) {
+                Write-Host "Ugyldigt valg. Vælg et tal mellem 1 og $($subscriptions.Count)." -ForegroundColor Red
+            }
+        } until ($validChoice)
+        $selectedSubscription = $subscriptions[$choiceNumber - 1]
+    }
+
+    $selectedSubscriptionId = Get-AzureSubscriptionObjectId -Subscription $selectedSubscription
+    $selectedTenantId = Get-ObjectPropertyValue -InputObject $selectedSubscription -Name 'TenantId'
+    if ([string]::IsNullOrWhiteSpace([string] $selectedTenantId)) {
+        Set-AzContext -SubscriptionId $selectedSubscriptionId -ErrorAction Stop | Out-Null
+    }
+    else {
+        Set-AzContext -SubscriptionId $selectedSubscriptionId -TenantId $selectedTenantId -ErrorAction Stop | Out-Null
+    }
+    return Get-AzContext -ErrorAction Stop
 }
 
 function Set-AppAzureContextState {
@@ -1020,7 +1111,10 @@ function Get-OrSelectSubscription {
     }
 
     if (-not [string]::IsNullOrWhiteSpace($SubscriptionId)) {
-        Set-AzContext -SubscriptionId $SubscriptionId -ErrorAction Stop | Out-Null
+        Resolve-AppAzureSubscriptionContext -PreferredSubscriptionId $SubscriptionId | Out-Null
+    }
+    else {
+        Resolve-AppAzureSubscriptionContext | Out-Null
     }
     $context = Get-AzContext
     Set-AppAzureContextState -Context $context
