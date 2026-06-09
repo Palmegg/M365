@@ -564,12 +564,14 @@ function Invoke-ConnectionWorkerMode {
                 $graphRepair = @($graphStatus | Where-Object { $_.NeedsRepair })
                 if ($missing.Count -gt 0 -or $graphRepair.Count -gt 0) {
                     if ($missing.Count -gt 0) {
-                        Write-AppLog -Level WARN -Message "Manglende moduler: $($missing.Name -join ', ')"
+                        $missingNames = @($missing | ForEach-Object { $_.Name })
+                        Write-AppLog -Level WARN -Message "Manglende moduler: $($missingNames -join ', ')"
                         Write-Host 'Manglende moduler skal installeres først:' -ForegroundColor Yellow
+                        foreach ($module in $missingNames) { Write-Host " - $module" -ForegroundColor Yellow }
                     }
-                    foreach ($module in $missing.Name) { Write-Host " - $module" -ForegroundColor Yellow }
                     if ($graphRepair.Count -gt 0) {
-                        Write-AppLog -Level WARN -Message "Graph moduler skal alignes til version $($graphRepair[0].TargetVersion): $($graphRepair.Name -join ', ')"
+                        $graphRepairNames = @($graphRepair | ForEach-Object { $_.Name })
+                        Write-AppLog -Level WARN -Message "Graph moduler skal alignes til version $($graphRepair[0].TargetVersion): $($graphRepairNames -join ', ')"
                         Write-Host ''
                         Write-Host "Graph moduler har blandede versioner og skal alignes til $($graphRepair[0].TargetVersion):" -ForegroundColor Yellow
                         foreach ($item in $graphRepair) {
@@ -588,7 +590,7 @@ function Invoke-ConnectionWorkerMode {
                     }
                     Install-GraphModulesAtTargetVersion -GraphStatus $graphStatus
                     $nonGraphMissing = @($missing | Where-Object { $_.Name -notlike 'Microsoft.Graph.*' })
-                    foreach ($module in $nonGraphMissing.Name) {
+                    foreach ($module in @($nonGraphMissing | ForEach-Object { $_.Name })) {
                         Write-AppLog -Message "Installerer modul: $module"
                         Write-Host "Installerer modul: $module" -ForegroundColor Cyan
                         Install-Module -Name $module -Scope CurrentUser -Repository PSGallery -AllowClobber -Force -ErrorAction Stop
@@ -597,7 +599,8 @@ function Invoke-ConnectionWorkerMode {
                 $graphAfter = @(Get-GraphModuleAlignmentStatus)
                 $graphStillBroken = @($graphAfter | Where-Object { $_.NeedsRepair })
                 if ($graphStillBroken.Count -gt 0) {
-                    throw "Graph moduler er stadig ikke version-aligned: $($graphStillBroken.Name -join ', ')"
+                    $brokenNames = @($graphStillBroken | ForEach-Object { $_.Name })
+                    throw "Graph moduler er stadig ikke version-aligned: $($brokenNames -join ', ')"
                 }
                 Import-RequiredModules
             }
@@ -2154,6 +2157,20 @@ function Set-UiBusy {
     Update-UiPump
 }
 
+function Test-ProcessHasExitedSafe {
+    [CmdletBinding()]
+    param([AllowNull()] $Process)
+
+    if ($null -eq $Process) { return $false }
+    if ($Process -isnot [System.Diagnostics.Process]) { return $false }
+    try {
+        return [bool] $Process.HasExited
+    }
+    catch {
+        return $true
+    }
+}
+
 function Set-WizardMaxStep {
     [CmdletBinding()]
     param([int] $Step)
@@ -2878,7 +2895,7 @@ function Start-BreakGlassWizard {
                     # Module worker log polling is best-effort.
                 }
             }
-            if ($script:ModuleWorkerProcess.HasExited) {
+            if (Test-ProcessHasExitedSafe -Process $script:ModuleWorkerProcess) {
                 $moduleExitCode = $script:ModuleWorkerProcess.ExitCode
                 $script:ModuleWorkerProcess.Dispose()
                 $script:ModuleWorkerProcess = $null
@@ -2906,7 +2923,7 @@ function Start-BreakGlassWizard {
                     # Connection worker log polling is best-effort.
                 }
             }
-            if ($script:ConnectionWorkerProcess.HasExited) {
+            if (Test-ProcessHasExitedSafe -Process $script:ConnectionWorkerProcess) {
                 $connectionExitCode = $script:ConnectionWorkerProcess.ExitCode
                 $script:ConnectionWorkerProcess.Dispose()
                 $script:ConnectionWorkerProcess = $null
@@ -2944,7 +2961,7 @@ function Start-BreakGlassWizard {
                 Set-UiBusy -Busy $false
             }
         }
-        if ($script:WorkerProcess -and $script:WorkerProcess.HasExited) {
+        if ($script:WorkerProcess -and (Test-ProcessHasExitedSafe -Process $script:WorkerProcess)) {
             $script:LogPollTimer.Stop()
             Sync-LogView
             $exitCode = $script:WorkerProcess.ExitCode
