@@ -97,7 +97,9 @@ Kør ikke første login/modulinstallation fra VS Code PowerShell Extension Termi
 
 Connect-knapperne starter en separat synlig PowerShell connection-worker til Graph/Azure login. Det beskytter WPF GUI-processen, hvis Microsoft Graph/WAM-login crasher eller lukker PowerShell-processen.
 
-Hvis moduler mangler, spørger connection-worker-vinduet om installation for `CurrentUser`. Godkend installationen i worker-vinduet, vent til den er færdig, og gå derefter tilbage til GUI'en. Statusbaren i GUI'en viser seneste worker-status.
+Hvis moduler mangler, eller hvis Microsoft Graph delmoduler er installeret i blandede versioner, spørger connection-worker-vinduet om installation/opdatering for `CurrentUser`. Godkend installationen i worker-vinduet, vent til den er færdig, og gå derefter tilbage til GUI'en. Statusbaren i GUI'en viser seneste worker-status.
+
+Graph-moduler skal være version-aligned. En blanding som `Microsoft.Graph.Authentication` 2.37 og `Microsoft.Graph.Groups` 2.31 kan give fejl som `AzureIdentityAccessTokenProvider..ctor method not found`.
 
 Til lab uden tenant-ændringer:
 

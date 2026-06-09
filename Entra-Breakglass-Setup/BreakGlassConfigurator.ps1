@@ -294,7 +294,7 @@ function Test-RequiredModules {
     param()
 
     $results = foreach ($module in $script:RequiredModules) {
-        $found = Get-Module -ListAvailable -Name $module | Select-Object -First 1
+        $found = Get-Module -ListAvailable -Name $module | Sort-Object Version -Descending | Select-Object -First 1
         [pscustomobject]@{
             Name    = $module
             Present = [bool] $found
@@ -302,6 +302,65 @@ function Test-RequiredModules {
         }
     }
     return @($results)
+}
+
+function Get-GraphModuleTargetVersion {
+    [CmdletBinding()]
+    param()
+
+    try {
+        $gallery = Find-Module -Name 'Microsoft.Graph.Authentication' -Repository PSGallery -ErrorAction Stop
+        if ($gallery.Version) {
+            return [version] $gallery.Version
+        }
+    }
+    catch {
+        Write-AppLog -Level WARN -Message "Kunne ikke hente seneste Graph version fra PSGallery. Bruger højeste lokalt installerede Graph-version. $(ConvertTo-RedactedError $_)"
+    }
+
+    $local = Get-Module -ListAvailable -Name 'Microsoft.Graph.Authentication' | Sort-Object Version -Descending | Select-Object -First 1
+    if ($local) {
+        return [version] $local.Version
+    }
+
+    return [version] '0.0.0'
+}
+
+function Get-GraphModuleAlignmentStatus {
+    [CmdletBinding()]
+    param()
+
+    $targetVersion = Get-GraphModuleTargetVersion
+    $graphModules = @($script:RequiredModules | Where-Object { $_ -like 'Microsoft.Graph.*' })
+    foreach ($module in $graphModules) {
+        $found = Get-Module -ListAvailable -Name $module | Sort-Object Version -Descending | Select-Object -First 1
+        $version = if ($found) { [version] $found.Version } else { [version] '0.0.0' }
+        [pscustomobject]@{
+            Name          = $module
+            Present       = [bool] $found
+            Version       = if ($found) { [string] $found.Version } else { '' }
+            TargetVersion = [string] $targetVersion
+            NeedsRepair   = (-not $found -or $version -ne $targetVersion)
+        }
+    }
+}
+
+function Install-GraphModulesAtTargetVersion {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][object[]] $GraphStatus)
+
+    $repairItems = @($GraphStatus | Where-Object { $_.NeedsRepair })
+    if ($repairItems.Count -eq 0) {
+        Write-AppLog -Message 'Graph moduler er version-aligned.'
+        return
+    }
+
+    $targetVersion = [string] $repairItems[0].TargetVersion
+    foreach ($module in $repairItems.Name) {
+        Write-AppLog -Message "Installerer/opdaterer Graph modul $module til version $targetVersion"
+        Write-Host "Installerer/opdaterer Graph modul $module til version $targetVersion" -ForegroundColor Cyan
+        Install-Module -Name $module -RequiredVersion $targetVersion -Scope CurrentUser -Repository PSGallery -AllowClobber -Force -ErrorAction Stop
+    }
 }
 
 function Install-RequiredModulesWithConsent {
@@ -501,24 +560,44 @@ function Invoke-ConnectionWorkerMode {
                 Write-AppLog -Message 'Forbereder Graph moduler.'
                 $status = Test-RequiredModules
                 $missing = @($status | Where-Object { -not $_.Present })
-                if ($missing.Count -gt 0) {
-                    Write-AppLog -Level WARN -Message "Manglende moduler: $($missing.Name -join ', ')"
-                    Write-Host 'Manglende moduler skal installeres først:' -ForegroundColor Yellow
+                $graphStatus = @(Get-GraphModuleAlignmentStatus)
+                $graphRepair = @($graphStatus | Where-Object { $_.NeedsRepair })
+                if ($missing.Count -gt 0 -or $graphRepair.Count -gt 0) {
+                    if ($missing.Count -gt 0) {
+                        Write-AppLog -Level WARN -Message "Manglende moduler: $($missing.Name -join ', ')"
+                        Write-Host 'Manglende moduler skal installeres først:' -ForegroundColor Yellow
+                    }
                     foreach ($module in $missing.Name) { Write-Host " - $module" -ForegroundColor Yellow }
+                    if ($graphRepair.Count -gt 0) {
+                        Write-AppLog -Level WARN -Message "Graph moduler skal alignes til version $($graphRepair[0].TargetVersion): $($graphRepair.Name -join ', ')"
+                        Write-Host ''
+                        Write-Host "Graph moduler har blandede versioner og skal alignes til $($graphRepair[0].TargetVersion):" -ForegroundColor Yellow
+                        foreach ($item in $graphRepair) {
+                            $currentVersion = if ($item.Version) { $item.Version } else { 'mangler' }
+                            Write-Host " - $($item.Name): $currentVersion -> $($item.TargetVersion)" -ForegroundColor Yellow
+                        }
+                    }
                     Write-Host ''
-                    $answer = Read-Host 'Installer manglende moduler for CurrentUser fra PSGallery? Skriv Y for ja'
+                    $answer = Read-Host 'Installer/opdater nødvendige moduler for CurrentUser fra PSGallery? Skriv Y for ja'
                     if ($answer -notin @('Y','y','YES','Yes','yes','J','j','JA','Ja','ja')) {
-                        throw 'Modulinstallation blev afvist.'
+                        throw 'Modulinstallation/opdatering blev afvist.'
                     }
                     [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
                     if (-not (Get-PackageProvider -Name NuGet -ErrorAction SilentlyContinue)) {
                         Install-PackageProvider -Name NuGet -MinimumVersion '2.8.5.201' -Scope CurrentUser -Force -ErrorAction Stop | Out-Null
                     }
-                    foreach ($module in $missing.Name) {
+                    Install-GraphModulesAtTargetVersion -GraphStatus $graphStatus
+                    $nonGraphMissing = @($missing | Where-Object { $_.Name -notlike 'Microsoft.Graph.*' })
+                    foreach ($module in $nonGraphMissing.Name) {
                         Write-AppLog -Message "Installerer modul: $module"
                         Write-Host "Installerer modul: $module" -ForegroundColor Cyan
                         Install-Module -Name $module -Scope CurrentUser -Repository PSGallery -AllowClobber -Force -ErrorAction Stop
                     }
+                }
+                $graphAfter = @(Get-GraphModuleAlignmentStatus)
+                $graphStillBroken = @($graphAfter | Where-Object { $_.NeedsRepair })
+                if ($graphStillBroken.Count -gt 0) {
+                    throw "Graph moduler er stadig ikke version-aligned: $($graphStillBroken.Name -join ', ')"
                 }
                 Import-RequiredModules
             }
