@@ -25,7 +25,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 $script:AppName = 'NetIP Entra Break Glass Configurator'
-$script:AppVersion = '1.0.3'
+$script:AppVersion = '1.0.4'
 $script:ProjectRoot = Split-Path -Parent $PSCommandPath
 if ([string]::IsNullOrWhiteSpace($script:ProjectRoot)) {
     $script:ProjectRoot = (Get-Location).Path
@@ -632,6 +632,8 @@ function Invoke-ConnectionWorkerMode {
     Write-Host ''
 
     $result = [ordered]@{
+        RequestedGraph        = [bool] $config.Graph
+        RequestedAzure        = [bool] $config.Azure
         GraphConnected        = $false
         AzureConnected        = $false
         GraphAccount          = ''
@@ -732,14 +734,7 @@ function Invoke-ConnectionWorkerMode {
                 $result['AzureError'] = ConvertTo-RedactedError $_
                 Write-DetailedError -Message 'Azure forbindelse fejlede.' -ErrorRecord $_
 
-                if (-not [bool] $result['GraphConnected']) {
-                    throw
-                }
-
-                Write-AppLog -Level WARN -Message 'Graph er forbundet, men Azure subscription blev ikke valgt. Azure Monitor/Log Analytics springes over for denne kørsel.'
-                Write-Host ''
-                Write-Host 'Graph er forbundet, men Azure subscription blev ikke valgt.' -ForegroundColor Yellow
-                Write-Host 'Værktøjet fortsætter uden Azure Monitor/Log Analytics for denne kørsel.' -ForegroundColor Yellow
+                throw
             }
         }
 
@@ -3299,6 +3294,12 @@ function Move-WizardNext {
                 Show-AppMessage -Message 'Forbind til Microsoft Graph før du fortsætter.' -Icon 'Warning' | Out-Null
                 return
             }
+            if (-not [bool] $script:Ui.DisableMonitoring.IsChecked -and -not $script:State.AzureConnected) {
+                Show-AppMessage -Message 'Azure Monitor/Log Analytics er slået til. Jeg starter Azure-login nu. Vælg en subscription i loginvinduet, og tryk Fortsæt igen når status viser Azure connected: True.' -Icon 'Information' | Out-Null
+                Set-UiStatus -Message 'Monitoring kræver Azure. Starter Azure connection-worker...' -Busy -Log
+                Start-ConnectionWorker -Azure
+                return
+            }
             Invoke-PrecheckFromUi | Out-Null
             if ([bool] $script:Ui.ConfigureModeRadio.IsChecked) {
                 Set-WizardMaxStep -Step 2
@@ -4022,25 +4023,33 @@ function Start-BreakGlassWizard {
                 if ($script:ConnectionWorkerResultPath -and (Test-Path -LiteralPath $script:ConnectionWorkerResultPath)) {
                     try {
                         $connectionResult = Get-Content -LiteralPath $script:ConnectionWorkerResultPath -Raw -Encoding UTF8 | ConvertFrom-Json
-                        $script:State['GraphConnected'] = [bool] $connectionResult.GraphConnected
-                        $script:State['AzureConnected'] = [bool] $connectionResult.AzureConnected
-                        $script:State['GraphAccount'] = [string] $connectionResult.GraphAccount
-                        $script:State['GraphScopes'] = @(Get-ObjectPropertyValue -InputObject $connectionResult -Name 'GraphScopes')
-                        $script:State['TenantId'] = [string] $connectionResult.TenantId
-                        $script:State['TenantDisplayName'] = [string] $connectionResult.TenantDisplayName
-                        $script:State['OnMicrosoftDomain'] = [string] $connectionResult.OnMicrosoftDomain
-                        $script:State['AzureAccount'] = [string] $connectionResult.AzureAccount
-                        $script:State['AzureSubscriptionId'] = [string] $connectionResult.AzureSubscriptionId
-                        $script:State['AzureSubscriptionName'] = [string] $connectionResult.AzureSubscriptionName
-                        $script:State['ExistingCandidates'] = @($connectionResult.ExistingCandidates)
-                        $script:State['GlobalAdminUsers'] = @($connectionResult.GlobalAdminUsers)
+                        $requestedGraph = [bool] (Get-ObjectPropertyValue -InputObject $connectionResult -Name 'RequestedGraph')
+                        $requestedAzure = [bool] (Get-ObjectPropertyValue -InputObject $connectionResult -Name 'RequestedAzure')
+                        if ($requestedGraph) {
+                            $script:State['GraphConnected'] = [bool] $connectionResult.GraphConnected
+                            $script:State['GraphAccount'] = [string] $connectionResult.GraphAccount
+                            $script:State['GraphScopes'] = @(Get-ObjectPropertyValue -InputObject $connectionResult -Name 'GraphScopes')
+                            $script:State['TenantId'] = [string] $connectionResult.TenantId
+                            $script:State['TenantDisplayName'] = [string] $connectionResult.TenantDisplayName
+                            $script:State['OnMicrosoftDomain'] = [string] $connectionResult.OnMicrosoftDomain
+                            $script:State['ExistingCandidates'] = @($connectionResult.ExistingCandidates)
+                            $script:State['GlobalAdminUsers'] = @($connectionResult.GlobalAdminUsers)
+                        }
+                        if ($requestedAzure) {
+                            $script:State['AzureConnected'] = [bool] $connectionResult.AzureConnected
+                            $script:State['AzureAccount'] = [string] $connectionResult.AzureAccount
+                            $script:State['AzureSubscriptionId'] = [string] $connectionResult.AzureSubscriptionId
+                            $script:State['AzureSubscriptionName'] = [string] $connectionResult.AzureSubscriptionName
+                        }
                         Update-ConnectionStatusUi
-                        Update-DiscoveryUi -Candidates @($script:State.ExistingCandidates)
+                        if ($requestedGraph) {
+                            Update-DiscoveryUi -Candidates @($script:State.ExistingCandidates)
+                        }
                         Update-MonitoringUi
                         if ($connectionExitCode -eq 0) {
                             $azureError = if ($connectionResult.PSObject.Properties['AzureError']) { [string] $connectionResult.AzureError } else { '' }
-                            if ([bool] $connectionResult.GraphConnected -and -not [bool] $connectionResult.AzureConnected -and -not [string]::IsNullOrWhiteSpace($azureError)) {
-                                Set-UiStatus -Message ("Graph er forbundet, men Azure/subscription mangler. Monitoring kræver Azure-login: {0}" -f $azureError)
+                            if ($requestedAzure -and -not [bool] $connectionResult.AzureConnected -and -not [string]::IsNullOrWhiteSpace($azureError)) {
+                                Set-UiStatus -Message ("Azure/subscription mangler. Monitoring kræver Azure-login: {0}" -f $azureError)
                             }
                             else {
                                 Set-UiStatus -Message 'Connection-worker færdig. Forbindelsesoplysninger er indlæst.'
