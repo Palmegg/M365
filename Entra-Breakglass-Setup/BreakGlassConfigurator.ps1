@@ -25,7 +25,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 $script:AppName = 'NetIP Entra Break Glass Configurator'
-$script:AppVersion = '1.0.16'
+$script:AppVersion = '1.0.17'
 $script:ProjectRoot = Split-Path -Parent $PSCommandPath
 if ([string]::IsNullOrWhiteSpace($script:ProjectRoot)) {
     $script:ProjectRoot = (Get-Location).Path
@@ -1270,6 +1270,25 @@ function Format-NullableBoolean {
     return $text
 }
 
+function Set-EnsureStatus {
+    [CmdletBinding()]
+    param(
+        [AllowNull()] $Object,
+        [Parameter(Mandatory)][string] $Status,
+        [AllowNull()][string] $Detail
+    )
+
+    if ($null -eq $Object) {
+        return $null
+    }
+
+    $Object | Add-Member -MemberType NoteProperty -Name EnsureStatus -Value $Status -Force
+    if (-not [string]::IsNullOrWhiteSpace($Detail)) {
+        $Object | Add-Member -MemberType NoteProperty -Name EnsureDetail -Value $Detail -Force
+    }
+    return $Object
+}
+
 function Get-OnMicrosoftDomain {
     [CmdletBinding()]
     param([AllowNull()] $Organization)
@@ -1499,7 +1518,7 @@ function Ensure-BreakGlassUser {
     $upn = ConvertTo-BreakGlassUpn -Prefix $Prefix -OnMicrosoftDomain $OnMicrosoftDomain
 
     if ($script:State.Mock) {
-        return [pscustomobject]@{ id = "mock-user-$Prefix"; userPrincipalName = $upn; displayName = $DisplayName; accountEnabled = $true; Action = 'MockValidated' }
+        return [pscustomobject]@{ id = "mock-user-$Prefix"; userPrincipalName = $upn; displayName = $DisplayName; accountEnabled = $true; Action = 'MockValidated'; EnsureStatus = 'MockValidated'; EnsureDetail = 'Mock user validated.' }
     }
 
     $existing = Get-BreakGlassUser -UserPrincipalName $upn
@@ -1509,15 +1528,15 @@ function Ensure-BreakGlassUser {
         if ($existingAccountEnabled -ne $true) {
             Write-AppLog -Level WARN -Message "Brugeren findes men er ikke enabled: $upn"
         }
-        return $existing
+        return Set-EnsureStatus -Object $existing -Status 'AlreadyExists' -Detail 'Existing break-glass user reused.'
     }
 
     if (-not $Apply) {
         Write-AppLog -Level PLAN -Message "Plan: opret bruger $upn"
-        return [pscustomobject]@{ id = "planned-user-$Prefix"; userPrincipalName = $upn; displayName = $DisplayName; accountEnabled = $true; Planned = $true }
+        return [pscustomobject]@{ id = "planned-user-$Prefix"; userPrincipalName = $upn; displayName = $DisplayName; accountEnabled = $true; Planned = $true; EnsureStatus = 'PlannedCreate'; EnsureDetail = 'User will be created in Configuration mode.' }
     }
 
-    return New-BreakGlassUser -UserPrincipalName $upn -DisplayName $DisplayName
+    return Set-EnsureStatus -Object (New-BreakGlassUser -UserPrincipalName $upn -DisplayName $DisplayName) -Status 'Created' -Detail 'User was created.'
 }
 
 function Get-BreakGlassGroup {
@@ -1557,7 +1576,7 @@ function Ensure-BreakGlassGroup {
     )
 
     if ($script:State.Mock) {
-        return [pscustomobject]@{ id = 'mock-bg-group'; displayName = $DisplayName; isAssignableToRole = $true; securityEnabled = $true; mailEnabled = $false }
+        return [pscustomobject]@{ id = 'mock-bg-group'; displayName = $DisplayName; isAssignableToRole = $true; securityEnabled = $true; mailEnabled = $false; EnsureStatus = 'MockValidated'; EnsureDetail = 'Mock role-assignable group validated.' }
     }
 
     $group = Get-BreakGlassGroup -DisplayName $DisplayName
@@ -1565,16 +1584,17 @@ function Ensure-BreakGlassGroup {
         Write-AppLog -Level PASS -Message "Gruppe findes: $DisplayName"
         if ($group.isAssignableToRole -ne $true) {
             Write-AppLog -Level WARN -Message "Gruppen findes, men isAssignableToRole er ikke true. Ny rolle-assignable gruppe kan være nødvendig."
+            return Set-EnsureStatus -Object $group -Status 'Incompatible' -Detail 'Existing group is not role-assignable and cannot receive Entra directory roles.'
         }
-        return $group
+        return Set-EnsureStatus -Object $group -Status 'AlreadyExists' -Detail 'Existing role-assignable group reused.'
     }
 
     if (-not $Apply) {
         Write-AppLog -Level PLAN -Message "Plan: opret rolle-assignable gruppe $DisplayName"
-        return [pscustomobject]@{ id = 'planned-bg-group'; displayName = $DisplayName; isAssignableToRole = $true; securityEnabled = $true; mailEnabled = $false; Planned = $true }
+        return [pscustomobject]@{ id = 'planned-bg-group'; displayName = $DisplayName; isAssignableToRole = $true; securityEnabled = $true; mailEnabled = $false; Planned = $true; EnsureStatus = 'PlannedCreate'; EnsureDetail = 'Role-assignable group will be created in Configuration mode.' }
     }
 
-    return New-BreakGlassRoleAssignableGroup -DisplayName $DisplayName
+    return Set-EnsureStatus -Object (New-BreakGlassRoleAssignableGroup -DisplayName $DisplayName) -Status 'Created' -Detail 'Role-assignable group was created.'
 }
 
 function Ensure-GroupMember {
@@ -1673,7 +1693,12 @@ function Ensure-BreakGlassGlobalAdminGroupAssignment {
     )
 
     if ($Group.isAssignableToRole -ne $true -and -not ($Group.id -like 'planned-*')) {
-        throw "Gruppen '$($Group.displayName)' er ikke role-assignable og kan derfor ikke tildeles Global Administrator."
+        $message = "Gruppen '$($Group.displayName)' er ikke role-assignable og kan derfor ikke tildeles Global Administrator."
+        if (-not $Apply) {
+            Write-AppLog -Level WARN -Message $message
+            return [pscustomobject]@{ Principal = $Group.displayName; Role = 'Global Administrator'; Scope = '/'; Status = 'Incompatible'; AssignmentId = ''; Message = $message }
+        }
+        throw $message
     }
     return Ensure-DirectoryRoleAssignment -Principal $Group -PrincipalLabel $Group.displayName -RoleDisplayName 'Global Administrator' -DirectoryScopeId '/' -Apply $Apply
 }
@@ -1944,19 +1969,30 @@ function Ensure-RestrictedManagementAdministrativeUnit {
     )
 
     if ($script:State.Mock) {
-        return [pscustomobject]@{ id = 'mock-rmau'; displayName = $DisplayName; isMemberManagementRestricted = $true }
+        return [pscustomobject]@{ id = 'mock-rmau'; displayName = $DisplayName; isMemberManagementRestricted = $true; EnsureStatus = 'MockValidated'; EnsureDetail = 'Mock restricted administrative unit validated.' }
     }
 
     $unit = Get-RestrictedManagementAdministrativeUnit -DisplayName $DisplayName
     if ($unit) {
         Write-AppLog -Level PASS -Message "RMAU findes: $DisplayName"
-        return $unit
+        $isRestricted = Get-ObjectPropertyValue -InputObject $unit -Name 'isMemberManagementRestricted'
+        if ($isRestricted -ne $true) {
+            Write-AppLog -Level WARN -Message "RMAU findes, men isMemberManagementRestricted er ikke true: $DisplayName"
+            if (-not $Apply) {
+                return Set-EnsureStatus -Object $unit -Status 'PlannedUpdate' -Detail 'Existing administrative unit will be updated to restricted member management in Configuration mode.'
+            }
+            $body = @{ isMemberManagementRestricted = $true } | ConvertTo-Json -Depth 10
+            Invoke-GraphRequestSafe -Method PATCH -Uri "https://graph.microsoft.com/beta/directory/administrativeUnits/$($unit.id)" -Body $body | Out-Null
+            $unit = Get-RestrictedManagementAdministrativeUnit -DisplayName $DisplayName
+            return Set-EnsureStatus -Object $unit -Status 'Updated' -Detail 'Existing administrative unit was updated to restricted member management.'
+        }
+        return Set-EnsureStatus -Object $unit -Status 'AlreadyConfigured' -Detail 'Existing restricted administrative unit reused.'
     }
     if (-not $Apply) {
         Write-AppLog -Level PLAN -Message "Plan: opret RMAU $DisplayName"
-        return [pscustomobject]@{ id = 'planned-rmau'; displayName = $DisplayName; isMemberManagementRestricted = $true; Planned = $true }
+        return [pscustomobject]@{ id = 'planned-rmau'; displayName = $DisplayName; isMemberManagementRestricted = $true; Planned = $true; EnsureStatus = 'PlannedCreate'; EnsureDetail = 'Restricted administrative unit will be created in Configuration mode.' }
     }
-    return New-RestrictedManagementAdministrativeUnit -DisplayName $DisplayName
+    return Set-EnsureStatus -Object (New-RestrictedManagementAdministrativeUnit -DisplayName $DisplayName) -Status 'Created' -Detail 'Restricted administrative unit was created.'
 }
 
 function Ensure-RmauMember {
@@ -2052,7 +2088,15 @@ function Ensure-RmauScopedAdministration {
     )
 
     if ($AdminGroup.isAssignableToRole -ne $true -and -not ($AdminGroup.id -like 'planned-*')) {
-        throw "RMAU admin-gruppen '$($AdminGroup.displayName)' er ikke role-assignable og kan derfor ikke få scoped administratorroller."
+        $message = "RMAU admin-gruppen '$($AdminGroup.displayName)' er ikke role-assignable og kan derfor ikke få scoped administratorroller."
+        if (-not $Apply) {
+            Write-AppLog -Level WARN -Message $message
+            return @(
+                [pscustomobject]@{ Principal = $AdminGroup.displayName; Role = 'User Administrator'; Scope = "/administrativeUnits/$($AdministrativeUnit.id)"; Status = 'Incompatible'; AssignmentId = ''; Message = $message }
+                [pscustomobject]@{ Principal = $AdminGroup.displayName; Role = 'Groups Administrator'; Scope = "/administrativeUnits/$($AdministrativeUnit.id)"; Status = 'Incompatible'; AssignmentId = ''; Message = $message }
+            )
+        }
+        throw $message
     }
 
     $scope = "/administrativeUnits/$($AdministrativeUnit.id)"
@@ -2087,7 +2131,7 @@ function Get-AuthenticationStrengthPolicy {
     return Invoke-GraphGetAllPages -Uri "https://graph.microsoft.com/beta/identity/conditionalAccess/authenticationStrength/policies?`$filter=$filter" | Select-Object -First 1
 }
 
-function New-BreakGlassAuthenticationStrengthPolicy {
+function New-BreakGlassAuthenticationStrengthPolicyBody {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][string] $DisplayName,
@@ -2111,7 +2155,65 @@ function New-BreakGlassAuthenticationStrengthPolicy {
             }
         )
     }
+    return $body
+}
+
+function New-BreakGlassAuthenticationStrengthPolicyPatchBody {
+    [CmdletBinding()]
+    param([string[]] $AllowedAaguids = @())
+
+    $body = @{
+        description         = 'Break-glass authentication strength requiring FIDO2.'
+        allowedCombinations = @('fido2')
+    }
+    $allowedAaguidList = @($AllowedAaguids | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    if ($allowedAaguidList.Count -gt 0) {
+        $body.combinationConfigurations = @(
+            @{
+                '@odata.type'  = '#microsoft.graph.fido2CombinationConfiguration'
+                appliesToCombinations = @('fido2')
+                allowedAAGUIDs = $allowedAaguidList
+            }
+        )
+    }
+    return $body
+}
+
+function New-BreakGlassAuthenticationStrengthPolicy {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string] $DisplayName,
+        [string[]] $AllowedAaguids = @()
+    )
+
+    $body = New-BreakGlassAuthenticationStrengthPolicyBody -DisplayName $DisplayName -AllowedAaguids $AllowedAaguids
     return Invoke-GraphRequestSafe -Method POST -Uri 'https://graph.microsoft.com/beta/identity/conditionalAccess/authenticationStrength/policies' -Body $body
+}
+
+function Test-AuthenticationStrengthNeedsUpdate {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] $Policy,
+        [string[]] $AllowedAaguids = @()
+    )
+
+    $allowedCombinations = @(Get-ObjectPropertyValue -InputObject $Policy -Name 'allowedCombinations')
+    if ($allowedCombinations -notcontains 'fido2') {
+        return $true
+    }
+
+    $desiredAaguids = @($AllowedAaguids | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | ForEach-Object { $_.ToLowerInvariant() } | Sort-Object -Unique)
+    if ($desiredAaguids.Count -eq 0) {
+        return $false
+    }
+
+    $existingAaguids = @()
+    $configs = @(Get-ObjectPropertyValue -InputObject $Policy -Name 'combinationConfigurations')
+    foreach ($config in $configs) {
+        $existingAaguids += @(Get-ObjectPropertyValue -InputObject $config -Name 'allowedAAGUIDs')
+    }
+    $existingAaguids = @($existingAaguids | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | ForEach-Object { ([string] $_).ToLowerInvariant() } | Sort-Object -Unique)
+    return ((Compare-Object -ReferenceObject $desiredAaguids -DifferenceObject $existingAaguids).Count -gt 0)
 }
 
 function Ensure-BreakGlassAuthenticationStrengthPolicy {
@@ -2123,19 +2225,29 @@ function Ensure-BreakGlassAuthenticationStrengthPolicy {
     )
 
     if ($script:State.Mock) {
-        return [pscustomobject]@{ id = 'mock-auth-strength'; displayName = $DisplayName; allowedCombinations = @('fido2') }
+        return [pscustomobject]@{ id = 'mock-auth-strength'; displayName = $DisplayName; allowedCombinations = @('fido2'); EnsureStatus = 'MockValidated'; EnsureDetail = 'Mock authentication strength validated.' }
     }
 
     $existing = Get-AuthenticationStrengthPolicy -DisplayName $DisplayName
     if ($existing) {
         Write-AppLog -Level PASS -Message "Authentication strength findes: $DisplayName"
-        return $existing
+        if (Test-AuthenticationStrengthNeedsUpdate -Policy $existing -AllowedAaguids $AllowedAaguids) {
+            Write-AppLog -Level WARN -Message "Authentication strength findes, men matcher ikke ønsket FIDO2/AAGUID-konfiguration: $DisplayName"
+            if (-not $Apply) {
+                return Set-EnsureStatus -Object $existing -Status 'PlannedUpdate' -Detail 'Existing authentication strength will be updated to requested FIDO2/AAGUID settings in Configuration mode.'
+            }
+            $body = New-BreakGlassAuthenticationStrengthPolicyPatchBody -AllowedAaguids $AllowedAaguids
+            Invoke-GraphRequestSafe -Method PATCH -Uri "https://graph.microsoft.com/beta/identity/conditionalAccess/authenticationStrength/policies/$($existing.id)" -Body $body | Out-Null
+            $existing = Get-AuthenticationStrengthPolicy -DisplayName $DisplayName
+            return Set-EnsureStatus -Object $existing -Status 'Updated' -Detail 'Existing authentication strength was updated.'
+        }
+        return Set-EnsureStatus -Object $existing -Status 'AlreadyConfigured' -Detail 'Existing authentication strength reused.'
     }
     if (-not $Apply) {
         Write-AppLog -Level PLAN -Message "Plan: opret authentication strength $DisplayName"
-        return [pscustomobject]@{ id = 'planned-auth-strength'; displayName = $DisplayName; allowedCombinations = @('fido2') }
+        return [pscustomobject]@{ id = 'planned-auth-strength'; displayName = $DisplayName; allowedCombinations = @('fido2'); EnsureStatus = 'PlannedCreate'; EnsureDetail = 'Authentication strength will be created in Configuration mode.' }
     }
-    return New-BreakGlassAuthenticationStrengthPolicy -DisplayName $DisplayName -AllowedAaguids $AllowedAaguids
+    return Set-EnsureStatus -Object (New-BreakGlassAuthenticationStrengthPolicy -DisplayName $DisplayName -AllowedAaguids $AllowedAaguids) -Status 'Created' -Detail 'Authentication strength was created.'
 }
 
 function Get-ConditionalAccessPolicyByName {
@@ -2164,7 +2276,7 @@ function Backup-ConditionalAccessPolicies {
     return $backupPath
 }
 
-function New-BreakGlassConditionalAccessPolicy {
+function New-BreakGlassConditionalAccessPolicyBody {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][string] $DisplayName,
@@ -2195,6 +2307,19 @@ function New-BreakGlassConditionalAccessPolicy {
             }
         }
     }
+    return $body
+}
+
+function New-BreakGlassConditionalAccessPolicy {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string] $DisplayName,
+        [Parameter(Mandatory)][string] $GroupId,
+        [Parameter(Mandatory)][string] $AuthenticationStrengthId,
+        [Parameter(Mandatory)][string] $State
+    )
+
+    $body = New-BreakGlassConditionalAccessPolicyBody -DisplayName $DisplayName -GroupId $GroupId -AuthenticationStrengthId $AuthenticationStrengthId -State $State
     return Invoke-GraphRequestSafe -Method POST -Uri 'https://graph.microsoft.com/v1.0/identity/conditionalAccess/policies' -Body $body
 }
 
@@ -2211,6 +2336,44 @@ function ConvertTo-GraphConditionalAccessState {
     }
 }
 
+function Test-ConditionalAccessPolicyNeedsUpdate {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] $Policy,
+        [Parameter(Mandatory)][string] $GroupId,
+        [Parameter(Mandatory)][string] $AuthenticationStrengthId,
+        [Parameter(Mandatory)][string] $State
+    )
+
+    $desiredState = ConvertTo-GraphConditionalAccessState -State $State
+    $currentState = [string] (Get-ObjectPropertyValue -InputObject $Policy -Name 'state')
+    if ($currentState -ne $desiredState) {
+        return $true
+    }
+
+    $conditions = Get-ObjectPropertyValue -InputObject $Policy -Name 'conditions'
+    $users = Get-ObjectPropertyValue -InputObject $conditions -Name 'users'
+    $includeGroups = @(Get-ObjectPropertyValue -InputObject $users -Name 'includeGroups')
+    if ($includeGroups -notcontains $GroupId) {
+        return $true
+    }
+
+    $applications = Get-ObjectPropertyValue -InputObject $conditions -Name 'applications'
+    $includeApplications = @(Get-ObjectPropertyValue -InputObject $applications -Name 'includeApplications')
+    if ($includeApplications -notcontains 'All') {
+        return $true
+    }
+
+    $grantControls = Get-ObjectPropertyValue -InputObject $Policy -Name 'grantControls'
+    $authenticationStrength = Get-ObjectPropertyValue -InputObject $grantControls -Name 'authenticationStrength'
+    $currentAuthStrengthId = [string] (Get-ObjectPropertyValue -InputObject $authenticationStrength -Name 'id')
+    if ($currentAuthStrengthId -ne $AuthenticationStrengthId) {
+        return $true
+    }
+
+    return $false
+}
+
 function Ensure-BreakGlassConditionalAccessPolicy {
     [CmdletBinding()]
     param(
@@ -2222,19 +2385,29 @@ function Ensure-BreakGlassConditionalAccessPolicy {
     )
 
     if ($script:State.Mock) {
-        return [pscustomobject]@{ id = 'mock-ca-policy'; displayName = $DisplayName; state = $State }
+        return [pscustomobject]@{ id = 'mock-ca-policy'; displayName = $DisplayName; state = $State; EnsureStatus = 'MockValidated'; EnsureDetail = 'Mock dedicated CA policy validated.' }
     }
 
     $existing = Get-ConditionalAccessPolicyByName -DisplayName $DisplayName
     if ($existing) {
         Write-AppLog -Level PASS -Message "Dedikeret CA policy findes: $DisplayName"
-        return $existing
+        if (Test-ConditionalAccessPolicyNeedsUpdate -Policy $existing -GroupId $GroupId -AuthenticationStrengthId $AuthenticationStrengthId -State $State) {
+            Write-AppLog -Level WARN -Message "Dedikeret CA policy findes, men matcher ikke ønsket break-glass-konfiguration: $DisplayName"
+            if (-not $Apply) {
+                return Set-EnsureStatus -Object $existing -Status 'PlannedUpdate' -Detail 'Existing dedicated CA policy will be updated in Configuration mode.'
+            }
+            $body = New-BreakGlassConditionalAccessPolicyBody -DisplayName $DisplayName -GroupId $GroupId -AuthenticationStrengthId $AuthenticationStrengthId -State $State
+            Invoke-GraphRequestSafe -Method PATCH -Uri "https://graph.microsoft.com/v1.0/identity/conditionalAccess/policies/$($existing.id)" -Body $body | Out-Null
+            $existing = Get-ConditionalAccessPolicyByName -DisplayName $DisplayName
+            return Set-EnsureStatus -Object $existing -Status 'Updated' -Detail 'Existing dedicated CA policy was updated.'
+        }
+        return Set-EnsureStatus -Object $existing -Status 'AlreadyConfigured' -Detail 'Existing dedicated CA policy reused.'
     }
     if (-not $Apply) {
         Write-AppLog -Level PLAN -Message "Plan: opret CA policy $DisplayName i state $State"
-        return [pscustomobject]@{ id = 'planned-ca-policy'; displayName = $DisplayName; state = $State }
+        return [pscustomobject]@{ id = 'planned-ca-policy'; displayName = $DisplayName; state = $State; EnsureStatus = 'PlannedCreate'; EnsureDetail = 'Dedicated CA policy will be created in Configuration mode.' }
     }
-    return New-BreakGlassConditionalAccessPolicy -DisplayName $DisplayName -GroupId $GroupId -AuthenticationStrengthId $AuthenticationStrengthId -State $State
+    return Set-EnsureStatus -Object (New-BreakGlassConditionalAccessPolicy -DisplayName $DisplayName -GroupId $GroupId -AuthenticationStrengthId $AuthenticationStrengthId -State $State) -Status 'Created' -Detail 'Dedicated CA policy was created.'
 }
 
 function Add-BreakGlassGroupExclusionToExistingCAPolicies {
@@ -2331,11 +2504,14 @@ function Get-OrCreate-ResourceGroup {
         [Parameter(Mandatory)][bool] $Apply
     )
 
-    if ($script:State.Mock) { return [pscustomobject]@{ ResourceGroupName = $Name; Location = $Location; ResourceId = "/mock/resourceGroups/$Name" } }
+    if ($script:State.Mock) { return [pscustomobject]@{ ResourceGroupName = $Name; Location = $Location; ResourceId = "/mock/resourceGroups/$Name"; EnsureStatus = 'MockValidated'; EnsureDetail = 'Mock resource group validated.' } }
     $rg = Get-AzResourceGroup -Name $Name -ErrorAction SilentlyContinue
-    if ($rg) { return $rg }
-    if (-not $Apply) { Write-AppLog -Level PLAN -Message "Plan: opret resource group $Name"; return [pscustomobject]@{ ResourceGroupName = $Name; Location = $Location; Planned = $true } }
-    return New-AzResourceGroup -Name $Name -Location $Location -ErrorAction Stop
+    if ($rg) {
+        Write-AppLog -Level PASS -Message "Resource group findes: $Name"
+        return Set-EnsureStatus -Object $rg -Status 'AlreadyExists' -Detail 'Existing resource group reused.'
+    }
+    if (-not $Apply) { Write-AppLog -Level PLAN -Message "Plan: opret resource group $Name"; return [pscustomobject]@{ ResourceGroupName = $Name; Location = $Location; Planned = $true; EnsureStatus = 'PlannedCreate'; EnsureDetail = 'Resource group will be created in Configuration mode.' } }
+    return Set-EnsureStatus -Object (New-AzResourceGroup -Name $Name -Location $Location -ErrorAction Stop) -Status 'Created' -Detail 'Resource group was created.'
 }
 
 function Get-OrCreate-LogAnalyticsWorkspace {
@@ -2347,11 +2523,14 @@ function Get-OrCreate-LogAnalyticsWorkspace {
         [Parameter(Mandatory)][bool] $Apply
     )
 
-    if ($script:State.Mock) { return [pscustomobject]@{ Name = $WorkspaceName; ResourceId = "/mock/workspaces/$WorkspaceName"; CustomerId = 'mock-workspace-id' } }
+    if ($script:State.Mock) { return [pscustomobject]@{ Name = $WorkspaceName; ResourceId = "/mock/workspaces/$WorkspaceName"; CustomerId = 'mock-workspace-id'; EnsureStatus = 'MockValidated'; EnsureDetail = 'Mock Log Analytics workspace validated.' } }
     $workspace = Get-AzOperationalInsightsWorkspace -ResourceGroupName $ResourceGroupName -Name $WorkspaceName -ErrorAction SilentlyContinue
-    if ($workspace) { return $workspace }
-    if (-not $Apply) { Write-AppLog -Level PLAN -Message "Plan: opret Log Analytics workspace $WorkspaceName"; return [pscustomobject]@{ Name = $WorkspaceName; ResourceId = "/planned/workspaces/$WorkspaceName"; Planned = $true } }
-    return New-AzOperationalInsightsWorkspace -ResourceGroupName $ResourceGroupName -Name $WorkspaceName -Location $Location -Sku PerGB2018 -ErrorAction Stop
+    if ($workspace) {
+        Write-AppLog -Level PASS -Message "Log Analytics workspace findes: $WorkspaceName"
+        return Set-EnsureStatus -Object $workspace -Status 'AlreadyExists' -Detail 'Existing Log Analytics workspace reused.'
+    }
+    if (-not $Apply) { Write-AppLog -Level PLAN -Message "Plan: opret Log Analytics workspace $WorkspaceName"; return [pscustomobject]@{ Name = $WorkspaceName; ResourceId = "/planned/workspaces/$WorkspaceName"; Planned = $true; EnsureStatus = 'PlannedCreate'; EnsureDetail = 'Log Analytics workspace will be created in Configuration mode.' } }
+    return Set-EnsureStatus -Object (New-AzOperationalInsightsWorkspace -ResourceGroupName $ResourceGroupName -Name $WorkspaceName -Location $Location -Sku PerGB2018 -ErrorAction Stop) -Status 'Created' -Detail 'Log Analytics workspace was created.'
 }
 
 function Ensure-EntraDiagnosticSettingToLogAnalytics {
@@ -2363,9 +2542,33 @@ function Ensure-EntraDiagnosticSettingToLogAnalytics {
     )
 
     if ($script:State.Mock) { return [pscustomobject]@{ Name = $DiagnosticSettingName; Status = 'MockValidated' } }
+    $path = "/providers/microsoft.aadiam/diagnosticSettings/$DiagnosticSettingName?api-version=2017-04-01-preview"
+    $existing = $null
+    try {
+        $existingResponse = Invoke-AzRestMethod -Method GET -Path $path -ErrorAction Stop
+        if ($existingResponse -and $existingResponse.Content) {
+            $existing = $existingResponse.Content | ConvertFrom-Json
+        }
+    }
+    catch {
+        $existing = $null
+    }
+
+    if ($existing) {
+        $existingWorkspaceId = [string] (Get-ObjectPropertyValue -InputObject (Get-ObjectPropertyValue -InputObject $existing -Name 'properties') -Name 'workspaceId')
+        if ($existingWorkspaceId -eq $WorkspaceResourceId) {
+            Write-AppLog -Level PASS -Message "Entra diagnostic setting findes og peger på ønsket workspace: $DiagnosticSettingName"
+            return [pscustomobject]@{ Name = $DiagnosticSettingName; Status = 'AlreadyConfigured'; WorkspaceResourceId = $WorkspaceResourceId }
+        }
+        if (-not $Apply) {
+            Write-AppLog -Level PLAN -Message "Plan: opdater Entra diagnostic setting $DiagnosticSettingName til ønsket workspace"
+            return [pscustomobject]@{ Name = $DiagnosticSettingName; Status = 'PlannedUpdate'; WorkspaceResourceId = $WorkspaceResourceId; CurrentWorkspaceResourceId = $existingWorkspaceId }
+        }
+    }
+
     if (-not $Apply) {
         Write-AppLog -Level PLAN -Message "Plan: opret/opdater Entra diagnostic setting $DiagnosticSettingName"
-        return [pscustomobject]@{ Name = $DiagnosticSettingName; Status = 'Planned' }
+        return [pscustomobject]@{ Name = $DiagnosticSettingName; Status = 'PlannedCreate'; WorkspaceResourceId = $WorkspaceResourceId }
     }
 
     $body = @{
@@ -2378,10 +2581,9 @@ function Ensure-EntraDiagnosticSettingToLogAnalytics {
         }
     } | ConvertTo-Json -Depth 20
 
-    $path = "/providers/microsoft.aadiam/diagnosticSettings/$DiagnosticSettingName?api-version=2017-04-01-preview"
     try {
         Invoke-AzRestMethod -Method PUT -Path $path -Payload $body -ErrorAction Stop | Out-Null
-        return [pscustomobject]@{ Name = $DiagnosticSettingName; Status = 'Configured' }
+        return [pscustomobject]@{ Name = $DiagnosticSettingName; Status = if ($existing) { 'Updated' } else { 'Created' }; WorkspaceResourceId = $WorkspaceResourceId }
     }
     catch {
         Write-SafeError -Message 'Diagnostic setting kunne ikke konfigureres.' -ErrorRecord $_
@@ -2401,9 +2603,26 @@ function Get-OrCreate-ActionGroup {
     )
 
     $resourceId = "/subscriptions/$SubscriptionId/resourceGroups/$ResourceGroupName/providers/Microsoft.Insights/actionGroups/$Name"
-    if ($script:State.Mock -or -not $Apply) {
+    if ($script:State.Mock) {
         Write-AppLog -Level PLAN -Message "Plan/mock: action group $Name"
-        return [pscustomobject]@{ Name = $Name; Id = $resourceId; Status = if ($script:State.Mock) { 'MockValidated' } else { 'Planned' } }
+        return [pscustomobject]@{ Name = $Name; Id = $resourceId; Status = 'MockValidated' }
+    }
+
+    $path = "$resourceId?api-version=2022-06-01"
+    $existing = $null
+    try {
+        $existingResponse = Invoke-AzRestMethod -Method GET -Path $path -ErrorAction Stop
+        if ($existingResponse -and $existingResponse.Content) {
+            $existing = $existingResponse.Content | ConvertFrom-Json
+        }
+    }
+    catch {
+        $existing = $null
+    }
+
+    if (-not $Apply) {
+        Write-AppLog -Level PLAN -Message "Plan/mock: action group $Name"
+        return [pscustomobject]@{ Name = $Name; Id = $resourceId; Status = if ($existing) { 'PlannedUpdate' } else { 'PlannedCreate' } }
     }
 
     $receivers = @()
@@ -2423,9 +2642,8 @@ function Get-OrCreate-ActionGroup {
             emailReceivers = $receivers
         }
     } | ConvertTo-Json -Depth 20
-    $path = "$resourceId?api-version=2022-06-01"
     Invoke-AzRestMethod -Method PUT -Path $path -Payload $body -ErrorAction Stop | Out-Null
-    return [pscustomobject]@{ Name = $Name; Id = $resourceId; Status = 'Configured' }
+    return [pscustomobject]@{ Name = $Name; Id = $resourceId; Status = if ($existing) { 'Updated' } else { 'Created' } }
 }
 
 function New-BreakGlassSignInKql {
@@ -2474,9 +2692,26 @@ function Ensure-ScheduledQueryRule {
     )
 
     $resourceId = "/subscriptions/$SubscriptionId/resourceGroups/$ResourceGroupName/providers/Microsoft.Insights/scheduledQueryRules/$Name"
-    if ($script:State.Mock -or -not $Apply) {
+    if ($script:State.Mock) {
         Write-AppLog -Level PLAN -Message "Plan/mock: scheduled query rule $Name"
-        return [pscustomobject]@{ Name = $Name; Id = $resourceId; Status = if ($script:State.Mock) { 'MockValidated' } else { 'Planned' }; Query = $Query }
+        return [pscustomobject]@{ Name = $Name; Id = $resourceId; Status = 'MockValidated'; Query = $Query }
+    }
+
+    $path = "$resourceId?api-version=2021-08-01"
+    $existing = $null
+    try {
+        $existingResponse = Invoke-AzRestMethod -Method GET -Path $path -ErrorAction Stop
+        if ($existingResponse -and $existingResponse.Content) {
+            $existing = $existingResponse.Content | ConvertFrom-Json
+        }
+    }
+    catch {
+        $existing = $null
+    }
+
+    if (-not $Apply) {
+        Write-AppLog -Level PLAN -Message "Plan/mock: scheduled query rule $Name"
+        return [pscustomobject]@{ Name = $Name; Id = $resourceId; Status = if ($existing) { 'PlannedUpdate' } else { 'PlannedCreate' }; Query = $Query }
     }
 
     $body = @{
@@ -2506,8 +2741,8 @@ function Ensure-ScheduledQueryRule {
             }
         }
     } | ConvertTo-Json -Depth 30
-    Invoke-AzRestMethod -Method PUT -Path "$resourceId?api-version=2021-08-01" -Payload $body -ErrorAction Stop | Out-Null
-    return [pscustomobject]@{ Name = $Name; Id = $resourceId; Status = 'Configured'; Query = $Query }
+    Invoke-AzRestMethod -Method PUT -Path $path -Payload $body -ErrorAction Stop | Out-Null
+    return [pscustomobject]@{ Name = $Name; Id = $resourceId; Status = if ($existing) { 'Updated' } else { 'Created' }; Query = $Query }
 }
 
 function Test-RequiredModulesPrecheck {
@@ -2695,8 +2930,10 @@ function Invoke-BreakGlassConfiguration {
             $subscriptionId = $script:State.AzureSubscriptionId
             Write-ExecutionStep -Status RUNNING -Message "Sikrer resource group: $($Config.ResourceGroupName)"
             $rg = Get-OrCreate-ResourceGroup -Name $Config.ResourceGroupName -Location $Config.AzureRegion -Apply $apply
+            $monitoring.Entries += [pscustomobject]@{ Name = $Config.ResourceGroupName; Type = 'ResourceGroup'; Status = (Get-ReportProperty -Object $rg -Name 'EnsureStatus'); Id = (Get-ReportProperty -Object $rg -Name 'ResourceId'); Detail = (Get-ReportProperty -Object $rg -Name 'EnsureDetail') }
             Write-ExecutionStep -Status RUNNING -Message "Sikrer Log Analytics workspace: $($Config.WorkspaceName)"
             $workspace = Get-OrCreate-LogAnalyticsWorkspace -ResourceGroupName $Config.ResourceGroupName -WorkspaceName $Config.WorkspaceName -Location $Config.AzureRegion -Apply $apply
+            $monitoring.Entries += [pscustomobject]@{ Name = $Config.WorkspaceName; Type = 'LogAnalyticsWorkspace'; Status = (Get-ReportProperty -Object $workspace -Name 'EnsureStatus'); Id = (Get-ReportProperty -Object $workspace -Name 'ResourceId'); Detail = (Get-ReportProperty -Object $workspace -Name 'EnsureDetail') }
             $workspaceResourceId = if ($workspace.ResourceId) { $workspace.ResourceId } elseif ($workspace.Id) { $workspace.Id } else { "/subscriptions/$subscriptionId/resourceGroups/$($Config.ResourceGroupName)/providers/Microsoft.OperationalInsights/workspaces/$($Config.WorkspaceName)" }
             Write-ExecutionStep -Status RUNNING -Message "Sikrer Entra diagnostic setting: $($Config.DiagnosticSettingName)"
             $diag = Ensure-EntraDiagnosticSettingToLogAnalytics -DiagnosticSettingName $Config.DiagnosticSettingName -WorkspaceResourceId $workspaceResourceId -Apply $apply
@@ -2746,6 +2983,8 @@ function Invoke-BreakGlassConfiguration {
             userPrincipalName = [string] (Get-ObjectPropertyValue -InputObject $_ -Name 'userPrincipalName')
             displayName       = [string] (Get-ObjectPropertyValue -InputObject $_ -Name 'displayName')
             accountEnabled    = Format-NullableBoolean -Value (Get-ObjectPropertyValue -InputObject $_ -Name 'accountEnabled')
+            ensureStatus      = [string] (Get-ObjectPropertyValue -InputObject $_ -Name 'EnsureStatus')
+            ensureDetail      = [string] (Get-ObjectPropertyValue -InputObject $_ -Name 'EnsureDetail')
         }
     })
     $result | Add-Member -MemberType NoteProperty -Name Users -Value ([object]$resultUsers)
@@ -2868,10 +3107,10 @@ function New-HtmlTable {
     if (-not $Items -or $Items.Count -eq 0) {
         return '<p>Ingen data.</p>'
     }
-    $properties = @($Items[0].PSObject.Properties.Name)
+    $properties = @($Items | ForEach-Object { $_.PSObject.Properties.Name } | Select-Object -Unique)
     $header = '<tr>' + (($properties | ForEach-Object { '<th>{0}</th>' -f (ConvertTo-HtmlEncoded $_) }) -join '') + '</tr>'
     $rows = foreach ($item in $Items) {
-        '<tr>' + (($properties | ForEach-Object { '<td>{0}</td>' -f (ConvertTo-HtmlEncoded $item.$_) }) -join '') + '</tr>'
+        '<tr>' + (($properties | ForEach-Object { '<td>{0}</td>' -f (ConvertTo-HtmlEncoded (Get-ReportProperty -Object $item -Name $_)) }) -join '') + '</tr>'
     }
     return '<table>' + $header + ($rows -join [Environment]::NewLine) + '</table>'
 }
@@ -2937,6 +3176,8 @@ function New-HtmlReport {
     <tr><th>DisplayName</th><td>$(ConvertTo-HtmlEncoded (Get-ReportProperty -Object $Result.Group -Name 'displayName'))</td></tr>
     <tr><th>ID</th><td>$(ConvertTo-HtmlEncoded (Get-ReportProperty -Object $Result.Group -Name 'id'))</td></tr>
     <tr><th>MailNickname</th><td>$(ConvertTo-HtmlEncoded (Get-ReportProperty -Object $Result.Group -Name 'mailNickname'))</td></tr>
+    <tr><th>Status</th><td>$(ConvertTo-HtmlEncoded (Get-ReportProperty -Object $Result.Group -Name 'EnsureStatus'))</td></tr>
+    <tr><th>Detail</th><td>$(ConvertTo-HtmlEncoded (Get-ReportProperty -Object $Result.Group -Name 'EnsureDetail'))</td></tr>
   </table>
   <h2>Gruppemedlemskab</h2>
   $membershipTable
@@ -2947,6 +3188,8 @@ function New-HtmlReport {
   <table>
     <tr><th>DisplayName</th><td>$(ConvertTo-HtmlEncoded (Get-ReportProperty -Object $Result.RMAU -Name 'displayName'))</td></tr>
     <tr><th>ID</th><td>$(ConvertTo-HtmlEncoded (Get-ReportProperty -Object $Result.RMAU -Name 'id'))</td></tr>
+    <tr><th>Status</th><td>$(ConvertTo-HtmlEncoded (Get-ReportProperty -Object $Result.RMAU -Name 'EnsureStatus'))</td></tr>
+    <tr><th>Detail</th><td>$(ConvertTo-HtmlEncoded (Get-ReportProperty -Object $Result.RMAU -Name 'EnsureDetail'))</td></tr>
   </table>
   <h2>RMAU medlemskab</h2>
   $rmauMembershipTable
@@ -2955,6 +3198,8 @@ function New-HtmlReport {
     <tr><th>DisplayName</th><td>$(ConvertTo-HtmlEncoded (Get-ReportProperty -Object $Result.RmauAdminGroup -Name 'displayName'))</td></tr>
     <tr><th>ID</th><td>$(ConvertTo-HtmlEncoded (Get-ReportProperty -Object $Result.RmauAdminGroup -Name 'id'))</td></tr>
     <tr><th>MailNickname</th><td>$(ConvertTo-HtmlEncoded (Get-ReportProperty -Object $Result.RmauAdminGroup -Name 'mailNickname'))</td></tr>
+    <tr><th>Status</th><td>$(ConvertTo-HtmlEncoded (Get-ReportProperty -Object $Result.RmauAdminGroup -Name 'EnsureStatus'))</td></tr>
+    <tr><th>Detail</th><td>$(ConvertTo-HtmlEncoded (Get-ReportProperty -Object $Result.RmauAdminGroup -Name 'EnsureDetail'))</td></tr>
   </table>
   <h2>RMAU administrator-medlemskab</h2>
   $rmauAdminMembershipTable
@@ -2964,12 +3209,16 @@ function New-HtmlReport {
   <table>
     <tr><th>DisplayName</th><td>$(ConvertTo-HtmlEncoded (Get-ReportProperty -Object $Result.AuthenticationStrength -Name 'displayName'))</td></tr>
     <tr><th>ID</th><td>$(ConvertTo-HtmlEncoded (Get-ReportProperty -Object $Result.AuthenticationStrength -Name 'id'))</td></tr>
+    <tr><th>Status</th><td>$(ConvertTo-HtmlEncoded (Get-ReportProperty -Object $Result.AuthenticationStrength -Name 'EnsureStatus'))</td></tr>
+    <tr><th>Detail</th><td>$(ConvertTo-HtmlEncoded (Get-ReportProperty -Object $Result.AuthenticationStrength -Name 'EnsureDetail'))</td></tr>
   </table>
   <h2>Dedikeret Conditional Access policy</h2>
   <table>
     <tr><th>DisplayName</th><td>$(ConvertTo-HtmlEncoded (Get-ReportProperty -Object $Result.ConditionalAccess -Name 'displayName'))</td></tr>
     <tr><th>ID</th><td>$(ConvertTo-HtmlEncoded (Get-ReportProperty -Object $Result.ConditionalAccess -Name 'id'))</td></tr>
     <tr><th>State</th><td>$(ConvertTo-HtmlEncoded (Get-ReportProperty -Object $Result.ConditionalAccess -Name 'state'))</td></tr>
+    <tr><th>Status</th><td>$(ConvertTo-HtmlEncoded (Get-ReportProperty -Object $Result.ConditionalAccess -Name 'EnsureStatus'))</td></tr>
+    <tr><th>Detail</th><td>$(ConvertTo-HtmlEncoded (Get-ReportProperty -Object $Result.ConditionalAccess -Name 'EnsureDetail'))</td></tr>
   </table>
   <h2>Conditional Access exclusions</h2>
   $caExclusionTable
@@ -3062,8 +3311,10 @@ function New-HandoverHtmlDocument {
   <table>
     <tr><th>RMAU</th><td>$(ConvertTo-HtmlEncoded (Get-ReportProperty -Object $Result.RMAU -Name 'displayName'))</td></tr>
     <tr><th>RMAU ID</th><td>$(ConvertTo-HtmlEncoded (Get-ReportProperty -Object $Result.RMAU -Name 'id'))</td></tr>
+    <tr><th>RMAU status</th><td>$(ConvertTo-HtmlEncoded (Get-ReportProperty -Object $Result.RMAU -Name 'EnsureStatus'))</td></tr>
     <tr><th>RMAU admin-gruppe</th><td>$(ConvertTo-HtmlEncoded (Get-ReportProperty -Object $Result.RmauAdminGroup -Name 'displayName'))</td></tr>
     <tr><th>RMAU admin-gruppe ID</th><td>$(ConvertTo-HtmlEncoded (Get-ReportProperty -Object $Result.RmauAdminGroup -Name 'id'))</td></tr>
+    <tr><th>RMAU admin-gruppe status</th><td>$(ConvertTo-HtmlEncoded (Get-ReportProperty -Object $Result.RmauAdminGroup -Name 'EnsureStatus'))</td></tr>
   </table>
   <h2>RMAU medlemskab</h2>
   $rmauMembershipTable
@@ -3075,12 +3326,14 @@ function New-HandoverHtmlDocument {
   <table>
     <tr><th>DisplayName</th><td>$(ConvertTo-HtmlEncoded (Get-ReportProperty -Object $Result.AuthenticationStrength -Name 'displayName'))</td></tr>
     <tr><th>ID</th><td>$(ConvertTo-HtmlEncoded (Get-ReportProperty -Object $Result.AuthenticationStrength -Name 'id'))</td></tr>
+    <tr><th>Status</th><td>$(ConvertTo-HtmlEncoded (Get-ReportProperty -Object $Result.AuthenticationStrength -Name 'EnsureStatus'))</td></tr>
   </table>
   <h2>Conditional Access</h2>
   <table>
     <tr><th>Dedikeret policy</th><td>$(ConvertTo-HtmlEncoded (Get-ReportProperty -Object $Result.ConditionalAccess -Name 'displayName'))</td></tr>
     <tr><th>Policy ID</th><td>$(ConvertTo-HtmlEncoded (Get-ReportProperty -Object $Result.ConditionalAccess -Name 'id'))</td></tr>
     <tr><th>State</th><td>$(ConvertTo-HtmlEncoded (Get-ReportProperty -Object $Result.ConditionalAccess -Name 'state'))</td></tr>
+    <tr><th>Status</th><td>$(ConvertTo-HtmlEncoded (Get-ReportProperty -Object $Result.ConditionalAccess -Name 'EnsureStatus'))</td></tr>
   </table>
   <h2>Conditional Access exclusions</h2>
   $caExclusionTable
