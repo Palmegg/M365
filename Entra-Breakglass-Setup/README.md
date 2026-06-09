@@ -85,13 +85,17 @@ Admin consent kan være nødvendig i kundens tenant.
 
 ## Sådan køres scriptet
 
-Åbn Windows PowerShell 5.1 og kør:
+Åbn en almindelig Windows PowerShell 5.1 konsol og kør:
 
 ```powershell
 Set-Location "C:\Users\jop\OneDrive - netIP\Dokumenter\GitHub\M365\Entra-Breakglass-Setup"
 Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 .\BreakGlassConfigurator.ps1
 ```
+
+Kør ikke første login/modulinstallation fra VS Code PowerShell Extension Terminal. WPF, Microsoft Graph interactive login og PowerShell Editor Services kan få VS Code extension-terminalen til at lukke. Brug en separat Windows PowerShell 5.1 konsol.
+
+Hvis moduler mangler, starter GUI'en en separat synlig PowerShell worker til modulinstallation. Godkend installationen i det worker-vindue, vent til den er færdig, og tryk derefter connect-knappen i GUI'en igen.
 
 Til lab uden tenant-ændringer:
 

@@ -14,7 +14,9 @@ param(
     [switch] $Mock,
     [switch] $NoApply,
     [switch] $WorkerMode,
-    [string] $WorkerConfigPath
+    [string] $WorkerConfigPath,
+    [switch] $ModuleWorkerMode,
+    [string] $ModuleWorkerLogPath
 )
 
 Set-StrictMode -Version Latest
@@ -33,6 +35,8 @@ $script:MainWindow = $null
 $script:LogTextBox = $null
 $script:LogPollTimer = $null
 $script:WorkerProcess = $null
+$script:ModuleWorkerProcess = $null
+$script:ModuleWorkerLogFile = ''
 $script:LastLogLength = 0
 $script:WizardMaxStep = 0
 $script:WizardInternalNavigation = $false
@@ -97,7 +101,7 @@ function Restart-InStaModeIfNeeded {
     [CmdletBinding()]
     param()
 
-    if ($WorkerMode) {
+    if ($WorkerMode -or $ModuleWorkerMode) {
         return
     }
 
@@ -327,6 +331,88 @@ function Import-RequiredModules {
         Write-AppLog -Message "Importerer modul: $module"
         Import-Module $module -ErrorAction Stop
     }
+}
+
+function Start-ModulePreparationWorker {
+    [CmdletBinding()]
+    param()
+
+    $folder = Join-Path -Path $script:DefaultOutputRoot -ChildPath ('ModulePreparation-{0}' -f (Get-Date -Format 'yyyyMMdd-HHmmss'))
+    New-Item -ItemType Directory -Force -Path $folder | Out-Null
+    $script:ModuleWorkerLogFile = Join-Path -Path $folder -ChildPath 'module-worker.log'
+    $powerShell = Join-Path -Path $env:SystemRoot -ChildPath 'System32\WindowsPowerShell\v1.0\powershell.exe'
+    $args = @(
+        '-NoProfile',
+        '-ExecutionPolicy',
+        'Bypass',
+        '-File',
+        ('"{0}"' -f $PSCommandPath),
+        '-ModuleWorkerMode',
+        '-ModuleWorkerLogPath',
+        ('"{0}"' -f $script:ModuleWorkerLogFile)
+    )
+    $script:ModuleWorkerProcess = Start-Process -FilePath $powerShell -ArgumentList ($args -join ' ') -PassThru -WindowStyle Normal
+    Set-UiStatus -Message 'Modulinstallation kører i et separat PowerShell vindue. Godkend prompten dér.' -Busy -Log
+}
+
+function Invoke-ModulePreparationWorkerMode {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string] $LogPath)
+
+    $script:LogFile = $LogPath
+    Write-AppLog -Message 'Module preparation worker startet.'
+    Write-Host ''
+    Write-Host 'NetIP Entra Break Glass Configurator - module preparation' -ForegroundColor Cyan
+    Write-Host 'Denne worker installerer kun PowerShell-moduler for CurrentUser.' -ForegroundColor Cyan
+    Write-Host ''
+
+    $status = Test-RequiredModules
+    $missing = @($status | Where-Object { -not $_.Present })
+    if ($missing.Count -eq 0) {
+        Write-AppLog -Message 'Alle nødvendige moduler findes allerede.'
+        Write-Host 'Alle nødvendige moduler findes allerede.' -ForegroundColor Green
+        exit 0
+    }
+
+    Write-AppLog -Level WARN -Message "Manglende moduler: $($missing.Name -join ', ')"
+    Write-Host 'Manglende moduler:' -ForegroundColor Yellow
+    foreach ($module in $missing.Name) {
+        Write-Host " - $module" -ForegroundColor Yellow
+    }
+    Write-Host ''
+    $answer = Read-Host 'Installer manglende moduler for CurrentUser fra PSGallery? Skriv Y for ja'
+    if ($answer -notin @('Y','y','YES','Yes','yes','J','j','JA','Ja','ja')) {
+        Write-AppLog -Level WARN -Message 'Modulinstallation blev afvist af brugeren.'
+        Write-Host 'Modulinstallation afbrudt.' -ForegroundColor Yellow
+        exit 20
+    }
+
+    [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+    if (-not (Get-PackageProvider -Name NuGet -ErrorAction SilentlyContinue)) {
+        Write-AppLog -Message 'Installerer NuGet package provider.'
+        Write-Host 'Installerer NuGet package provider...' -ForegroundColor Cyan
+        Install-PackageProvider -Name NuGet -MinimumVersion '2.8.5.201' -Scope CurrentUser -Force -ErrorAction Stop | Out-Null
+    }
+
+    foreach ($module in $missing.Name) {
+        Write-AppLog -Message "Installerer modul: $module"
+        Write-Host "Installerer modul: $module" -ForegroundColor Cyan
+        Install-Module -Name $module -Scope CurrentUser -Repository PSGallery -AllowClobber -Force -ErrorAction Stop
+    }
+
+    $after = Test-RequiredModules
+    $stillMissing = @($after | Where-Object { -not $_.Present })
+    if ($stillMissing.Count -gt 0) {
+        Write-AppLog -Level ERROR -Message "Moduler mangler stadig: $($stillMissing.Name -join ', ')"
+        Write-Host "Moduler mangler stadig: $($stillMissing.Name -join ', ')" -ForegroundColor Red
+        exit 30
+    }
+
+    Write-AppLog -Level PASS -Message 'Modulinstallation færdig.'
+    Write-Host ''
+    Write-Host 'Modulinstallation færdig. Du kan lukke dette vindue og trykke connect i GUI igen.' -ForegroundColor Green
+    Start-Sleep -Seconds 3
+    exit 0
 }
 
 function Connect-AppGraph {
@@ -1880,14 +1966,22 @@ function Ensure-AppModulesFromUi {
 
     if ($script:State.Mock) {
         Set-UiStatus -Message 'Mock mode: module check springes over.' -Busy
-        return
+        return $true
     }
     Set-UiStatus -Message 'Tjekker nødvendige PowerShell moduler...' -Busy -Log
     $status = Test-RequiredModules
-    Set-UiStatus -Message 'Installerer manglende moduler, hvis du godkender prompten...' -Busy
-    Install-RequiredModulesWithConsent -ModuleStatus $status
+    $missing = @($status | Where-Object { -not $_.Present })
+    if ($missing.Count -gt 0) {
+        if ($script:ModuleWorkerProcess -and -not $script:ModuleWorkerProcess.HasExited) {
+            Set-UiStatus -Message 'Modulinstallation kører allerede i separat PowerShell vindue.' -Busy
+            return $false
+        }
+        Start-ModulePreparationWorker
+        return $false
+    }
     Set-UiStatus -Message 'Importerer Microsoft Graph og Az moduler...' -Busy -Log
     Import-RequiredModules
+    return $true
 }
 
 function Connect-AllFromUi {
@@ -1895,7 +1989,7 @@ function Connect-AllFromUi {
     param()
 
     Set-UiStatus -Message 'Starter samlet forbindelse...' -Busy -Log
-    Ensure-AppModulesFromUi
+    if (-not (Ensure-AppModulesFromUi)) { return $false }
     Set-UiStatus -Message 'Forbinder til Microsoft Graph. Gennemfør loginprompten, hvis den vises...' -Busy -Log
     Connect-AppGraph | Out-Null
     if (-not [bool] $script:Ui.DisableMonitoring.IsChecked) {
@@ -1915,6 +2009,7 @@ function Connect-AllFromUi {
     }
     Update-ConnectionStatusUi
     Set-UiStatus -Message 'Forbindelser klar.' -Log
+    return $true
 }
 
 function Invoke-PrecheckFromUi {
@@ -2330,7 +2425,7 @@ function Start-BreakGlassWizard {
         try {
             Set-UiBusy -Busy $true
             Set-UiStatus -Message 'Starter Graph forbindelse...' -Busy -Log
-            Ensure-AppModulesFromUi
+            if (-not (Ensure-AppModulesFromUi)) { return }
             Set-UiStatus -Message 'Forbinder til Microsoft Graph. Gennemfør loginprompten, hvis den vises...' -Busy -Log
             Connect-AppGraph | Out-Null
             Update-ConnectionStatusUi
@@ -2350,7 +2445,7 @@ function Start-BreakGlassWizard {
         try {
             Set-UiBusy -Busy $true
             Set-UiStatus -Message 'Starter Azure forbindelse...' -Busy -Log
-            Ensure-AppModulesFromUi
+            if (-not (Ensure-AppModulesFromUi)) { return }
             Set-UiStatus -Message 'Forbinder til Azure Resource Manager. Gennemfør loginprompten, hvis den vises...' -Busy -Log
             Connect-AppAzure | Out-Null
             Update-ConnectionStatusUi
@@ -2369,7 +2464,7 @@ function Start-BreakGlassWizard {
     $script:Ui.ConnectAllButton.Add_Click({
         try {
             Set-UiBusy -Busy $true
-            Connect-AllFromUi
+            if (-not (Connect-AllFromUi)) { return }
             Set-WizardMaxStep -Step 2
             Set-UiStatus -Message 'Forbindelser klar.'
         }
@@ -2548,6 +2643,34 @@ function Start-BreakGlassWizard {
     $script:LogPollTimer.Interval = [TimeSpan]::FromSeconds(1)
     $script:LogPollTimer.Add_Tick({
         Sync-LogView
+        if ($script:ModuleWorkerProcess) {
+            if ($script:ModuleWorkerLogFile -and (Test-Path -LiteralPath $script:ModuleWorkerLogFile)) {
+                try {
+                    $lastLine = Get-Content -LiteralPath $script:ModuleWorkerLogFile -Tail 1 -ErrorAction Stop
+                    if ($lastLine) {
+                        Set-UiStatus -Message ("Modul-worker: {0}" -f $lastLine) -Busy
+                    }
+                }
+                catch {
+                    # Module worker log polling is best-effort.
+                }
+            }
+            if ($script:ModuleWorkerProcess.HasExited) {
+                $moduleExitCode = $script:ModuleWorkerProcess.ExitCode
+                $script:ModuleWorkerProcess.Dispose()
+                $script:ModuleWorkerProcess = $null
+                if ($moduleExitCode -eq 0) {
+                    Set-UiStatus -Message 'Moduler er klar. Tryk forbind-knappen igen for at logge ind.'
+                }
+                elseif ($moduleExitCode -eq 20) {
+                    Set-UiStatus -Message 'Modulinstallation blev afbrudt. Connect kan ikke fortsætte før modulerne findes.'
+                }
+                else {
+                    Set-UiStatus -Message ("Modul-worker fejlede med exit code {0}. Se module-worker.log." -f $moduleExitCode)
+                }
+                Set-UiBusy -Busy $false
+            }
+        }
         if ($script:WorkerProcess -and $script:WorkerProcess.HasExited) {
             $script:LogPollTimer.Stop()
             Sync-LogView
@@ -2572,7 +2695,10 @@ function Start-BreakGlassWizard {
 
 try {
     Initialize-AppState
-    if ($WorkerMode) {
+    if ($ModuleWorkerMode) {
+        Invoke-ModulePreparationWorkerMode -LogPath $ModuleWorkerLogPath
+    }
+    elseif ($WorkerMode) {
         Invoke-WorkerMode -Path $WorkerConfigPath
     }
     else {
@@ -2581,7 +2707,7 @@ try {
 }
 catch {
     Write-SafeError -Message 'Uventet fejl.' -ErrorRecord $_
-    if (-not $WorkerMode) {
+    if (-not $WorkerMode -and -not $ModuleWorkerMode) {
         Show-AppMessage -Message ("Uventet fejl:`r`n{0}" -f (ConvertTo-RedactedError $_)) -Icon 'Error' | Out-Null
     }
     throw
