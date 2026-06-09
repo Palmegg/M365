@@ -25,7 +25,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 $script:AppName = 'NetIP Entra Break Glass Configurator'
-$script:AppVersion = '1.0.7'
+$script:AppVersion = '1.0.8'
 $script:ProjectRoot = Split-Path -Parent $PSCommandPath
 if ([string]::IsNullOrWhiteSpace($script:ProjectRoot)) {
     $script:ProjectRoot = (Get-Location).Path
@@ -1011,7 +1011,18 @@ function Resolve-AppAzureSubscriptionContext {
 
     $subscriptions = @(Get-AzSubscription -ErrorAction Stop)
     if ($subscriptions.Count -eq 0) {
-        throw 'Azure-login lykkedes, men kontoen har ingen tilgængelige Azure subscriptions. Azure Monitor/Log Analytics kræver en subscription hvor workspace, action group og alerts kan oprettes. Slå monitoring fra, eller log ind med en konto der har adgang til en Azure subscription.'
+        Write-Host ''
+        Write-Host 'Azure-login lykkedes, men kontoen har ingen tilgængelige Azure subscriptions.' -ForegroundColor Yellow
+        Write-Host 'Værktøjet kan oprette resource group, Log Analytics workspace, action group og alerts i en eksisterende subscription.' -ForegroundColor Yellow
+        Write-Host 'Selve Azure subscription er billing/contract-niveau og kan normalt ikke oprettes automatisk af dette script.' -ForegroundColor Yellow
+        Write-Host ''
+        $answer = Read-Host 'Vil du åbne Azure Portal for at oprette/tilknytte en subscription? Skriv O for åbn, eller Enter for at stoppe'
+        if ($answer -in @('O','o','OPEN','Open','open','A','a','Å','å')) {
+            Start-Process 'https://portal.azure.com/#view/Microsoft_Azure_Billing/SubscriptionsBlade' | Out-Null
+            Write-Host ''
+            Write-Host 'Azure Portal er åbnet. Opret/tilknyt en subscription, vent til den er aktiv, og kør forbindelsestrinnet igen.' -ForegroundColor Cyan
+        }
+        throw 'Azure Monitor/Log Analytics kræver en eksisterende Azure subscription. Opret/tilknyt en subscription i Azure Portal, eller slå monitoring fra på step 1.'
     }
 
     $selectedSubscription = $null
@@ -3590,7 +3601,7 @@ function Start-BreakGlassWizard {
                             <StackPanel>
                                 <TextBlock Text="Azure Monitor/Log Analytics" FontWeight="SemiBold" Margin="0,0,0,8"/>
                                 <CheckBox x:Name="DisableMonitoring" Content="Slå Azure Monitor/Log Analytics fra for denne kørsel"/>
-                                <TextBlock TextWrapping="Wrap" Foreground="#4B5563" Margin="0,8,0,0" Text="Hvis monitoring er slået til, kræver forbindelsestrinnet både Microsoft Graph og Azure Resource Manager med valgt subscription. Hvis monitoring slås fra, kræves kun Microsoft Graph."/>
+                                <TextBlock TextWrapping="Wrap" Foreground="#4B5563" Margin="0,8,0,0" Text="Hvis monitoring er slået til, kræver forbindelsestrinnet både Microsoft Graph og Azure Resource Manager med en eksisterende Azure subscription. Værktøjet kan oprette resource group, Log Analytics workspace, action group og alerts i den valgte subscription. Hvis monitoring slås fra, kræves kun Microsoft Graph."/>
                             </StackPanel>
                         </Border>
                         <CheckBox x:Name="UnderstandRisk" Margin="0,20,0,0" Content="Jeg forstår at dette script kan ændre sikkerhedskritisk tenant-konfiguration."/>
