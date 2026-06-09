@@ -19,6 +19,7 @@ Scriptet hjælper med at konfigurere og validere:
 - Valgfri opt-in exclusion af break-glass gruppen fra eksisterende Conditional Access policies.
 - Entra diagnostic settings til Log Analytics.
 - Azure Monitor scheduled query alerts og action group.
+- Discovery af eksisterende mulige emergency access/break-glass konti og grupper før Configuration mode fortsætter.
 - Manuel FIDO2 guidance og efterfølgende validering.
 - HTML- og JSON-rapport.
 

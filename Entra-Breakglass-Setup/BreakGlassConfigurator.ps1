@@ -47,6 +47,7 @@ $script:LastLogLength = 0
 $script:WizardMaxStep = 0
 $script:WizardInternalNavigation = $false
 $script:PrecheckPassed = $false
+$script:DiscoveryReviewed = $false
 $script:PlanBuilt = $false
 
 $script:RequiredGraphScopes = @(
@@ -95,6 +96,7 @@ $script:State = [ordered]@{
     Plan                         = $null
     Result                       = $null
     ValidationResults            = @()
+    ExistingCandidates           = @()
     Warnings                     = New-Object System.Collections.Generic.List[string]
     CaBackupFiles                = @()
     CreatedPasswords             = New-Object System.Collections.Generic.List[object]
@@ -1403,6 +1405,151 @@ function Ensure-BreakGlassGlobalAdminGroupAssignment {
     return Ensure-DirectoryRoleAssignment -Principal $Group -PrincipalLabel $Group.displayName -RoleDisplayName 'Global Administrator' -DirectoryScopeId '/' -Apply $Apply
 }
 
+function Get-DirectoryObjectSummary {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string] $ObjectId)
+
+    if ($script:State.Mock) { return $null }
+    try {
+        return Invoke-GraphRequestSafe -Method GET -Uri ("https://graph.microsoft.com/v1.0/directoryObjects/{0}" -f [uri]::EscapeDataString($ObjectId)) -SuppressErrorLog
+    }
+    catch {
+        Write-AppLog -Level WARN -Message "Kunne ikke læse directory object $ObjectId under discovery: $(ConvertTo-RedactedError $_)"
+        return $null
+    }
+}
+
+function Add-DiscoveryCandidate {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] [System.Collections.Generic.List[object]] $Candidates,
+        [Parameter(Mandatory)] [hashtable] $Seen,
+        [Parameter(Mandatory)][string] $Source,
+        [Parameter(Mandatory)][string] $Type,
+        [AllowNull()][string] $DisplayName,
+        [AllowNull()][string] $UserPrincipalName,
+        [AllowNull()][string] $ObjectId,
+        [AllowNull()][string] $Role,
+        [AllowNull()][string] $Notes
+    )
+
+    $key = if ($ObjectId) { $ObjectId } elseif ($UserPrincipalName) { $UserPrincipalName.ToLowerInvariant() } else { "$Source|$DisplayName|$Type" }
+    if ($Seen.ContainsKey($key)) { return }
+    $Seen[$key] = $true
+    $Candidates.Add([pscustomobject]@{
+        Source            = $Source
+        Type              = $Type
+        DisplayName       = $DisplayName
+        UserPrincipalName = $UserPrincipalName
+        ObjectId          = $ObjectId
+        Role              = $Role
+        Notes             = $Notes
+    }) | Out-Null
+}
+
+function Find-ExistingEmergencyAccessCandidates {
+    [CmdletBinding()]
+    param([hashtable] $Config)
+
+    $candidates = New-Object System.Collections.Generic.List[object]
+    $seen = @{}
+    if ($script:State.Mock) {
+        Add-DiscoveryCandidate -Candidates $candidates -Seen $seen -Source 'Mock' -Type 'User' -DisplayName 'Emergency Access 01' -UserPrincipalName 'svc_ea01@example.onmicrosoft.com' -ObjectId 'mock-user-1' -Role 'Global Administrator' -Notes 'Mock discovery candidate'
+        return $candidates.ToArray()
+    }
+
+    $gaRole = Get-DirectoryRoleDefinitionByDisplayName -DisplayName 'Global Administrator'
+    if ($gaRole) {
+        $filter = [uri]::EscapeDataString("roleDefinitionId eq '$($gaRole.id)'")
+        $assignments = @(Invoke-GraphGetAllPages -Uri "https://graph.microsoft.com/v1.0/roleManagement/directory/roleAssignments?`$filter=$filter")
+        foreach ($assignment in $assignments) {
+            $principal = Get-DirectoryObjectSummary -ObjectId ([string] $assignment.principalId)
+            if (-not $principal) { continue }
+            $odataType = [string] $principal.'@odata.type'
+            if ($odataType -like '*group') {
+                Add-DiscoveryCandidate -Candidates $candidates -Seen $seen -Source 'Global Administrator assignment' -Type 'Group' -DisplayName $principal.displayName -UserPrincipalName '' -ObjectId $principal.id -Role 'Global Administrator' -Notes ('Group has GA assignment. isAssignableToRole={0}' -f $principal.isAssignableToRole)
+                try {
+                    $members = @(Invoke-GraphGetAllPages -Uri "https://graph.microsoft.com/v1.0/groups/$($principal.id)/members?`$select=id,displayName,userPrincipalName,accountEnabled")
+                    foreach ($member in $members) {
+                        $memberType = [string] $member.'@odata.type'
+                        if ($memberType -like '*user') {
+                            Add-DiscoveryCandidate -Candidates $candidates -Seen $seen -Source "Member of GA group: $($principal.displayName)" -Type 'User' -DisplayName $member.displayName -UserPrincipalName $member.userPrincipalName -ObjectId $member.id -Role 'Global Administrator via group' -Notes ('accountEnabled={0}' -f $member.accountEnabled)
+                        }
+                    }
+                }
+                catch {
+                    Write-AppLog -Level WARN -Message "Kunne ikke læse medlemmer af GA-gruppen $($principal.displayName): $(ConvertTo-RedactedError $_)"
+                }
+            }
+            elseif ($odataType -like '*user') {
+                Add-DiscoveryCandidate -Candidates $candidates -Seen $seen -Source 'Direct Global Administrator assignment' -Type 'User' -DisplayName $principal.displayName -UserPrincipalName $principal.userPrincipalName -ObjectId $principal.id -Role 'Global Administrator' -Notes ('accountEnabled={0}' -f $principal.accountEnabled)
+            }
+            else {
+                Add-DiscoveryCandidate -Candidates $candidates -Seen $seen -Source 'Global Administrator assignment' -Type $odataType -DisplayName $principal.displayName -UserPrincipalName '' -ObjectId $principal.id -Role 'Global Administrator' -Notes 'Non-user principal'
+            }
+        }
+    }
+
+    $targetDomain = if ($script:State.OnMicrosoftDomain) { $script:State.OnMicrosoftDomain } else { '' }
+    foreach ($prefix in @($Config.UserPrefix1, $Config.UserPrefix2)) {
+        if (-not [string]::IsNullOrWhiteSpace($prefix) -and -not [string]::IsNullOrWhiteSpace($targetDomain)) {
+            try {
+                $upn = ConvertTo-BreakGlassUpn -Prefix $prefix -OnMicrosoftDomain $targetDomain
+                $targetUser = Get-BreakGlassUser -UserPrincipalName $upn
+                if ($targetUser) {
+                    Add-DiscoveryCandidate -Candidates $candidates -Seen $seen -Source 'Configured target account exists' -Type 'User' -DisplayName $targetUser.displayName -UserPrincipalName $targetUser.userPrincipalName -ObjectId $targetUser.id -Role '' -Notes ('accountEnabled={0}' -f $targetUser.accountEnabled)
+                }
+            }
+            catch {
+                Write-AppLog -Level WARN -Message "Kunne ikke teste konfigureret konto-prefix '$prefix' under discovery: $(ConvertTo-RedactedError $_)"
+            }
+        }
+    }
+
+    $filters = @(
+        "startsWith(userPrincipalName,'svc_ea')",
+        "startsWith(userPrincipalName,'svr_ea')",
+        "startsWith(userPrincipalName,'adm_ea')",
+        "startsWith(displayName,'Emergency Access')",
+        "startsWith(displayName,'Break Glass')",
+        "startsWith(displayName,'Breakglass')"
+    )
+    foreach ($filterText in $filters) {
+        try {
+            $filter = [uri]::EscapeDataString($filterText)
+            $matches = @(Invoke-GraphGetAllPages -Uri "https://graph.microsoft.com/v1.0/users?`$filter=$filter&`$select=id,displayName,userPrincipalName,accountEnabled")
+            foreach ($match in $matches) {
+                Add-DiscoveryCandidate -Candidates $candidates -Seen $seen -Source "Name/UPN pattern: $filterText" -Type 'User' -DisplayName $match.displayName -UserPrincipalName $match.userPrincipalName -ObjectId $match.id -Role '' -Notes ('accountEnabled={0}' -f $match.accountEnabled)
+            }
+        }
+        catch {
+            Write-AppLog -Level WARN -Message "Discovery filter fejlede '$filterText': $(ConvertTo-RedactedError $_)"
+        }
+    }
+
+    $groupFilters = @(
+        "startsWith(displayName,'GRP-ENTRA-BreakGlass')",
+        "startsWith(displayName,'CA-BreakGlass')",
+        "startsWith(displayName,'Emergency Access')",
+        "startsWith(displayName,'Break Glass')",
+        "startsWith(displayName,'Breakglass')"
+    )
+    foreach ($filterText in $groupFilters) {
+        try {
+            $filter = [uri]::EscapeDataString($filterText)
+            $matches = @(Invoke-GraphGetAllPages -Uri "https://graph.microsoft.com/v1.0/groups?`$filter=$filter&`$select=id,displayName,mailNickname,securityEnabled,isAssignableToRole")
+            foreach ($match in $matches) {
+                Add-DiscoveryCandidate -Candidates $candidates -Seen $seen -Source "Group name pattern: $filterText" -Type 'Group' -DisplayName $match.displayName -UserPrincipalName '' -ObjectId $match.id -Role '' -Notes ('securityEnabled={0}; isAssignableToRole={1}' -f $match.securityEnabled, $match.isAssignableToRole)
+            }
+        }
+        catch {
+            Write-AppLog -Level WARN -Message "Discovery group filter fejlede '$filterText': $(ConvertTo-RedactedError $_)"
+        }
+    }
+
+    return $candidates.ToArray()
+}
+
 function Get-RestrictedManagementAdministrativeUnit {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string] $DisplayName)
@@ -2039,6 +2186,7 @@ function New-Plan {
         NoApply               = [bool] $Config.NoApply
         TenantId              = $script:State.TenantId
         OnMicrosoftDomain     = $domain
+        ExistingCandidates    = @($script:State.ExistingCandidates)
         Users                 = @(
             @{ Prefix = $Config.UserPrefix1; UPN = $upn1; DisplayName = $Config.DisplayName1 },
             @{ Prefix = $Config.UserPrefix2; UPN = $upn2; DisplayName = $Config.DisplayName2 }
@@ -2090,12 +2238,15 @@ function Invoke-BreakGlassConfiguration {
     $apply = -not [bool] $Config.NoApply
     $tenantId = if ($script:State.TenantId) { $script:State.TenantId } else { 'UnknownTenant' }
     $output = New-OutputFolder -TenantId $tenantId
-    $plan = New-Plan -Config $Config
-    Export-JsonSafe -InputObject $plan -Path (Join-Path $output 'plan.json') | Out-Null
 
     Write-AppLog -Message "Starter konfiguration. Apply: $apply"
     $tenant = Get-TenantInfo
     $domain = $tenant.OnMicrosoftDomain
+    $existingCandidates = @(Find-ExistingEmergencyAccessCandidates -Config $Config)
+    $script:State['ExistingCandidates'] = [object[]] $existingCandidates
+    Write-AppLog -Message ("Eksisterende emergency access kandidater fundet før ændringer: {0}" -f $existingCandidates.Count)
+    $plan = New-Plan -Config $Config
+    Export-JsonSafe -InputObject $plan -Path (Join-Path $output 'plan.json') | Out-Null
     $users = @()
     $users += Ensure-BreakGlassUser -Prefix $Config.UserPrefix1 -DisplayName $Config.DisplayName1 -OnMicrosoftDomain $domain -Apply $apply
     $users += Ensure-BreakGlassUser -Prefix $Config.UserPrefix2 -DisplayName $Config.DisplayName2 -OnMicrosoftDomain $domain -Apply $apply
@@ -2158,6 +2309,7 @@ function Invoke-BreakGlassConfiguration {
     $result | Add-Member -MemberType NoteProperty -Name TenantDisplayName -Value $script:State['TenantDisplayName']
     $result | Add-Member -MemberType NoteProperty -Name Operator -Value $script:State['GraphAccount']
     $result | Add-Member -MemberType NoteProperty -Name OnMicrosoftDomain -Value $domain
+    $result | Add-Member -MemberType NoteProperty -Name ExistingCandidates -Value ([object]([object[]]@($existingCandidates)))
     $resultUsers = [object[]]@($users | Select-Object id,userPrincipalName,displayName,accountEnabled)
     $result | Add-Member -MemberType NoteProperty -Name Users -Value ([object]$resultUsers)
     $result | Add-Member -MemberType NoteProperty -Name Group -Value $group
@@ -2289,6 +2441,7 @@ function New-HtmlReport {
 
     $path = Join-Path -Path $OutputFolder -ChildPath 'report.html'
     $validationTable = New-HtmlTable -Items @($Result.ValidationResults)
+    $existingCandidatesTable = New-HtmlTable -Items @($Result.ExistingCandidates)
     $usersTable = New-HtmlTable -Items @($Result.Users)
     $membershipTable = New-HtmlTable -Items @($Result.Membership)
     $roleTable = New-HtmlTable -Items @($Result.RoleAssignments)
@@ -2329,6 +2482,9 @@ function New-HtmlReport {
     <tr><th>Timestamp</th><td>$(ConvertTo-HtmlEncoded $Result.Timestamp)</td></tr>
     <tr><th>onmicrosoft.com</th><td>$(ConvertTo-HtmlEncoded $Result.OnMicrosoftDomain)</td></tr>
   </table>
+  <h2>Eksisterende kandidater fundet før kørsel</h2>
+  <p class="muted">Listen er baseret på Global Administrator assignments, medlemmer af GA-grupper, konfigurerede target-konti og kendte navne/UPN-mønstre.</p>
+  $existingCandidatesTable
   <h2>Brugere</h2>
   $usersTable
   <h2>Role-assignable gruppe</h2>
@@ -2460,9 +2616,29 @@ function Update-PrecheckUi {
     [CmdletBinding()]
     param([object[]] $Results)
 
+    if (-not $script:Ui.ContainsKey('PrecheckList') -or -not $script:Ui.PrecheckList) { return }
     $script:Ui.PrecheckList.Items.Clear()
     foreach ($result in $Results) {
         $script:Ui.PrecheckList.Items.Add(('{0} [{1}] {2}' -f $result.Check, $result.Status, $result.Detail)) | Out-Null
+    }
+}
+
+function Update-DiscoveryUi {
+    [CmdletBinding()]
+    param([object[]] $Candidates)
+
+    if (-not $script:Ui.ContainsKey('DiscoveryList') -or -not $script:Ui.DiscoveryList) { return }
+    $script:Ui.DiscoveryList.Items.Clear()
+    foreach ($candidate in @($Candidates)) {
+        $script:Ui.DiscoveryList.Items.Add(('{0} | {1} | {2} | {3} | {4} | {5}' -f $candidate.Source, $candidate.Type, $candidate.DisplayName, $candidate.UserPrincipalName, $candidate.Role, $candidate.Notes)) | Out-Null
+    }
+    if ($script:Ui.ContainsKey('DiscoverySummary') -and $script:Ui.DiscoverySummary) {
+        if (@($Candidates).Count -eq 0) {
+            $script:Ui.DiscoverySummary.Text = 'Ingen eksisterende kandidater fundet ud fra GA-roller, target-konti eller navne/UPN-mønstre.'
+        }
+        else {
+            $script:Ui.DiscoverySummary.Text = ('{0} eksisterende kandidat(er) fundet. Gennemgå dem før du fortsætter med Configuration mode.' -f @($Candidates).Count)
+        }
     }
 }
 
@@ -2514,7 +2690,7 @@ function Set-UiBusy {
     [CmdletBinding()]
     param([bool] $Busy)
 
-    foreach ($name in @('ConnectAllButton','ConnectGraphButton','ConnectAzureButton','RunPrecheckButton','BuildPlanButton','ExportPlanButton','ApplyButton','BackButton','NextButton')) {
+    foreach ($name in @('ConnectAllButton','ConnectGraphButton','ConnectAzureButton','RunDiscoveryButton','BuildPlanButton','ExportPlanButton','ApplyButton','BackButton','NextButton')) {
         if ($script:Ui.ContainsKey($name) -and $script:Ui[$name]) {
             $script:Ui[$name].IsEnabled = -not $Busy
         }
@@ -2529,6 +2705,9 @@ function Get-WizardSkippedSteps {
     [CmdletBinding()]
     param()
 
+    if ($script:Ui -and $script:Ui.ContainsKey('ConfigureModeRadio') -and [bool] $script:Ui.ConfigureModeRadio.IsChecked) {
+        return @(6, 7)
+    }
     return @(2, 6, 7)
 }
 
@@ -2637,6 +2816,22 @@ function Update-ModeUi {
 
     if (-not $script:Ui -or -not $script:Ui.ContainsKey('ReportModeRadio')) { return }
     $reportOnly = [bool] $script:Ui.ReportModeRadio.IsChecked
+    $script:DiscoveryReviewed = $false
+    $script:PlanBuilt = $false
+    if ($script:Ui.ContainsKey('WizardTabs') -and $script:Ui.WizardTabs) {
+        if ($reportOnly) {
+            $script:Ui.WizardTabs.Items[3].Header = '3. Konfiguration'
+            $script:Ui.WizardTabs.Items[4].Header = '4. Plan'
+            $script:Ui.WizardTabs.Items[5].Header = '5. Kørsel'
+            $script:Ui.WizardTabs.Items[8].Header = '6. Rapport'
+        }
+        else {
+            $script:Ui.WizardTabs.Items[3].Header = '4. Konfiguration'
+            $script:Ui.WizardTabs.Items[4].Header = '5. Plan'
+            $script:Ui.WizardTabs.Items[5].Header = '6. Kørsel'
+            $script:Ui.WizardTabs.Items[8].Header = '7. Rapport'
+        }
+    }
     $script:Ui.NoApply.IsChecked = $reportOnly
     $script:Ui.NoApply.Content = if ($reportOnly) { 'Report only: lav kun plan/rapport uden ændringer' } else { 'Configuration mode: gennemfør ændringer ved kørsel' }
     if ($reportOnly) {
@@ -2736,10 +2931,21 @@ function Invoke-PrecheckFromUi {
     Update-PrecheckUi -Results $results
     $failed = @($results | Where-Object { $_.Status -eq 'Failed' })
     $script:PrecheckPassed = ($failed.Count -eq 0)
-    if ($script:PrecheckPassed) {
-        Set-WizardMaxStep -Step 3
-    }
     return $results
+}
+
+function Invoke-DiscoveryFromUi {
+    [CmdletBinding()]
+    param()
+
+    Set-UiStatus -Message 'Finder eksisterende mulige break-glass/emergency access konti...' -Busy -Log
+    $candidates = @(Find-ExistingEmergencyAccessCandidates -Config (Build-ConfigFromUi))
+    $script:State['ExistingCandidates'] = [object[]] $candidates
+    $script:DiscoveryReviewed = $true
+    Update-DiscoveryUi -Candidates $candidates
+    Write-AppLog -Message ("Discovery færdig. Fundne kandidater: {0}" -f $candidates.Count)
+    Set-WizardMaxStep -Step 3
+    return $candidates
 }
 
 function New-PlanFromUi {
@@ -2812,10 +3018,26 @@ function Move-WizardNext {
                 if ($answer -ne 'Yes') { return }
                 $script:Ui.DisableMonitoring.IsChecked = $true
             }
-            Set-WizardMaxStep -Step 3
             Invoke-PrecheckFromUi | Out-Null
+            if ([bool] $script:Ui.ConfigureModeRadio.IsChecked) {
+                Set-WizardMaxStep -Step 2
+                Set-WizardStep -Step 2
+                Invoke-DiscoveryFromUi | Out-Null
+                Set-UiStatus -Message 'Discovery færdig. Gennemgå fundne kandidater og tryk Fortsæt.'
+            }
+            else {
+                Set-WizardMaxStep -Step 3
+                Set-WizardStep -Step 3
+                Set-UiStatus -Message 'Forbindelse og automatisk pre-check er klar. Udfyld konfigurationen.'
+            }
+        }
+        2 {
+            if (-not $script:DiscoveryReviewed) {
+                Invoke-DiscoveryFromUi | Out-Null
+            }
+            Set-WizardMaxStep -Step 3
             Set-WizardStep -Step 3
-            Set-UiStatus -Message 'Forbindelse og automatisk pre-check er klar. Udfyld konfigurationen.'
+            Set-UiStatus -Message 'Discovery er gennemgået. Udfyld konfigurationen.'
         }
         3 {
             Test-ConfigurationForWizard | Out-Null
@@ -3005,10 +3227,15 @@ function Start-BreakGlassWizard {
                     <TextBlock x:Name="ConnectionStatus" Grid.Row="7" Grid.Column="1" Text="Ikke forbundet"/>
                 </Grid>
             </TabItem>
-            <TabItem Header="3. Pre-check">
+            <TabItem Header="3. Discovery">
                 <DockPanel Margin="18">
-                    <Button x:Name="RunPrecheckButton" DockPanel.Dock="Top" Content="Kør pre-check" Height="32" Width="140" HorizontalAlignment="Left" Margin="0,0,0,10"/>
-                    <ListBox x:Name="PrecheckList" FontFamily="Consolas"/>
+                    <StackPanel DockPanel.Dock="Top" Margin="0,0,0,10">
+                        <TextBlock FontSize="18" FontWeight="SemiBold" Text="Eksisterende emergency access kandidater"/>
+                        <TextBlock TextWrapping="Wrap" Margin="0,8,0,10" Text="Configuration mode stopper her, så du kan se eksisterende mulige break-glass/emergency access konti, grupper og Global Administrator assignments før værktøjet opretter eller ændrer noget."/>
+                        <Button x:Name="RunDiscoveryButton" Content="Refresh discovery" Height="32" Width="150" HorizontalAlignment="Left"/>
+                        <TextBlock x:Name="DiscoverySummary" Margin="0,10,0,0" Foreground="#374151"/>
+                    </StackPanel>
+                    <ListBox x:Name="DiscoveryList" FontFamily="Consolas"/>
                 </DockPanel>
             </TabItem>
             <TabItem Header="3. Konfiguration">
@@ -3161,7 +3388,7 @@ function Start-BreakGlassWizard {
     $script:MainWindow = [Windows.Markup.XamlReader]::Load($reader)
     foreach ($name in @(
         'UnderstandRisk','ReportModeRadio','ConfigureModeRadio','ConnectGraphButton','ConnectAzureButton','ConnectAllButton','GraphAccount','TenantId','TenantName','OnMicrosoftDomain','AzureAccount','SubscriptionIdDetected','ConnectionStatus',
-        'RunPrecheckButton','PrecheckList','UserPrefix1','UserPrefix2','DisplayName1','DisplayName2','GroupDisplayName','RmauDisplayName','RmauAdminGroupDisplayName','RmauAdminUpns','AuthStrengthName','CaPolicyName','CaState',
+        'RunDiscoveryButton','DiscoverySummary','DiscoveryList','UserPrefix1','UserPrefix2','DisplayName1','DisplayName2','GroupDisplayName','RmauDisplayName','RmauAdminGroupDisplayName','RmauAdminUpns','AuthStrengthName','CaPolicyName','CaState',
         'ExcludeExistingCa','AllowedAaguids','NoApply','DisableMonitoring','UseExistingWorkspace','SubscriptionId','ResourceGroupName','WorkspaceName','AzureRegion','DiagnosticSettingName',
         'ActionGroupName','AlertEmails','CreateSignInAlert','CreateAuditAlert','BuildPlanButton','ExportPlanButton','ApplyButton','PlanText','ProgressBar','ExecutionLog','OpenSecurityInfoButton',
         'ValidateFidoButton','FidoResults','RunValidationButton','ValidationList','OutputFolderText','ReportPathText','OpenReportButton','OpenOutputFolderButton','BackButton','NextButton','CloseButton','BackgroundStatus','StatusProgress','FooterStatus','WizardTabs'
@@ -3224,16 +3451,15 @@ function Start-BreakGlassWizard {
         }
     })
 
-    $script:Ui.RunPrecheckButton.Add_Click({
+    $script:Ui.RunDiscoveryButton.Add_Click({
         try {
             Set-UiBusy -Busy $true
-            Set-UiStatus -Message 'Kører pre-check...' -Busy -Log
-            Invoke-PrecheckFromUi | Out-Null
-            Set-UiStatus -Message 'Pre-check færdig.'
+            Invoke-DiscoveryFromUi | Out-Null
+            Set-UiStatus -Message 'Discovery opdateret. Gennemgå fundene før du fortsætter.'
         }
         catch {
-            Write-DetailedError -Message 'Pre-check fejlede.' -ErrorRecord $_
-            Set-UiStatus -Message 'Pre-check fejlede.'
+            Write-DetailedError -Message 'Discovery fejlede.' -ErrorRecord $_
+            Set-UiStatus -Message 'Discovery fejlede.'
             Show-AppMessage -Message (ConvertTo-RedactedError $_) -Icon 'Error' | Out-Null
         }
         finally {
