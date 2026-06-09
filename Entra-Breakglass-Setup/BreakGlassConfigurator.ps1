@@ -954,14 +954,40 @@ function Get-TenantInfo {
         throw 'Kunne ikke læse tenant organization fra Graph.'
     }
 
-    $script:State['TenantId'] = [string] $organization.id
-    $script:State['TenantDisplayName'] = [string] $organization.displayName
+    $script:State['TenantId'] = [string] (Get-ObjectPropertyValue -InputObject $organization -Name 'id')
+    $script:State['TenantDisplayName'] = [string] (Get-ObjectPropertyValue -InputObject $organization -Name 'displayName')
     $script:State['OnMicrosoftDomain'] = Get-OnMicrosoftDomain -Organization $organization
     return [pscustomobject]@{
         Id                = $script:State.TenantId
         DisplayName       = $script:State.TenantDisplayName
         OnMicrosoftDomain = $script:State.OnMicrosoftDomain
     }
+}
+
+function Get-ObjectPropertyValue {
+    [CmdletBinding()]
+    param(
+        [AllowNull()] $InputObject,
+        [Parameter(Mandatory)][string] $Name
+    )
+
+    if ($null -eq $InputObject) {
+        return $null
+    }
+
+    if ($InputObject -is [System.Collections.IDictionary]) {
+        if ($InputObject.Contains($Name)) {
+            return $InputObject[$Name]
+        }
+        return $null
+    }
+
+    $property = $InputObject.PSObject.Properties[$Name]
+    if ($property) {
+        return $property.Value
+    }
+
+    return $null
 }
 
 function Get-OnMicrosoftDomain {
@@ -973,21 +999,35 @@ function Get-OnMicrosoftDomain {
     }
 
     $domains = @()
-    if ($Organization -and $Organization.PSObject.Properties['verifiedDomains']) {
-        $domains = @($Organization.verifiedDomains)
+    $verifiedDomains = Get-ObjectPropertyValue -InputObject $Organization -Name 'verifiedDomains'
+    if ($verifiedDomains) {
+        $domains = @($verifiedDomains)
     }
     if ($domains.Count -eq 0) {
         $domains = Invoke-GraphGetAllPages -Uri 'https://graph.microsoft.com/v1.0/domains'
     }
 
-    $initial = $domains | Where-Object { $_.name -like '*.onmicrosoft.com' -and ($_.isInitial -eq $true -or $_.isDefault -eq $true) } | Select-Object -First 1
+    $normalizedDomains = foreach ($domain in $domains) {
+        $domainName = [string] (Get-ObjectPropertyValue -InputObject $domain -Name 'name')
+        if ([string]::IsNullOrWhiteSpace($domainName)) {
+            continue
+        }
+
+        [pscustomobject]@{
+            Name      = $domainName
+            IsInitial = [bool] (Get-ObjectPropertyValue -InputObject $domain -Name 'isInitial')
+            IsDefault = [bool] (Get-ObjectPropertyValue -InputObject $domain -Name 'isDefault')
+        }
+    }
+
+    $initial = $normalizedDomains | Where-Object { $_.Name -like '*.onmicrosoft.com' -and ($_.IsInitial -eq $true -or $_.IsDefault -eq $true) } | Select-Object -First 1
     if (-not $initial) {
-        $initial = $domains | Where-Object { $_.name -like '*.onmicrosoft.com' } | Sort-Object name | Select-Object -First 1
+        $initial = $normalizedDomains | Where-Object { $_.Name -like '*.onmicrosoft.com' } | Sort-Object Name | Select-Object -First 1
     }
     if (-not $initial) {
         throw 'Kunne ikke finde tenantens *.onmicrosoft.com domæne.'
     }
-    return ([string] $initial.name).ToLowerInvariant()
+    return ([string] $initial.Name).ToLowerInvariant()
 }
 
 function New-RandomStrongPassword {
