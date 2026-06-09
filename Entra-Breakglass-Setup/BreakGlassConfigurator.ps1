@@ -831,7 +831,8 @@ function Invoke-GraphRequestSafe {
     param(
         [Parameter(Mandatory)][ValidateSet('GET','POST','PATCH','PUT','DELETE')] [string] $Method,
         [Parameter(Mandatory)][string] $Uri,
-        [object] $Body
+        [object] $Body,
+        [switch] $SuppressErrorLog
     )
 
     if ($script:State.Mock) {
@@ -847,7 +848,9 @@ function Invoke-GraphRequestSafe {
         return Invoke-MgGraphRequest -Method $Method -Uri $Uri -ErrorAction Stop
     }
     catch {
-        Write-SafeError -Message "Graph-kald fejlede: $Method $Uri." -ErrorRecord $_
+        if (-not $SuppressErrorLog) {
+            Write-SafeError -Message "Graph-kald fejlede: $Method $Uri." -ErrorRecord $_
+        }
         throw
     }
 }
@@ -1123,10 +1126,10 @@ function Get-BreakGlassUser {
     }
 
     try {
-        return Invoke-GraphRequestSafe -Method GET -Uri ("https://graph.microsoft.com/v1.0/users/{0}?`$select=id,displayName,userPrincipalName,accountEnabled" -f [uri]::EscapeDataString($UserPrincipalName))
+        return Invoke-GraphRequestSafe -Method GET -Uri ("https://graph.microsoft.com/v1.0/users/{0}?`$select=id,displayName,userPrincipalName,accountEnabled" -f [uri]::EscapeDataString($UserPrincipalName)) -SuppressErrorLog
     }
     catch {
-        if ((ConvertTo-RedactedError $_) -match 'Request_ResourceNotFound|does not exist|ResourceNotFound|404') {
+        if ((ConvertTo-RedactedError $_) -match 'Request_ResourceNotFound|does not exist|ResourceNotFound|NotFound|Not Found|404') {
             return $null
         }
         throw
