@@ -104,15 +104,16 @@ Til plan/report uden apply er `Dry-run/NoApply` slået til som standard i GUI'en
 ## Wizard-flow
 
 1. Gennemgå velkomst og sikkerhedsbekræftelse.
-2. Connect til Microsoft Graph.
-3. Connect til Azure, medmindre monitoring er slået fra.
-4. Kør pre-check.
-5. Udfyld konfiguration.
-6. Byg dry-run plan og eksporter den efter behov.
-7. Apply configuration.
-8. Registrer FIDO2/FIDO keys manuelt for begge konti.
-9. Kør FIDO2-validering og endelig validering.
-10. Åbn outputmappen og gennemgå rapporterne.
+2. Tryk `Fortsæt` for at gå videre. Senere trin er låst, indtil de tidligere trin er gennemført.
+3. Brug `Forbind til Graph + Azure` for samlet sign-in. Graph er påkrævet; Azure bruges kun til Log Analytics/Azure Monitor.
+4. Hvis Azure ikke kan forbindes, kan du vælge at fortsætte uden Azure Monitor/Log Analytics for den aktuelle kørsel.
+5. Kør pre-check.
+6. Udfyld konfiguration.
+7. Byg dry-run plan og eksporter den efter behov.
+8. Apply configuration.
+9. Registrer FIDO2/FIDO keys manuelt for begge konti.
+10. Kør FIDO2-validering og endelig validering.
+11. Åbn outputmappen og gennemgå rapporterne.
 
 ## Output
 

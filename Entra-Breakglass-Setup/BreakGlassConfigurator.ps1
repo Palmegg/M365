@@ -34,6 +34,10 @@ $script:LogTextBox = $null
 $script:LogPollTimer = $null
 $script:WorkerProcess = $null
 $script:LastLogLength = 0
+$script:WizardMaxStep = 0
+$script:WizardInternalNavigation = $false
+$script:PrecheckPassed = $false
+$script:PlanBuilt = $false
 
 $script:RequiredGraphScopes = @(
     'User.ReadWrite.All',
@@ -1786,6 +1790,166 @@ function Update-ValidationUi {
     }
 }
 
+function Set-WizardMaxStep {
+    [CmdletBinding()]
+    param([int] $Step)
+
+    if ($Step -gt $script:WizardMaxStep) {
+        $script:WizardMaxStep = [Math]::Min($Step, $script:Ui.WizardTabs.Items.Count - 1)
+    }
+    Update-WizardNavigation
+}
+
+function Set-WizardStep {
+    [CmdletBinding()]
+    param([int] $Step)
+
+    $target = [Math]::Max(0, [Math]::Min($Step, $script:WizardMaxStep))
+    $script:WizardInternalNavigation = $true
+    $script:Ui.WizardTabs.SelectedIndex = $target
+    $script:WizardInternalNavigation = $false
+    Update-WizardNavigation
+}
+
+function Update-WizardNavigation {
+    [CmdletBinding()]
+    param()
+
+    if (-not $script:Ui.WizardTabs) { return }
+    for ($i = 0; $i -lt $script:Ui.WizardTabs.Items.Count; $i++) {
+        $script:Ui.WizardTabs.Items[$i].IsEnabled = ($i -le $script:WizardMaxStep)
+    }
+    $index = $script:Ui.WizardTabs.SelectedIndex
+    $script:Ui.BackButton.IsEnabled = ($index -gt 0)
+    $script:Ui.NextButton.IsEnabled = ($index -lt ($script:Ui.WizardTabs.Items.Count - 1))
+    $script:Ui.FooterStatus.Text = 'Step {0} af {1}' -f ($index + 1), $script:Ui.WizardTabs.Items.Count
+}
+
+function Ensure-AppModulesFromUi {
+    [CmdletBinding()]
+    param()
+
+    if ($script:State.Mock) { return }
+    $status = Test-RequiredModules
+    Install-RequiredModulesWithConsent -ModuleStatus $status
+    Import-RequiredModules
+}
+
+function Connect-AllFromUi {
+    [CmdletBinding()]
+    param()
+
+    Ensure-AppModulesFromUi
+    Connect-AppGraph | Out-Null
+    if (-not [bool] $script:Ui.DisableMonitoring.IsChecked) {
+        try {
+            Connect-AppAzure | Out-Null
+        }
+        catch {
+            Write-SafeError -Message 'Azure forbindelse fejlede under samlet forbindelse.' -ErrorRecord $_
+            $answer = Show-AppMessage -Message ("Azure forbindelse fejlede:`r`n{0}`r`n`r`nVil du fortsætte uden Azure Monitor/Log Analytics for denne kørsel?" -f (ConvertTo-RedactedError $_)) -Buttons 'YesNo' -Icon 'Question'
+            if ($answer -ne 'Yes') {
+                throw
+            }
+            $script:Ui.DisableMonitoring.IsChecked = $true
+            Write-AppLog -Level WARN -Message 'Azure Monitor/Log Analytics blev slået fra for denne kørsel efter Azure sign-in fejl.'
+        }
+    }
+    Update-ConnectionStatusUi
+}
+
+function Invoke-PrecheckFromUi {
+    [CmdletBinding()]
+    param()
+
+    $results = Invoke-PreCheck -Config (Build-ConfigFromUi)
+    Update-PrecheckUi -Results $results
+    $failed = @($results | Where-Object { $_.Status -eq 'Failed' })
+    $script:PrecheckPassed = ($failed.Count -eq 0)
+    if ($script:PrecheckPassed) {
+        Set-WizardMaxStep -Step 3
+    }
+    return $results
+}
+
+function New-PlanFromUi {
+    [CmdletBinding()]
+    param()
+
+    $plan = New-Plan -Config (Build-ConfigFromUi)
+    $script:Ui.PlanText.Text = ($plan | ConvertTo-Json -Depth 30)
+    $script:PlanBuilt = $true
+    Set-WizardMaxStep -Step 5
+    return $plan
+}
+
+function Test-ConfigurationForWizard {
+    [CmdletBinding()]
+    param()
+
+    $config = Build-ConfigFromUi
+    foreach ($field in @('UserPrefix1','UserPrefix2','DisplayName1','DisplayName2','GroupDisplayName','RmauDisplayName','AuthStrengthName','CaPolicyName')) {
+        if ([string]::IsNullOrWhiteSpace([string] $config[$field])) {
+            throw "Feltet '$field' skal udfyldes."
+        }
+    }
+    Validate-AaguidList -Text $config.AllowedAaguids | Out-Null
+    return $config
+}
+
+function Move-WizardNext {
+    [CmdletBinding()]
+    param()
+
+    $index = $script:Ui.WizardTabs.SelectedIndex
+    switch ($index) {
+        0 {
+            if (-not [bool] $script:Ui.UnderstandRisk.IsChecked) {
+                Show-AppMessage -Message 'Sæt flueben i sikkerhedsbekræftelsen før du fortsætter.' -Icon 'Warning' | Out-Null
+                return
+            }
+            Set-WizardMaxStep -Step 1
+            Set-WizardStep -Step 1
+        }
+        1 {
+            if (-not $script:State.GraphConnected) {
+                Show-AppMessage -Message 'Forbind til Microsoft Graph før du fortsætter.' -Icon 'Warning' | Out-Null
+                return
+            }
+            if (-not $script:State.AzureConnected -and -not [bool] $script:Ui.DisableMonitoring.IsChecked) {
+                $answer = Show-AppMessage -Message "Azure er ikke forbundet. Vil du fortsætte uden Azure Monitor/Log Analytics for denne kørsel?" -Buttons 'YesNo' -Icon 'Question'
+                if ($answer -ne 'Yes') { return }
+                $script:Ui.DisableMonitoring.IsChecked = $true
+            }
+            Set-WizardMaxStep -Step 2
+            Set-WizardStep -Step 2
+        }
+        2 {
+            Invoke-PrecheckFromUi | Out-Null
+            if (-not $script:PrecheckPassed) {
+                Show-AppMessage -Message 'Pre-check har hard failures. Ret dem før du fortsætter.' -Icon 'Warning' | Out-Null
+                return
+            }
+            Set-WizardStep -Step 3
+        }
+        3 {
+            Test-ConfigurationForWizard | Out-Null
+            Set-WizardMaxStep -Step 4
+            Set-WizardStep -Step 4
+        }
+        4 {
+            if (-not $script:PlanBuilt) {
+                New-PlanFromUi | Out-Null
+            }
+            Set-WizardStep -Step 5
+        }
+        default {
+            Set-WizardMaxStep -Step ($index + 1)
+            Set-WizardStep -Step ($index + 1)
+        }
+    }
+}
+
 function Sync-LogView {
     [CmdletBinding()]
     param()
@@ -1921,8 +2085,11 @@ function Start-BreakGlassWizard {
                         <RowDefinition Height="Auto"/>
                         <RowDefinition Height="Auto"/>
                     </Grid.RowDefinitions>
-                    <Button x:Name="ConnectGraphButton" Grid.Row="0" Grid.Column="0" Content="Forbind til Microsoft Graph" Height="32" Margin="0,0,12,10"/>
-                    <Button x:Name="ConnectAzureButton" Grid.Row="0" Grid.Column="1" Content="Forbind til Azure" Height="32" Width="160" HorizontalAlignment="Left" Margin="0,0,0,10"/>
+                    <StackPanel Grid.Row="0" Grid.Column="0" Grid.ColumnSpan="2" Orientation="Horizontal" Margin="0,0,0,10">
+                        <Button x:Name="ConnectAllButton" Content="Forbind til Graph + Azure" Height="32" Width="190" Margin="0,0,8,0"/>
+                        <Button x:Name="ConnectGraphButton" Content="Kun Graph" Height="32" Width="110" Margin="0,0,8,0"/>
+                        <Button x:Name="ConnectAzureButton" Content="Kun Azure" Height="32" Width="110"/>
+                    </StackPanel>
                     <TextBlock Grid.Row="1" Grid.Column="0" Text="Graph konto" FontWeight="SemiBold"/>
                     <TextBlock x:Name="GraphAccount" Grid.Row="1" Grid.Column="1"/>
                     <TextBlock Grid.Row="2" Grid.Column="0" Text="Tenant ID" FontWeight="SemiBold"/>
@@ -2056,6 +2223,8 @@ function Start-BreakGlassWizard {
         </TabControl>
         <DockPanel Grid.Row="2" Margin="0,12,0,0">
             <Button x:Name="CloseButton" DockPanel.Dock="Right" Content="Luk" Width="90" Height="32"/>
+            <Button x:Name="NextButton" DockPanel.Dock="Right" Content="Fortsæt" Width="110" Height="32" Margin="0,0,8,0"/>
+            <Button x:Name="BackButton" DockPanel.Dock="Right" Content="Tilbage" Width="110" Height="32" Margin="0,0,8,0"/>
             <TextBlock x:Name="FooterStatus" Text="Klar" VerticalAlignment="Center"/>
         </DockPanel>
     </Grid>
@@ -2065,11 +2234,11 @@ function Start-BreakGlassWizard {
     $reader = New-Object System.Xml.XmlNodeReader $xaml
     $script:MainWindow = [Windows.Markup.XamlReader]::Load($reader)
     foreach ($name in @(
-        'UnderstandRisk','ConnectGraphButton','ConnectAzureButton','GraphAccount','TenantId','TenantName','OnMicrosoftDomain','AzureAccount','SubscriptionIdDetected','ConnectionStatus',
+        'UnderstandRisk','ConnectGraphButton','ConnectAzureButton','ConnectAllButton','GraphAccount','TenantId','TenantName','OnMicrosoftDomain','AzureAccount','SubscriptionIdDetected','ConnectionStatus',
         'RunPrecheckButton','PrecheckList','UserPrefix1','UserPrefix2','DisplayName1','DisplayName2','GroupDisplayName','RmauDisplayName','AuthStrengthName','CaPolicyName','CaState',
         'ExcludeExistingCa','AllowedAaguids','NoApply','DisableMonitoring','UseExistingWorkspace','SubscriptionId','ResourceGroupName','WorkspaceName','AzureRegion','DiagnosticSettingName',
         'ActionGroupName','AlertEmails','CreateSignInAlert','CreateAuditAlert','BuildPlanButton','ExportPlanButton','ApplyButton','PlanText','ProgressBar','ExecutionLog','OpenSecurityInfoButton',
-        'ValidateFidoButton','FidoResults','RunValidationButton','ValidationList','OutputFolderText','OpenOutputFolderButton','CloseButton','FooterStatus','WizardTabs'
+        'ValidateFidoButton','FidoResults','RunValidationButton','ValidationList','OutputFolderText','OpenOutputFolderButton','BackButton','NextButton','CloseButton','FooterStatus','WizardTabs'
     )) {
         $script:Ui[$name] = $script:MainWindow.FindName($name)
     }
@@ -2078,12 +2247,7 @@ function Start-BreakGlassWizard {
 
     $script:Ui.ConnectGraphButton.Add_Click({
         try {
-            if (-not $script:State.Mock) {
-                Test-RequiredModules | ForEach-Object { } | Out-Null
-                $status = Test-RequiredModules
-                Install-RequiredModulesWithConsent -ModuleStatus $status
-                Import-RequiredModules
-            }
+            Ensure-AppModulesFromUi
             Connect-AppGraph | Out-Null
             Update-ConnectionStatusUi
             $script:Ui.FooterStatus.Text = 'Graph forbundet'
@@ -2096,11 +2260,7 @@ function Start-BreakGlassWizard {
 
     $script:Ui.ConnectAzureButton.Add_Click({
         try {
-            if (-not $script:State.Mock) {
-                $status = Test-RequiredModules
-                Install-RequiredModulesWithConsent -ModuleStatus $status
-                Import-RequiredModules
-            }
+            Ensure-AppModulesFromUi
             Connect-AppAzure | Out-Null
             Update-ConnectionStatusUi
             $script:Ui.FooterStatus.Text = 'Azure forbundet'
@@ -2111,10 +2271,21 @@ function Start-BreakGlassWizard {
         }
     })
 
+    $script:Ui.ConnectAllButton.Add_Click({
+        try {
+            Connect-AllFromUi
+            Set-WizardMaxStep -Step 2
+            $script:Ui.FooterStatus.Text = 'Forbindelser klar'
+        }
+        catch {
+            Write-SafeError -Message 'Samlet forbindelse fejlede.' -ErrorRecord $_
+            Show-AppMessage -Message ("Samlet forbindelse fejlede:`r`n{0}" -f (ConvertTo-RedactedError $_)) -Icon 'Error' | Out-Null
+        }
+    })
+
     $script:Ui.RunPrecheckButton.Add_Click({
         try {
-            $results = Invoke-PreCheck -Config (Build-ConfigFromUi)
-            Update-PrecheckUi -Results $results
+            Invoke-PrecheckFromUi | Out-Null
         }
         catch {
             Write-SafeError -Message 'Pre-check fejlede.' -ErrorRecord $_
@@ -2124,8 +2295,7 @@ function Start-BreakGlassWizard {
 
     $script:Ui.BuildPlanButton.Add_Click({
         try {
-            $plan = New-Plan -Config (Build-ConfigFromUi)
-            $script:Ui.PlanText.Text = ($plan | ConvertTo-Json -Depth 30)
+            New-PlanFromUi | Out-Null
         }
         catch {
             Write-SafeError -Message 'Plan kunne ikke bygges.' -ErrorRecord $_
@@ -2164,12 +2334,47 @@ function Start-BreakGlassWizard {
             Start-WorkerApply -Config $config
             $script:Ui.ProgressBar.IsIndeterminate = $true
             $script:Ui.FooterStatus.Text = 'Kører...'
-            $script:Ui.WizardTabs.SelectedIndex = 5
+            Set-WizardMaxStep -Step 5
+            Set-WizardStep -Step 5
         }
         catch {
             Write-SafeError -Message 'Apply fejlede.' -ErrorRecord $_
             Show-AppMessage -Message (ConvertTo-RedactedError $_) -Icon 'Error' | Out-Null
         }
+    })
+
+    $script:Ui.UnderstandRisk.Add_Checked({
+        Set-WizardMaxStep -Step 1
+        $script:Ui.FooterStatus.Text = 'Sikkerhedsbekræftelse registreret. Tryk Fortsæt.'
+    })
+
+    $script:Ui.UnderstandRisk.Add_Unchecked({
+        $script:WizardMaxStep = 0
+        Set-WizardStep -Step 0
+    })
+
+    $script:Ui.BackButton.Add_Click({
+        Set-WizardStep -Step ($script:Ui.WizardTabs.SelectedIndex - 1)
+    })
+
+    $script:Ui.NextButton.Add_Click({
+        try {
+            Move-WizardNext
+        }
+        catch {
+            Write-SafeError -Message 'Wizard navigation fejlede.' -ErrorRecord $_
+            Show-AppMessage -Message (ConvertTo-RedactedError $_) -Icon 'Error' | Out-Null
+        }
+    })
+
+    $script:Ui.WizardTabs.Add_SelectionChanged({
+        if ($script:WizardInternalNavigation) { return }
+        if ($script:Ui.WizardTabs.SelectedIndex -gt $script:WizardMaxStep) {
+            Show-AppMessage -Message 'Gennemfør de tidligere wizard-steps før du går videre.' -Icon 'Warning' | Out-Null
+            Set-WizardStep -Step $script:WizardMaxStep
+            return
+        }
+        Update-WizardNavigation
     })
 
     $script:Ui.OpenSecurityInfoButton.Add_Click({
@@ -2221,11 +2426,15 @@ function Start-BreakGlassWizard {
             $script:Ui.ProgressBar.IsIndeterminate = $false
             $script:Ui.FooterStatus.Text = if ($exitCode -eq 0) { 'Færdig' } else { "Fejl: worker exit code $exitCode" }
             $script:Ui.OutputFolderText.Text = $script:SessionOutputFolder
+            if ($exitCode -eq 0) {
+                Set-WizardMaxStep -Step 8
+            }
         }
     })
     $script:LogPollTimer.Start()
 
     Update-ConnectionStatusUi
+    Update-WizardNavigation
     $script:MainWindow.ShowDialog() | Out-Null
 }
 
