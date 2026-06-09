@@ -11,8 +11,9 @@ Scriptet hjælper med at konfigurere og validere:
 - To cloud-only break-glass konti på tenantens `*.onmicrosoft.com` domæne.
 - Role-assignable sikkerhedsgruppe til break-glass kontiene.
 - Gruppemedlemskab for begge konti.
-- Direkte permanente Global Administrator rolleassignments.
-- Restricted Management Administrative Unit, RMAU.
+- Permanent Global Administrator assignment til den role-assignable break-glass gruppe.
+- Restricted Management Administrative Unit, RMAU, som beskytter break-glass konti og gruppen.
+- Separat role-assignable RMAU administratorgruppe med scoped User Administrator og Groups Administrator roller på RMAU'en.
 - Custom authentication strength til FIDO2, valgfrit begrænset med AAGUIDs.
 - Dedikeret Conditional Access policy, som kræver authentication strength for gruppen.
 - Valgfri opt-in exclusion af break-glass gruppen fra eksisterende Conditional Access policies.
@@ -36,7 +37,6 @@ Scriptet tjekker disse moduler og kan installere dem for `CurrentUser` efter eks
 - `Microsoft.Graph.Groups`
 - `Microsoft.Graph.Identity.DirectoryManagement`
 - `Microsoft.Graph.Identity.SignIns`
-- `Microsoft.Graph.Identity.Governance`
 - `Az.Accounts`
 - `Az.Resources`
 - `Az.OperationalInsights`
@@ -54,7 +54,7 @@ Typisk kræves en kombination af:
 - Authentication Policy Administrator
 - User Administrator eller tilsvarende rettigheder
 
-Kundens governance kan kræve PIM-aktivering før kørsel.
+Scriptet bruger ikke PIM. Det tildeler Global Administrator permanent til den role-assignable break-glass gruppe og tildeler RMAU-scopede roller til en separat administratorgruppe.
 
 ## Nødvendige Azure roller
 
@@ -161,7 +161,7 @@ Version 1 automatiserer ikke FIDO2/FIDO key enrollment. Konsulenten skal manuelt
 ## Kendte begrænsninger
 
 - Ingen Sentinel eller SentinelOne integration i version 1.
-- Ingen PIM-konfiguration i version 1.
+- Ingen PIM-konfiguration i version 1. PIM kræver Entra ID P2 eller Entra ID Governance og bruges ikke i standarddesignet.
 - Ingen automatisk rollback.
 - FIDO2 enrollment, PIN, fysisk key-håndtering og password manager-processer er manuelle.
 - Authentication strength og enkelte diagnostic setting endpoints kan ændre sig i Graph/Azure. Scriptet logger fejl pænt og fortsætter hvor det er sikkert.
@@ -173,7 +173,7 @@ Version 1 automatiserer ikke FIDO2/FIDO key enrollment. Konsulenten skal manuelt
 2. Kør i en testtenant med `Dry-run/NoApply` slået til.
 3. Gennemgå `plan.json` og `report.html`.
 4. Kør apply med CA policy state `reportOnly`.
-5. Bekræft brugere, gruppe, GA assignments, RMAU og CA policy i Entra admin center.
+5. Bekræft brugere, break-glass gruppe, GA assignment på gruppen, RMAU, RMAU admin-gruppe og CA policy i Entra admin center.
 6. Registrer FIDO2 keys manuelt.
 7. Kør FIDO2-validering.
 8. Test sign-in alerts og audit/change alerts.

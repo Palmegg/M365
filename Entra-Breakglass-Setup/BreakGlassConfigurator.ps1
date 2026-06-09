@@ -66,8 +66,7 @@ $script:RequiredGraphModules = @(
     'Microsoft.Graph.Users',
     'Microsoft.Graph.Groups',
     'Microsoft.Graph.Identity.DirectoryManagement',
-    'Microsoft.Graph.Identity.SignIns',
-    'Microsoft.Graph.Identity.Governance'
+    'Microsoft.Graph.Identity.SignIns'
 )
 
 $script:RequiredAzModules = @(
@@ -1336,54 +1335,72 @@ function Ensure-GroupMember {
     return [pscustomobject]@{ User = $userUpn; Group = $Group.displayName; Status = 'Added' }
 }
 
-function Get-GlobalAdministratorRoleDefinition {
+function Get-DirectoryRoleDefinitionByDisplayName {
     [CmdletBinding()]
-    param()
+    param([Parameter(Mandatory)][string] $DisplayName)
 
     if ($script:State.Mock) {
-        return [pscustomobject]@{ id = 'mock-ga-role-definition'; displayName = 'Global Administrator' }
+        return [pscustomobject]@{ id = "mock-role-definition-$($DisplayName -replace '[^a-zA-Z0-9]', '')"; displayName = $DisplayName }
     }
-    $filter = [uri]::EscapeDataString("displayName eq 'Global Administrator'")
+    $filter = [uri]::EscapeDataString("displayName eq '$($DisplayName.Replace("'", "''"))'")
     return Invoke-GraphGetAllPages -Uri "https://graph.microsoft.com/v1.0/roleManagement/directory/roleDefinitions?`$filter=$filter" | Select-Object -First 1
 }
 
-function Ensure-DirectGlobalAdminAssignment {
+function Ensure-DirectoryRoleAssignment {
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory)] $User,
+        [Parameter(Mandatory)] $Principal,
+        [Parameter(Mandatory)][string] $PrincipalLabel,
+        [Parameter(Mandatory)][string] $RoleDisplayName,
+        [Parameter(Mandatory)][string] $DirectoryScopeId,
         [Parameter(Mandatory)][bool] $Apply
     )
 
-    $role = Get-GlobalAdministratorRoleDefinition
+    $role = Get-DirectoryRoleDefinitionByDisplayName -DisplayName $RoleDisplayName
     if (-not $role) {
-        throw 'Global Administrator rolledefinition blev ikke fundet.'
+        throw "Rolledefinition blev ikke fundet: $RoleDisplayName"
     }
 
-    if ($script:State.Mock -or $User.id -like 'planned-*') {
-        Write-AppLog -Level PLAN -Message "Plan/mock: direkte Global Administrator til $($User.userPrincipalName)"
-        return [pscustomobject]@{ User = $User.userPrincipalName; Role = 'Global Administrator'; Status = 'PlannedOrMock'; AssignmentId = '' }
+    if ($script:State.Mock -or $Principal.id -like 'planned-*') {
+        Write-AppLog -Level PLAN -Message "Plan/mock: tildel $RoleDisplayName til $PrincipalLabel på scope $DirectoryScopeId"
+        return [pscustomobject]@{ Principal = $PrincipalLabel; Role = $RoleDisplayName; Scope = $DirectoryScopeId; Status = 'PlannedOrMock'; AssignmentId = '' }
     }
 
-    $filter = [uri]::EscapeDataString("principalId eq '$($User.id)' and roleDefinitionId eq '$($role.id)'")
-    $existing = Invoke-GraphGetAllPages -Uri "https://graph.microsoft.com/v1.0/roleManagement/directory/roleAssignments?`$filter=$filter" | Select-Object -First 1
+    $filter = [uri]::EscapeDataString("principalId eq '$($Principal.id)' and roleDefinitionId eq '$($role.id)'")
+    $existing = Invoke-GraphGetAllPages -Uri "https://graph.microsoft.com/v1.0/roleManagement/directory/roleAssignments?`$filter=$filter" |
+        Where-Object { [string] $_.directoryScopeId -eq $DirectoryScopeId } |
+        Select-Object -First 1
     if ($existing) {
-        Write-AppLog -Level PASS -Message "$($User.userPrincipalName) har allerede direkte Global Administrator."
-        return [pscustomobject]@{ User = $User.userPrincipalName; Role = 'Global Administrator'; Status = 'AlreadyAssigned'; AssignmentId = $existing.id }
+        Write-AppLog -Level PASS -Message "$PrincipalLabel har allerede $RoleDisplayName på scope $DirectoryScopeId."
+        return [pscustomobject]@{ Principal = $PrincipalLabel; Role = $RoleDisplayName; Scope = $DirectoryScopeId; Status = 'AlreadyAssigned'; AssignmentId = $existing.id }
     }
 
     if (-not $Apply) {
-        Write-AppLog -Level PLAN -Message "Plan: tildel direkte Global Administrator til $($User.userPrincipalName)"
-        return [pscustomobject]@{ User = $User.userPrincipalName; Role = 'Global Administrator'; Status = 'Planned'; AssignmentId = '' }
+        Write-AppLog -Level PLAN -Message "Plan: tildel $RoleDisplayName til $PrincipalLabel på scope $DirectoryScopeId"
+        return [pscustomobject]@{ Principal = $PrincipalLabel; Role = $RoleDisplayName; Scope = $DirectoryScopeId; Status = 'Planned'; AssignmentId = '' }
     }
 
     $body = @{
-        principalId      = $User.id
+        principalId      = $Principal.id
         roleDefinitionId = $role.id
-        directoryScopeId = '/'
+        directoryScopeId = $DirectoryScopeId
     }
     $assignment = Invoke-GraphRequestSafe -Method POST -Uri 'https://graph.microsoft.com/v1.0/roleManagement/directory/roleAssignments' -Body $body
-    Write-AppLog -Level PASS -Message "Direkte Global Administrator tildelt til $($User.userPrincipalName)."
-    return [pscustomobject]@{ User = $User.userPrincipalName; Role = 'Global Administrator'; Status = 'Assigned'; AssignmentId = $assignment.id }
+    Write-AppLog -Level PASS -Message "$RoleDisplayName tildelt til $PrincipalLabel på scope $DirectoryScopeId."
+    return [pscustomobject]@{ Principal = $PrincipalLabel; Role = $RoleDisplayName; Scope = $DirectoryScopeId; Status = 'Assigned'; AssignmentId = $assignment.id }
+}
+
+function Ensure-BreakGlassGlobalAdminGroupAssignment {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] $Group,
+        [Parameter(Mandatory)][bool] $Apply
+    )
+
+    if ($Group.isAssignableToRole -ne $true -and -not ($Group.id -like 'planned-*')) {
+        throw "Gruppen '$($Group.displayName)' er ikke role-assignable og kan derfor ikke tildeles Global Administrator."
+    }
+    return Ensure-DirectoryRoleAssignment -Principal $Group -PrincipalLabel $Group.displayName -RoleDisplayName 'Global Administrator' -DirectoryScopeId '/' -Apply $Apply
 }
 
 function Get-RestrictedManagementAdministrativeUnit {
@@ -1465,6 +1482,62 @@ function Ensure-RmauMember {
         Write-SafeError -Message 'RMAU medlemskab kunne ikke sættes.' -ErrorRecord $_
         return [pscustomobject]@{ ObjectId = $objectId; Status = 'Warning'; Message = ConvertTo-RedactedError $_ }
     }
+}
+
+function ConvertFrom-DelimitedUpnList {
+    [CmdletBinding()]
+    param([AllowNull()][string] $Text)
+
+    if ([string]::IsNullOrWhiteSpace($Text)) { return @() }
+    return @($Text -split '[,;\r\n]+' |
+        ForEach-Object { $_.Trim() } |
+        Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
+        Select-Object -Unique)
+}
+
+function Ensure-RmauAdminGroupMembers {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] $AdminGroup,
+        [Parameter(Mandatory)][string[]] $AdminUserPrincipalNames,
+        [Parameter(Mandatory)][bool] $Apply
+    )
+
+    $results = @()
+    foreach ($upn in $AdminUserPrincipalNames) {
+        if ($upn -notmatch '^[^@\s]+@[^@\s]+\.[^@\s]+$') {
+            Write-AppLog -Level WARN -Message "RMAU admin UPN er ikke gyldigt og springes over: $upn"
+            $results += [pscustomobject]@{ User = $upn; Group = $AdminGroup.displayName; Status = 'InvalidUpn' }
+            continue
+        }
+        $user = Get-BreakGlassUser -UserPrincipalName $upn
+        if (-not $user) {
+            Write-AppLog -Level WARN -Message "RMAU admin-bruger findes ikke og kan ikke tilføjes til admin-gruppen: $upn"
+            $results += [pscustomobject]@{ User = $upn; Group = $AdminGroup.displayName; Status = 'UserNotFound' }
+            continue
+        }
+        $results += Ensure-GroupMember -Group $AdminGroup -User $user -Apply $Apply
+    }
+    return $results
+}
+
+function Ensure-RmauScopedAdministration {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] $AdministrativeUnit,
+        [Parameter(Mandatory)] $AdminGroup,
+        [Parameter(Mandatory)][bool] $Apply
+    )
+
+    if ($AdminGroup.isAssignableToRole -ne $true -and -not ($AdminGroup.id -like 'planned-*')) {
+        throw "RMAU admin-gruppen '$($AdminGroup.displayName)' er ikke role-assignable og kan derfor ikke få scoped administratorroller."
+    }
+
+    $scope = "/administrativeUnits/$($AdministrativeUnit.id)"
+    return @(
+        Ensure-DirectoryRoleAssignment -Principal $AdminGroup -PrincipalLabel $AdminGroup.displayName -RoleDisplayName 'User Administrator' -DirectoryScopeId $scope -Apply $Apply
+        Ensure-DirectoryRoleAssignment -Principal $AdminGroup -PrincipalLabel $AdminGroup.displayName -RoleDisplayName 'Groups Administrator' -DirectoryScopeId $scope -Apply $Apply
+    )
 }
 
 function Validate-AaguidList {
@@ -1972,6 +2045,8 @@ function New-Plan {
         )
         Group                 = $Config.GroupDisplayName
         RMAU                  = $Config.RmauDisplayName
+        RmauAdminGroup        = $Config.RmauAdminGroupDisplayName
+        RmauAdminUpns         = @(ConvertFrom-DelimitedUpnList -Text $Config.RmauAdminUpns)
         AuthenticationStrength = @{
             DisplayName = $Config.AuthStrengthName
             AllowedAaguids = $aaguids
@@ -1995,8 +2070,10 @@ function New-Plan {
         PlannedActions        = @(
             "Validate or create users $upn1 and $upn2",
             "Validate or create role-assignable group $($Config.GroupDisplayName)",
-            'Ensure direct permanent Global Administrator assignments',
+            "Assign Global Administrator to role-assignable group $($Config.GroupDisplayName)",
             "Validate or create restricted management administrative unit $($Config.RmauDisplayName)",
+            "Validate or create RMAU administrator group $($Config.RmauAdminGroupDisplayName)",
+            'Assign User Administrator and Groups Administrator scoped to the RMAU admin group',
             "Validate or create authentication strength $($Config.AuthStrengthName)",
             "Validate or create Conditional Access policy $($Config.CaPolicyName)",
             'Configure Log Analytics diagnostic settings and Azure Monitor alerts if enabled'
@@ -2025,8 +2102,11 @@ function Invoke-BreakGlassConfiguration {
 
     $group = Ensure-BreakGlassGroup -DisplayName $Config.GroupDisplayName -Apply $apply
     $membership = foreach ($user in $users) { Ensure-GroupMember -Group $group -User $user -Apply $apply }
-    $roleAssignments = foreach ($user in $users) { Ensure-DirectGlobalAdminAssignment -User $user -Apply $apply }
+    $roleAssignments = @(Ensure-BreakGlassGlobalAdminGroupAssignment -Group $group -Apply $apply)
     $rmau = Ensure-RestrictedManagementAdministrativeUnit -DisplayName $Config.RmauDisplayName -Apply $apply
+    $rmauAdminGroup = Ensure-BreakGlassGroup -DisplayName $Config.RmauAdminGroupDisplayName -Apply $apply
+    $rmauAdminMembership = Ensure-RmauAdminGroupMembers -AdminGroup $rmauAdminGroup -AdminUserPrincipalNames @(ConvertFrom-DelimitedUpnList -Text $Config.RmauAdminUpns) -Apply $apply
+    $rmauScopedRoleAssignments = Ensure-RmauScopedAdministration -AdministrativeUnit $rmau -AdminGroup $rmauAdminGroup -Apply $apply
     $rmauMembership = @()
     foreach ($user in $users) { $rmauMembership += Ensure-RmauMember -AdministrativeUnit $rmau -DirectoryObject $user -Apply $apply }
     $rmauMembership += Ensure-RmauMember -AdministrativeUnit $rmau -DirectoryObject $group -Apply $apply
@@ -2053,7 +2133,7 @@ function Invoke-BreakGlassConfiguration {
             $monitoring.Entries += $diag
             $monitoring.Entries += $ag
             $upns = @($users | ForEach-Object { $_.userPrincipalName })
-            $ids = @($users | ForEach-Object { $_.id }) + @($group.id, $rmau.id, $authStrength.id, $caPolicy.id)
+            $ids = @($users | ForEach-Object { $_.id }) + @($group.id, $rmau.id, $rmauAdminGroup.id, $authStrength.id, $caPolicy.id)
             if ($Config.CreateSignInAlert) {
                 $monitoring.Entries += Ensure-ScheduledQueryRule -SubscriptionId $subscriptionId -ResourceGroupName $Config.ResourceGroupName -Name 'alert-breakglass-any-signin' -Location $Config.AzureRegion -WorkspaceResourceId $workspaceResourceId -Query (New-BreakGlassSignInKql -UserPrincipalNames $upns) -ActionGroupId $ag.Id -Apply $apply
             }
@@ -2068,7 +2148,7 @@ function Invoke-BreakGlassConfiguration {
     }
 
     $fidoStatus = Test-BreakGlassFido2Registration -Users $users
-    $validation = Invoke-Validation -Users $users -Group $group -RoleAssignments $roleAssignments -Rmau $rmau -AuthStrength $authStrength -CaPolicy $caPolicy -FidoStatus $fidoStatus -Monitoring $monitoring
+    $validation = Invoke-Validation -Users $users -Group $group -RoleAssignments $roleAssignments -Rmau $rmau -RmauAdminGroup $rmauAdminGroup -RmauScopedRoleAssignments $rmauScopedRoleAssignments -AuthStrength $authStrength -CaPolicy $caPolicy -FidoStatus $fidoStatus -Monitoring $monitoring
     $script:State['ValidationResults'] = $validation
 
     $result = New-Object psobject
@@ -2085,6 +2165,9 @@ function Invoke-BreakGlassConfiguration {
     $result | Add-Member -MemberType NoteProperty -Name RoleAssignments -Value ([object]([object[]]@($roleAssignments)))
     $result | Add-Member -MemberType NoteProperty -Name RMAU -Value $rmau
     $result | Add-Member -MemberType NoteProperty -Name RmauMembership -Value ([object]([object[]]@($rmauMembership)))
+    $result | Add-Member -MemberType NoteProperty -Name RmauAdminGroup -Value $rmauAdminGroup
+    $result | Add-Member -MemberType NoteProperty -Name RmauAdminMembership -Value ([object]([object[]]@($rmauAdminMembership)))
+    $result | Add-Member -MemberType NoteProperty -Name RmauScopedRoleAssignments -Value ([object]([object[]]@($rmauScopedRoleAssignments)))
     $result | Add-Member -MemberType NoteProperty -Name AuthenticationStrength -Value $authStrength
     $result | Add-Member -MemberType NoteProperty -Name ConditionalAccess -Value $caPolicy
     $result | Add-Member -MemberType NoteProperty -Name ExistingCaExclusions -Value ([object]([object[]]@($existingCaExclusionResults)))
@@ -2108,6 +2191,8 @@ function Invoke-Validation {
         [AllowNull()] $Group,
         [object[]] $RoleAssignments,
         [AllowNull()] $Rmau,
+        [AllowNull()] $RmauAdminGroup,
+        [object[]] $RmauScopedRoleAssignments,
         [AllowNull()] $AuthStrength,
         [AllowNull()] $CaPolicy,
         [object[]] $FidoStatus,
@@ -2122,8 +2207,10 @@ function Invoke-Validation {
         $items += [pscustomobject]@{ Check = "onmicrosoft.com UPN: $($user.userPrincipalName)"; Status = if ($user.userPrincipalName -like '*@*.onmicrosoft.com') { 'Passed' } else { 'Failed' }; Detail = $user.userPrincipalName }
     }
     $items += [pscustomobject]@{ Check = 'Break-glass gruppe findes'; Status = if ($Group.id) { 'Passed' } else { 'Failed' }; Detail = $Group.displayName }
-    $items += [pscustomobject]@{ Check = 'Global Administrator assignments'; Status = if (@($RoleAssignments | Where-Object { $_.Status -match 'Assigned|AlreadyAssigned|Planned|PlannedOrMock' }).Count -ge 2) { 'Passed' } else { 'Warning' }; Detail = (@($RoleAssignments).Status -join ', ') }
+    $items += [pscustomobject]@{ Check = 'Global Administrator på break-glass gruppe'; Status = if (@($RoleAssignments | Where-Object { $_.Role -eq 'Global Administrator' -and $_.Status -match 'Assigned|AlreadyAssigned|Planned|PlannedOrMock' }).Count -ge 1) { 'Passed' } else { 'Warning' }; Detail = (@($RoleAssignments | ForEach-Object { "$($_.Principal):$($_.Status)" }) -join ', ') }
     $items += [pscustomobject]@{ Check = 'RMAU findes'; Status = if ($Rmau.id) { 'Passed' } else { 'Warning' }; Detail = $Rmau.displayName }
+    $items += [pscustomobject]@{ Check = 'RMAU admin-gruppe findes'; Status = if ($RmauAdminGroup.id) { 'Passed' } else { 'Warning' }; Detail = $RmauAdminGroup.displayName }
+    $items += [pscustomobject]@{ Check = 'Scoped RMAU admin roles'; Status = if (@($RmauScopedRoleAssignments | Where-Object { $_.Status -match 'Assigned|AlreadyAssigned|Planned|PlannedOrMock' }).Count -ge 2) { 'Passed' } else { 'Warning' }; Detail = (@($RmauScopedRoleAssignments | ForEach-Object { "$($_.Role):$($_.Status)" }) -join ', ') }
     $items += [pscustomobject]@{ Check = 'Authentication strength findes'; Status = if ($AuthStrength.id) { 'Passed' } else { 'Warning' }; Detail = $AuthStrength.displayName }
     $items += [pscustomobject]@{ Check = 'Conditional Access policy findes'; Status = if ($CaPolicy.id) { 'Passed' } else { 'Warning' }; Detail = $CaPolicy.displayName }
     foreach ($fido in $FidoStatus) {
@@ -2206,6 +2293,8 @@ function New-HtmlReport {
     $membershipTable = New-HtmlTable -Items @($Result.Membership)
     $roleTable = New-HtmlTable -Items @($Result.RoleAssignments)
     $rmauMembershipTable = New-HtmlTable -Items @($Result.RmauMembership)
+    $rmauAdminMembershipTable = New-HtmlTable -Items @($Result.RmauAdminMembership)
+    $rmauScopedRoleTable = New-HtmlTable -Items @($Result.RmauScopedRoleAssignments)
     $fidoTable = New-HtmlTable -Items @($Result.Fido2 | Select-Object UserPrincipalName,HasFido2,Count)
     $monitoringTable = New-HtmlTable -Items @($Result.Monitoring.Entries)
     $caExclusionTable = New-HtmlTable -Items @($Result.ExistingCaExclusions)
@@ -2250,7 +2339,7 @@ function New-HtmlReport {
   </table>
   <h2>Gruppemedlemskab</h2>
   $membershipTable
-  <h2>Global Administrator assignments</h2>
+  <h2>Global Administrator assignment</h2>
   $roleTable
   <h2>Restricted management administrative unit</h2>
   <table>
@@ -2259,6 +2348,16 @@ function New-HtmlReport {
   </table>
   <h2>RMAU medlemskab</h2>
   $rmauMembershipTable
+  <h2>RMAU administratorgruppe</h2>
+  <table>
+    <tr><th>DisplayName</th><td>$(ConvertTo-HtmlEncoded (Get-ReportProperty -Object $Result.RmauAdminGroup -Name 'displayName'))</td></tr>
+    <tr><th>ID</th><td>$(ConvertTo-HtmlEncoded (Get-ReportProperty -Object $Result.RmauAdminGroup -Name 'id'))</td></tr>
+    <tr><th>MailNickname</th><td>$(ConvertTo-HtmlEncoded (Get-ReportProperty -Object $Result.RmauAdminGroup -Name 'mailNickname'))</td></tr>
+  </table>
+  <h2>RMAU administrator-medlemskab</h2>
+  $rmauAdminMembershipTable
+  <h2>Scoped RMAU administratorroller</h2>
+  $rmauScopedRoleTable
   <h2>Authentication strength</h2>
   <table>
     <tr><th>DisplayName</th><td>$(ConvertTo-HtmlEncoded (Get-ReportProperty -Object $Result.AuthenticationStrength -Name 'displayName'))</td></tr>
@@ -2318,6 +2417,8 @@ function Build-ConfigFromUi {
         DisplayName2           = $script:Ui.DisplayName2.Text.Trim()
         GroupDisplayName       = $script:Ui.GroupDisplayName.Text.Trim()
         RmauDisplayName        = $script:Ui.RmauDisplayName.Text.Trim()
+        RmauAdminGroupDisplayName = $script:Ui.RmauAdminGroupDisplayName.Text.Trim()
+        RmauAdminUpns          = $script:Ui.RmauAdminUpns.Text.Trim()
         AuthStrengthName       = $script:Ui.AuthStrengthName.Text.Trim()
         CaPolicyName           = $script:Ui.CaPolicyName.Text.Trim()
         CaState                = [string] $script:Ui.CaState.SelectedItem.Content
@@ -2350,6 +2451,9 @@ function Update-ConnectionStatusUi {
     $script:Ui.AzureAccount.Text = $script:State.AzureAccount
     $script:Ui.SubscriptionIdDetected.Text = $script:State.AzureSubscriptionId
     $script:Ui.ConnectionStatus.Text = "Graph: $($script:State.GraphConnected) | Azure: $($script:State.AzureConnected)"
+    if ($script:Ui.ContainsKey('RmauAdminUpns') -and $script:Ui.RmauAdminUpns -and [string]::IsNullOrWhiteSpace($script:Ui.RmauAdminUpns.Text) -and $script:State.GraphAccount -match '@') {
+        $script:Ui.RmauAdminUpns.Text = $script:State.GraphAccount
+    }
 }
 
 function Update-PrecheckUi {
@@ -2654,10 +2758,14 @@ function Test-ConfigurationForWizard {
     param()
 
     $config = Build-ConfigFromUi
-    foreach ($field in @('UserPrefix1','UserPrefix2','DisplayName1','DisplayName2','GroupDisplayName','RmauDisplayName','AuthStrengthName','CaPolicyName')) {
+    foreach ($field in @('UserPrefix1','UserPrefix2','DisplayName1','DisplayName2','GroupDisplayName','RmauDisplayName','RmauAdminGroupDisplayName','AuthStrengthName','CaPolicyName')) {
         if ([string]::IsNullOrWhiteSpace([string] $config[$field])) {
             throw "Feltet '$field' skal udfyldes."
         }
+    }
+    $rmauAdminUpns = @(ConvertFrom-DelimitedUpnList -Text $config.RmauAdminUpns)
+    if ($rmauAdminUpns.Count -eq 0) {
+        throw 'Angiv mindst én RMAU administrator UPN. Brugeren/brugerne bliver medlem af RMAU admin-gruppen.'
     }
     if (-not [bool] $config.DisableMonitoring) {
         if (-not $script:State.AzureConnected) {
@@ -2845,7 +2953,7 @@ function Start-BreakGlassWizard {
                 <ScrollViewer VerticalScrollBarVisibility="Auto">
                     <StackPanel Margin="18" MaxWidth="980">
                         <TextBlock FontSize="18" FontWeight="SemiBold" Text="Velkommen"/>
-                        <TextBlock TextWrapping="Wrap" Margin="0,10,0,0" Text="Dette værktøj etablerer en break-glass baseline med cloud-only konti, rolle-assignable gruppe, direkte Global Administrator roller, RMAU, FIDO2 authentication strength, Conditional Access, Log Analytics og Azure Monitor alerts."/>
+                        <TextBlock TextWrapping="Wrap" Margin="0,10,0,0" Text="Dette værktøj etablerer en break-glass baseline med cloud-only konti, role-assignable Global Administrator-gruppe, RMAU-beskyttelse, FIDO2 authentication strength, Conditional Access, Log Analytics og Azure Monitor alerts."/>
                         <TextBlock TextWrapping="Wrap" Margin="0,10,0,0" Text="FIDO2/FIDO key registrering automatiseres ikke. Du får en tydelig reminder i slutrapporten efter kørsel."/>
                         <TextBlock TextWrapping="Wrap" Margin="0,10,0,0" Text="Microsoft Sentinel og SentinelOne bruges ikke i v1. Overvågning bruger Entra Diagnostic Settings til Log Analytics samt Azure Monitor scheduled query alerts."/>
                         <Border BorderBrush="#CBD5E1" BorderThickness="1" CornerRadius="4" Padding="12" Margin="0,18,0,0">
@@ -2963,6 +3071,11 @@ function Start-BreakGlassWizard {
                         <TextBox x:Name="AlertEmails" Grid.Row="11" Grid.Column="1" Grid.ColumnSpan="3" Margin="0,0,0,8"/>
                         <CheckBox x:Name="CreateSignInAlert" Grid.Row="12" Grid.Column="0" Grid.ColumnSpan="2" Content="Opret sign-in alert" IsChecked="True" Margin="0,0,0,8"/>
                         <CheckBox x:Name="CreateAuditAlert" Grid.Row="12" Grid.Column="2" Grid.ColumnSpan="2" Content="Opret audit/change alert" IsChecked="True" Margin="0,0,0,8"/>
+                        <TextBlock Grid.Row="13" Grid.Column="0" Text="RMAU admin-gruppe"/>
+                        <TextBox x:Name="RmauAdminGroupDisplayName" Grid.Row="13" Grid.Column="1" Text="GRP-ENTRA-BreakGlass-RMAU-Admins" Margin="0,0,12,8"/>
+                        <TextBlock Grid.Row="13" Grid.Column="2" Text="RMAU admin UPNs"/>
+                        <TextBox x:Name="RmauAdminUpns" Grid.Row="13" Grid.Column="3" Margin="0,0,0,8"/>
+                        <TextBlock Grid.Row="14" Grid.Column="0" Grid.ColumnSpan="4" Foreground="#92400E" TextWrapping="Wrap" Text="RMAU admin-gruppen får User Administrator og Groups Administrator scoped til RMAU'en. Hvis listen efterlades tom, foreslås den konto du logger på med."/>
                     </Grid>
                 </ScrollViewer>
             </TabItem>
@@ -3048,7 +3161,7 @@ function Start-BreakGlassWizard {
     $script:MainWindow = [Windows.Markup.XamlReader]::Load($reader)
     foreach ($name in @(
         'UnderstandRisk','ReportModeRadio','ConfigureModeRadio','ConnectGraphButton','ConnectAzureButton','ConnectAllButton','GraphAccount','TenantId','TenantName','OnMicrosoftDomain','AzureAccount','SubscriptionIdDetected','ConnectionStatus',
-        'RunPrecheckButton','PrecheckList','UserPrefix1','UserPrefix2','DisplayName1','DisplayName2','GroupDisplayName','RmauDisplayName','AuthStrengthName','CaPolicyName','CaState',
+        'RunPrecheckButton','PrecheckList','UserPrefix1','UserPrefix2','DisplayName1','DisplayName2','GroupDisplayName','RmauDisplayName','RmauAdminGroupDisplayName','RmauAdminUpns','AuthStrengthName','CaPolicyName','CaState',
         'ExcludeExistingCa','AllowedAaguids','NoApply','DisableMonitoring','UseExistingWorkspace','SubscriptionId','ResourceGroupName','WorkspaceName','AzureRegion','DiagnosticSettingName',
         'ActionGroupName','AlertEmails','CreateSignInAlert','CreateAuditAlert','BuildPlanButton','ExportPlanButton','ApplyButton','PlanText','ProgressBar','ExecutionLog','OpenSecurityInfoButton',
         'ValidateFidoButton','FidoResults','RunValidationButton','ValidationList','OutputFolderText','ReportPathText','OpenReportButton','OpenOutputFolderButton','BackButton','NextButton','CloseButton','BackgroundStatus','StatusProgress','FooterStatus','WizardTabs'
