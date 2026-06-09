@@ -25,7 +25,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 $script:AppName = 'NetIP Entra Break Glass Configurator'
-$script:AppVersion = '1.0.15'
+$script:AppVersion = '1.0.16'
 $script:ProjectRoot = Split-Path -Parent $PSCommandPath
 if ([string]::IsNullOrWhiteSpace($script:ProjectRoot)) {
     $script:ProjectRoot = (Get-Location).Path
@@ -2985,7 +2985,7 @@ function New-HtmlReport {
   $warnings
   <h2>Manuelle resterende trin</h2>
   <ul>
-    <li>Registrer en separat FIDO2/FIDO key for hver konto.</li>
+    <li>Registrer to separate FIDO2/FIDO keys for hver konto.</li>
     <li>Opbevar keys og credentials efter intern nødprocedure.</li>
     <li>Test login og alerting periodisk.</li>
     <li>Brug aldrig kontiene til daglig administration.</li>
@@ -3090,7 +3090,7 @@ function New-HandoverHtmlDocument {
   $monitoringTable
   <h2>Manuelle overleveringspunkter</h2>
   <ul>
-    <li>Registrer en separat FIDO2/FIDO key for hver Break Glass-konto.</li>
+    <li>Registrer to separate FIDO2/FIDO keys for hver Break Glass-konto.</li>
     <li>Flyt credentials til godkendt password manager eller fysisk nødprocedure.</li>
     <li>Opbevar FIDO2 keys fysisk adskilt og sikkert.</li>
     <li>Bekræft at sign-in og object-change alerting virker.</li>
@@ -4320,10 +4320,10 @@ function Start-BreakGlassWizard {
             <TabItem Header="7. Manuel FIDO2 opsætning">
                 <StackPanel Margin="18">
                     <TextBlock FontSize="18" FontWeight="SemiBold" Text="Manuel FIDO2 opsætning"/>
-                    <TextBlock TextWrapping="Wrap" Margin="0,8,0,10" Text="Konsulenten skal manuelt registrere FIDO2/FIDO keys for begge konti. Værktøjet opretter ikke nøgler og håndterer ikke PIN eller fysisk opbevaring."/>
+                    <TextBlock TextWrapping="Wrap" Margin="0,8,0,10" Text="Konsulenten skal manuelt registrere to FIDO2/FIDO keys for hver konto. Værktøjet opretter ikke nøgler og håndterer ikke PIN eller fysisk opbevaring."/>
                     <TextBlock Text="Checklist:" FontWeight="SemiBold"/>
-                    <CheckBox Content="Log ind som/for konto 1 og registrer FIDO2 key"/>
-                    <CheckBox Content="Opbevar key efter intern procedure"/>
+                    <CheckBox Content="Log ind som/for konto 1 og registrer to FIDO2 keys"/>
+                    <CheckBox Content="Opbevar begge keys efter intern procedure"/>
                     <CheckBox Content="Gentag for konto 2"/>
                     <StackPanel Orientation="Horizontal" Margin="0,14,0,10">
                         <Button x:Name="OpenSecurityInfoButton" Content="Åbn Security Info" Height="32" Width="150" Margin="0,0,8,0"/>
@@ -4341,7 +4341,7 @@ function Start-BreakGlassWizard {
             <TabItem Header="6. Rapport">
                 <StackPanel Margin="18">
                     <TextBlock Text="Rapport og næste manuelle steps" FontSize="16" FontWeight="SemiBold"/>
-                    <TextBlock TextWrapping="Wrap" Margin="0,8,0,0" Text="Rapporten genereres automatisk efter kørsel. FIDO2 keys skal stadig registreres manuelt for begge konti, og credentials skal flyttes til godkendt password manager eller nødprocedure."/>
+                    <TextBlock TextWrapping="Wrap" Margin="0,8,0,0" Text="Rapporten genereres automatisk efter kørsel. To FIDO2 keys skal stadig registreres manuelt for hver konto, og credentials skal flyttes til godkendt password manager eller nødprocedure."/>
                     <TextBlock Text="Outputmappe:" Margin="0,12,0,0"/>
                     <TextBox x:Name="OutputFolderText" IsReadOnly="True" Margin="0,4,0,10"/>
                     <TextBlock Text="Rapportfil:" Margin="0,6,0,0"/>
@@ -4353,7 +4353,7 @@ function Start-BreakGlassWizard {
                         <Button x:Name="OpenHandoverButton" Content="Åbn handover" Height="32" Width="130" Margin="0,0,8,0"/>
                         <Button x:Name="OpenOutputFolderButton" Content="Åbn outputmappe" Height="32" Width="150"/>
                     </StackPanel>
-                    <TextBlock TextWrapping="Wrap" Margin="0,16,0,0" Foreground="#92400E" Text="Reminder: registrer én separat FIDO2 key pr. konto, opbevar keys fysisk adskilt og sikkert, ekskluder ikke break-glass-kontiene fra overvågning, og test kontiene periodisk."/>
+                    <TextBlock TextWrapping="Wrap" Margin="0,16,0,0" Foreground="#92400E" Text="Reminder: registrer to separate FIDO2 keys pr. konto, opbevar keys fysisk adskilt og sikkert, ekskluder ikke break-glass-kontiene fra overvågning, og test kontiene periodisk."/>
                 </StackPanel>
             </TabItem>
         </TabControl>

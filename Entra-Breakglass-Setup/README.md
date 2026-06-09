@@ -129,7 +129,7 @@ Til plan/report uden apply vælges `Report only` på startsiden. Vælg først `C
 6. Udfyld konfiguration.
 7. Byg dry-run plan og eksporter den efter behov.
 8. Apply configuration.
-9. Registrer FIDO2/FIDO keys manuelt for begge konti.
+9. Registrer to FIDO2/FIDO keys manuelt for hver konto.
 10. Kør FIDO2-validering og endelig validering.
 11. Åbn outputmappen og gennemgå rapporterne.
 
@@ -155,7 +155,7 @@ Adgangskoder, tokens og secrets skrives ikke til log, JSON eller HTML-rapport.
 
 Version 1 automatiserer ikke FIDO2/FIDO key enrollment. Konsulenten skal manuelt:
 
-- Registrere en separat FIDO2/FIDO key for hver konto.
+- Registrere to separate FIDO2/FIDO keys for hver konto.
 - Sikre at hver key er unik og fysisk adskilt.
 - Følge kundens godkendte nødprocedure for opbevaring.
 - Teste login for hver konto.
@@ -177,7 +177,7 @@ Version 1 automatiserer ikke FIDO2/FIDO key enrollment. Konsulenten skal manuelt
 3. Gennemgå `plan.json` og `report.html`.
 4. Kør apply med CA policy state `reportOnly`.
 5. Bekræft brugere, break-glass gruppe, GA assignment på gruppen, RMAU, RMAU admin-gruppe og CA policy i Entra admin center.
-6. Registrer FIDO2 keys manuelt.
+6. Registrer to FIDO2 keys manuelt for hver konto.
 7. Kør FIDO2-validering.
 8. Test sign-in alerts og audit/change alerts.
 9. Skift først CA policy til `enabled`, når rapport og manuelle tests er godkendt.
