@@ -1475,12 +1475,13 @@ function New-BreakGlassAuthenticationStrengthPolicy {
         requirementsSatisfied = 'mfa'
         allowedCombinations = @('fido2')
     }
-    if ($AllowedAaguids.Count -gt 0) {
+    $allowedAaguidList = @($AllowedAaguids | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+    if ($allowedAaguidList.Count -gt 0) {
         $body.combinationConfigurations = @(
             @{
                 '@odata.type'  = '#microsoft.graph.fido2CombinationConfiguration'
                 appliesToCombinations = @('fido2')
-                allowedAAGUIDs = $AllowedAaguids
+                allowedAAGUIDs = $allowedAaguidList
             }
         )
     }
@@ -3219,7 +3220,7 @@ try {
     }
 }
 catch {
-    Write-SafeError -Message 'Uventet fejl.' -ErrorRecord $_
+    Write-DetailedError -Message 'Uventet fejl.' -ErrorRecord $_
     if (-not $WorkerMode -and -not $ModuleWorkerMode -and -not $ConnectionWorkerMode) {
         Show-AppMessage -Message ("Uventet fejl:`r`n{0}" -f (ConvertTo-RedactedError $_)) -Icon 'Error' | Out-Null
         Write-Host ''
@@ -3229,5 +3230,9 @@ catch {
         Read-Host 'Tryk Enter for at lukke PowerShell-vinduet'
         exit 1
     }
-    throw
+    Write-Host ''
+    Write-Host "Worker stoppede med en fejl: $(ConvertTo-RedactedError $_)" -ForegroundColor Red
+    Write-Host "Se logfilen: $script:LogFile" -ForegroundColor Yellow
+    Start-Sleep -Seconds 8
+    exit 1
 }
