@@ -897,11 +897,40 @@ function Connect-AppAzure {
         throw 'Azure context blev ikke returneret.'
     }
     $script:State['AzureConnected'] = $true
-    $script:State['AzureAccount'] = [string] $context.Account
-    $script:State['AzureSubscriptionId'] = [string] $context.Subscription.Id
-    $script:State['AzureSubscriptionName'] = [string] $context.Subscription.Name
+    $script:State['AzureAccount'] = [string] (Get-ObjectPropertyValue -InputObject $context -Name 'Account')
+    Set-AppAzureContextState -Context $context
     Write-AppLog -Message "Azure forbundet som $($script:State.AzureAccount), subscription $($script:State.AzureSubscriptionName)."
     return $script:State
+}
+
+function Set-AppAzureContextState {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)] $Context)
+
+    $subscription = Get-ObjectPropertyValue -InputObject $Context -Name 'Subscription'
+    if (-not $subscription) {
+        throw 'Azure context indeholder ikke en valgt subscription. Vælg en subscription i Azure login-vinduet og prøv igen.'
+    }
+
+    $subscriptionId = Get-ObjectPropertyValue -InputObject $subscription -Name 'Id'
+    if (-not $subscriptionId) {
+        $subscriptionId = Get-ObjectPropertyValue -InputObject $subscription -Name 'SubscriptionId'
+    }
+    if (-not $subscriptionId) {
+        $subscriptionId = Get-ObjectPropertyValue -InputObject $subscription -Name 'Subscription'
+    }
+
+    $subscriptionName = Get-ObjectPropertyValue -InputObject $subscription -Name 'Name'
+    if (-not $subscriptionName) {
+        $subscriptionName = Get-ObjectPropertyValue -InputObject $subscription -Name 'SubscriptionName'
+    }
+
+    if ([string]::IsNullOrWhiteSpace([string] $subscriptionId)) {
+        throw 'Azure context indeholder ikke et subscription id. Vælg en subscription i Azure login-vinduet og prøv igen.'
+    }
+
+    $script:State['AzureSubscriptionId'] = [string] $subscriptionId
+    $script:State['AzureSubscriptionName'] = [string] $subscriptionName
 }
 
 function Get-AppAzureContext {
@@ -932,8 +961,7 @@ function Get-OrSelectSubscription {
         Set-AzContext -SubscriptionId $SubscriptionId -ErrorAction Stop | Out-Null
     }
     $context = Get-AzContext
-    $script:State['AzureSubscriptionId'] = [string] $context.Subscription.Id
-    $script:State['AzureSubscriptionName'] = [string] $context.Subscription.Name
+    Set-AppAzureContextState -Context $context
     return $script:State.AzureSubscriptionId
 }
 
