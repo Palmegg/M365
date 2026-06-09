@@ -845,15 +845,42 @@ function Invoke-GraphGetAllPages {
     $next = $Uri
     while (-not [string]::IsNullOrWhiteSpace($next)) {
         $response = Invoke-GraphRequestSafe -Method GET -Uri $next
-        if ($response.PSObject.Properties['value']) {
-            foreach ($item in @($response.value)) {
-                $items.Add($item) | Out-Null
+        $value = $null
+        $nextLink = $null
+
+        if ($response -is [System.Collections.IDictionary]) {
+            if ($response.Contains('value')) {
+                $value = $response['value']
+            }
+            if ($response.Contains('@odata.nextLink')) {
+                $nextLink = [string] $response['@odata.nextLink']
             }
         }
-        $nextProperty = $response.PSObject.Properties['@odata.nextLink']
-        $next = if ($nextProperty) { [string] $nextProperty.Value } else { $null }
+        else {
+            $valueProperty = $response.PSObject.Properties['value']
+            if ($valueProperty) {
+                $value = $valueProperty.Value
+            }
+            $nextProperty = $response.PSObject.Properties['@odata.nextLink']
+            if ($nextProperty) {
+                $nextLink = [string] $nextProperty.Value
+            }
+        }
+
+        if ($null -ne $value) {
+            if ($value -is [System.Collections.IEnumerable] -and $value -isnot [string]) {
+                foreach ($item in $value) {
+                    $items.Add($item) | Out-Null
+                }
+            }
+            else {
+                $items.Add($value) | Out-Null
+            }
+        }
+
+        $next = $nextLink
     }
-    return @($items)
+    return $items.ToArray()
 }
 
 function Connect-AppAzure {
