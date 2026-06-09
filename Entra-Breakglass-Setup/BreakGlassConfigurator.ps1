@@ -757,13 +757,7 @@ function Connect-AppGraph {
     }
     catch {
         Write-DetailedError -Message 'Microsoft Graph native interactive sign-in fejlede.' -ErrorRecord $_
-        Write-AppLog -Level WARN -Message 'Prøver Microsoft Graph device-code fallback i samme worker-vindue.'
-        Write-Host ''
-        Write-Host 'Native Microsoft Graph login fejlede. Prøver device-code fallback.' -ForegroundColor Yellow
-        Write-Host 'Kopiér koden som vises af Microsoft Graph, åbn https://microsoft.com/devicelogin, og log ind med FIDO/passkey.' -ForegroundColor Yellow
-        Write-Host ''
-        Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null
-        Connect-MgGraph -Scopes $requiredScopes -ContextScope ([Microsoft.Graph.PowerShell.Authentication.ContextScope]::Process) -UseDeviceCode -NoWelcome -ErrorAction Stop | Out-Null
+        throw
     }
     $context = Get-MgContext
     if (-not $context) {
