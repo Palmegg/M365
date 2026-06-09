@@ -1,6 +1,6 @@
 # NetIP Entra Break Glass Configurator
 
-Version 1 af et Windows PowerShell/WPF-værktøj til konsulentvenlig opsætning og dokumentation af en Microsoft Entra break-glass baseline.
+Version 1 af et PowerShell 7/WPF-værktøj til konsulentvenlig opsætning og dokumentation af en Microsoft Entra break-glass baseline.
 
 Værktøjet er designet til at være sikkert, idempotent og egnet til lab-test mod en rigtig tenant. Det bruger Microsoft Graph PowerShell, Microsoft Graph REST via `Invoke-MgGraphRequest`, Az PowerShell og ARM REST. Det bruger ikke `AzureAD` eller `MSOnline`.
 
@@ -24,9 +24,8 @@ Scriptet hjælper med at konfigurere og validere:
 ## Krav
 
 - Windows.
-- Windows PowerShell 5.1.
-- x64 PowerShell anbefales.
-- WPF kræver STA. Scriptet relancerer automatisk i `powershell.exe -STA`, hvis det startes forkert.
+- PowerShell 7 x64.
+- WPF kræver STA. Scriptet relancerer automatisk i `pwsh.exe -STA`, hvis det startes uden STA eller fra Windows PowerShell.
 - Internetadgang til Microsoft Graph, Azure Resource Manager og PowerShell Gallery, hvis moduler skal installeres.
 - Delegated interactive sign-in. Version 1 bruger ikke app-only authentication, client secrets eller certifikatbaseret automation.
 
@@ -85,7 +84,7 @@ Admin consent kan være nødvendig i kundens tenant.
 
 ## Sådan køres scriptet
 
-Åbn en almindelig Windows PowerShell 5.1 konsol og kør:
+Åbn en almindelig PowerShell 7 x64 konsol og kør:
 
 ```powershell
 Set-Location "C:\Users\jop\OneDrive - netIP\Dokumenter\GitHub\M365\Entra-Breakglass-Setup"
@@ -93,9 +92,15 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 .\BreakGlassConfigurator.ps1
 ```
 
-Kør ikke første login/modulinstallation fra VS Code PowerShell Extension Terminal. WPF, Microsoft Graph interactive login og PowerShell Editor Services kan få VS Code extension-terminalen til at lukke. Brug en separat Windows PowerShell 5.1 konsol.
+Du kan også starte den direkte med STA:
 
-Connect-knapperne starter en separat synlig PowerShell connection-worker til Graph/Azure login. Det beskytter WPF GUI-processen, hvis Microsoft Graph/WAM-login crasher eller lukker PowerShell-processen.
+```powershell
+pwsh -NoProfile -ExecutionPolicy Bypass -STA -File .\BreakGlassConfigurator.ps1
+```
+
+Kør ikke første login/modulinstallation fra VS Code PowerShell Extension Terminal. WPF, Microsoft Graph interactive login og PowerShell Editor Services kan få VS Code extension-terminalen til at lukke. Brug en separat PowerShell 7 konsol.
+
+Connect-knapperne starter en separat synlig PowerShell 7 connection-worker til Graph/Azure login. Det beskytter WPF GUI-processen, hvis Microsoft Graph/WAM-login crasher eller lukker PowerShell-processen.
 
 Hvis moduler mangler, eller hvis Microsoft Graph delmoduler er installeret i blandede versioner, spørger connection-worker-vinduet om installation/opdatering for `CurrentUser`. Godkend installationen i worker-vinduet, vent til den er færdig, og gå derefter tilbage til GUI'en. Statusbaren i GUI'en viser seneste worker-status.
 

@@ -112,55 +112,34 @@ function Restart-InStaModeIfNeeded {
         return
     }
 
-    if (-not (Test-StaMode)) {
-        $powerShell = Join-Path -Path $env:SystemRoot -ChildPath 'System32\WindowsPowerShell\v1.0\powershell.exe'
+    if ($PSVersionTable.PSVersion.Major -lt 7 -or -not (Test-StaMode)) {
+        $powerShell = Get-PowerShellHostPath
         $arguments = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-STA', '-File', ('"{0}"' -f $PSCommandPath))
         if ($Mock) { $arguments += '-Mock' }
         if ($NoApply) { $arguments += '-NoApply' }
-        Write-Host 'Genstarter i Windows PowerShell STA til WPF...' -ForegroundColor Cyan
+        Write-Host 'Genstarter i PowerShell 7 STA til WPF...' -ForegroundColor Cyan
         Start-Process -FilePath $powerShell -ArgumentList ($arguments -join ' ') -Wait
         exit 0
     }
 }
 
-function Initialize-WindowsPowerShellModulePath {
+function Get-PowerShellHostPath {
     [CmdletBinding()]
     param()
 
-    if ($PSVersionTable.PSVersion.Major -gt 5) {
-        return
-    }
-
-    $paths = New-Object System.Collections.Generic.List[string]
-    $documents = [Environment]::GetFolderPath('MyDocuments')
-    if (-not [string]::IsNullOrWhiteSpace($documents)) {
-        $paths.Add((Join-Path -Path $documents -ChildPath 'WindowsPowerShell\Modules')) | Out-Null
-    }
-    if (-not [string]::IsNullOrWhiteSpace($env:ProgramFiles)) {
-        $paths.Add((Join-Path -Path $env:ProgramFiles -ChildPath 'WindowsPowerShell\Modules')) | Out-Null
-    }
-    if (-not [string]::IsNullOrWhiteSpace($env:WINDIR)) {
-        $paths.Add((Join-Path -Path $env:WINDIR -ChildPath 'system32\WindowsPowerShell\v1.0\Modules')) | Out-Null
-    }
-
-    $existingWindowsPowerShellPaths = @($env:PSModulePath -split ';' | Where-Object {
-        -not [string]::IsNullOrWhiteSpace($_) -and
-        $_ -match '\\WindowsPowerShell\\Modules' -and
-        $_ -notmatch '\\PowerShell\\7\\Modules' -and
-        $_ -notmatch '\\PowerShell\\Modules'
-    })
-    foreach ($path in $existingWindowsPowerShellPaths) {
-        $paths.Add($path) | Out-Null
-    }
-
-    $unique = @()
-    foreach ($path in $paths) {
-        if (-not [string]::IsNullOrWhiteSpace($path) -and $unique -notcontains $path) {
-            $unique += $path
+    if ($PSVersionTable.PSVersion.Major -ge 7 -and -not [string]::IsNullOrWhiteSpace($PSHOME)) {
+        $current = Join-Path -Path $PSHOME -ChildPath 'pwsh.exe'
+        if (Test-Path -LiteralPath $current) {
+            return $current
         }
     }
 
-    $env:PSModulePath = ($unique -join ';')
+    $command = Get-Command pwsh.exe -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($command -and $command.Source) {
+        return $command.Source
+    }
+
+    throw 'PowerShell 7 blev ikke fundet. Installer PowerShell 7, og start scriptet igen med pwsh.exe.'
 }
 
 function ConvertTo-RedactedError {
@@ -266,9 +245,9 @@ function Initialize-AppState {
     param()
 
     Restart-InStaModeIfNeeded
-    Initialize-WindowsPowerShellModulePath
     New-Item -ItemType Directory -Force -Path $script:DefaultOutputRoot | Out-Null
     Write-AppLog -Message "$($script:AppName) v$($script:AppVersion) initialiseret. Mock: $($script:State.Mock). NoApply: $($script:State.NoApply)."
+    Write-AppLog -Message "PowerShell runtime: $($PSVersionTable.PSVersion). Host: $(Get-PowerShellHostPath)"
     Write-AppLog -Message "PSModulePath: $env:PSModulePath"
 }
 
@@ -488,7 +467,7 @@ function Start-ModulePreparationWorker {
     $folder = Join-Path -Path $script:DefaultOutputRoot -ChildPath ('ModulePreparation-{0}' -f (Get-Date -Format 'yyyyMMdd-HHmmss'))
     New-Item -ItemType Directory -Force -Path $folder | Out-Null
     $script:ModuleWorkerLogFile = Join-Path -Path $folder -ChildPath 'module-worker.log'
-    $powerShell = Join-Path -Path $env:SystemRoot -ChildPath 'System32\WindowsPowerShell\v1.0\powershell.exe'
+    $powerShell = Get-PowerShellHostPath
     $args = @(
         '-NoProfile',
         '-ExecutionPolicy',
@@ -585,7 +564,7 @@ function Start-ConnectionWorker {
     }
     Export-JsonSafe -InputObject $config -Path $script:ConnectionWorkerConfigFile -Depth 10 | Out-Null
 
-    $powerShell = Join-Path -Path $env:SystemRoot -ChildPath 'System32\WindowsPowerShell\v1.0\powershell.exe'
+    $powerShell = Get-PowerShellHostPath
     $args = @(
         '-NoProfile',
         '-ExecutionPolicy',
@@ -1754,7 +1733,7 @@ function Invoke-PreCheck {
     param([hashtable] $Config)
 
     $results = New-Object System.Collections.Generic.List[object]
-    $results.Add([pscustomobject]@{ Check = 'Windows PowerShell'; Status = if ($PSVersionTable.PSVersion.Major -ge 5) { 'Passed' } else { 'Failed' }; Detail = [string] $PSVersionTable.PSVersion }) | Out-Null
+    $results.Add([pscustomobject]@{ Check = 'PowerShell 7'; Status = if ($PSVersionTable.PSVersion.Major -ge 7) { 'Passed' } else { 'Failed' }; Detail = [string] $PSVersionTable.PSVersion }) | Out-Null
     $results.Add([pscustomobject]@{ Check = 'STA mode'; Status = if (Test-StaMode) { 'Passed' } else { 'Failed' }; Detail = [System.Threading.Thread]::CurrentThread.GetApartmentState() }) | Out-Null
     foreach ($item in Test-RequiredModulesPrecheck) { $results.Add($item) | Out-Null }
     $results.Add([pscustomobject]@{ Check = 'Microsoft Graph forbindelse'; Status = if ($script:State.GraphConnected) { 'Passed' } else { 'Failed' }; Detail = $script:State.GraphAccount }) | Out-Null
@@ -2476,7 +2455,7 @@ function Start-WorkerApply {
     }
     $configPath = Join-Path -Path $output -ChildPath 'worker-config.json'
     Export-JsonSafe -InputObject $workerConfig -Path $configPath -Depth 30 | Out-Null
-    $powerShell = Join-Path -Path $env:SystemRoot -ChildPath 'System32\WindowsPowerShell\v1.0\powershell.exe'
+    $powerShell = Get-PowerShellHostPath
     $args = @('-NoProfile','-ExecutionPolicy','Bypass','-STA','-File',('"{0}"' -f $PSCommandPath),'-WorkerMode','-WorkerConfigPath',('"{0}"' -f $configPath))
     if ($script:State.Mock) { $args += '-Mock' }
     $script:WorkerProcess = Start-Process -FilePath $powerShell -ArgumentList ($args -join ' ') -PassThru -WindowStyle Normal
