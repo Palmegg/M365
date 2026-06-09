@@ -25,7 +25,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 $script:AppName = 'NetIP Entra Break Glass Configurator'
-$script:AppVersion = '1.0.11'
+$script:AppVersion = '1.0.12'
 $script:ProjectRoot = Split-Path -Parent $PSCommandPath
 if ([string]::IsNullOrWhiteSpace($script:ProjectRoot)) {
     $script:ProjectRoot = (Get-Location).Path
@@ -2438,7 +2438,14 @@ function Invoke-BreakGlassConfiguration {
 
     $apply = -not [bool] $Config.NoApply
     $tenantId = if ($script:State.TenantId) { $script:State.TenantId } else { 'UnknownTenant' }
-    $output = New-OutputFolder -TenantId $tenantId
+    $output = if (-not [string]::IsNullOrWhiteSpace($script:SessionOutputFolder)) {
+        New-Item -ItemType Directory -Force -Path $script:SessionOutputFolder | Out-Null
+        $script:State['OutputFolder'] = $script:SessionOutputFolder
+        $script:SessionOutputFolder
+    }
+    else {
+        New-OutputFolder -TenantId $tenantId
+    }
 
     Write-AppLog -Message "Starter konfiguration. Apply: $apply"
     $tenant = Get-TenantInfo
@@ -3077,6 +3084,37 @@ function Update-ValidationUi {
     foreach ($result in $Results) {
         $script:Ui.ValidationList.Items.Add(('{0} [{1}] {2}' -f $result.Check, $result.Status, $result.Detail)) | Out-Null
     }
+}
+
+function Resolve-ReportPathFromUi {
+    [CmdletBinding()]
+    param()
+
+    $candidatePaths = New-Object System.Collections.Generic.List[string]
+    if ($script:Ui.ContainsKey('ReportPathText') -and $script:Ui.ReportPathText -and -not [string]::IsNullOrWhiteSpace($script:Ui.ReportPathText.Text)) {
+        $candidatePaths.Add($script:Ui.ReportPathText.Text.Trim()) | Out-Null
+    }
+    if (-not [string]::IsNullOrWhiteSpace($script:SessionOutputFolder)) {
+        $candidatePaths.Add((Join-Path -Path $script:SessionOutputFolder -ChildPath 'report.html')) | Out-Null
+    }
+    if ($script:State.Contains('OutputFolder') -and -not [string]::IsNullOrWhiteSpace([string] $script:State.OutputFolder)) {
+        $candidatePaths.Add((Join-Path -Path ([string] $script:State.OutputFolder) -ChildPath 'report.html')) | Out-Null
+    }
+
+    foreach ($path in @($candidatePaths.ToArray() | Select-Object -Unique)) {
+        if (-not [string]::IsNullOrWhiteSpace($path) -and (Test-Path -LiteralPath $path -PathType Leaf)) {
+            return $path
+        }
+    }
+
+    $latestReport = Get-ChildItem -LiteralPath $script:DefaultOutputRoot -Filter 'report.html' -File -Recurse -ErrorAction SilentlyContinue |
+        Sort-Object LastWriteTime -Descending |
+        Select-Object -First 1
+    if ($latestReport) {
+        return $latestReport.FullName
+    }
+
+    return ''
 }
 
 function Update-UiPump {
@@ -4110,18 +4148,23 @@ function Start-BreakGlassWizard {
     })
 
     $script:Ui.OpenOutputFolderButton.Add_Click({
-        if ($script:SessionOutputFolder -and (Test-Path -Path $script:SessionOutputFolder)) {
-            Start-Process explorer.exe -ArgumentList $script:SessionOutputFolder
+        $reportPath = Resolve-ReportPathFromUi
+        $folder = if ($reportPath) { Split-Path -Parent $reportPath } elseif ($script:SessionOutputFolder) { $script:SessionOutputFolder } else { '' }
+        if ($folder -and (Test-Path -LiteralPath $folder -PathType Container)) {
+            $script:Ui.OutputFolderText.Text = $folder
+            Start-Process explorer.exe -ArgumentList $folder
+        }
+        else {
+            Show-AppMessage -Message 'Outputmappen findes ikke endnu.' -Icon 'Information' | Out-Null
         }
     })
 
     $script:Ui.OpenReportButton.Add_Click({
-        $reportPath = $script:Ui.ReportPathText.Text
-        if ($reportPath -and (Test-Path -LiteralPath $reportPath)) {
+        $reportPath = Resolve-ReportPathFromUi
+        if ($reportPath -and (Test-Path -LiteralPath $reportPath -PathType Leaf)) {
+            $script:Ui.ReportPathText.Text = $reportPath
+            $script:Ui.OutputFolderText.Text = Split-Path -Parent $reportPath
             Start-Process $reportPath
-        }
-        elseif ($script:SessionOutputFolder -and (Test-Path -LiteralPath (Join-Path -Path $script:SessionOutputFolder -ChildPath 'report.html'))) {
-            Start-Process (Join-Path -Path $script:SessionOutputFolder -ChildPath 'report.html')
         }
         else {
             Show-AppMessage -Message 'Rapporten er ikke genereret endnu.' -Icon 'Information' | Out-Null
@@ -4266,10 +4309,16 @@ function Start-BreakGlassWizard {
             if ($exitCode -eq 0) {
                 Set-WizardMaxStep -Step 8
                 Set-WizardStep -Step 8
-                if ($reportPath -and (Test-Path -LiteralPath $reportPath)) {
-                    Start-Process $reportPath
+                $resolvedReportPath = Resolve-ReportPathFromUi
+                if ($resolvedReportPath -and (Test-Path -LiteralPath $resolvedReportPath -PathType Leaf)) {
+                    $script:Ui.ReportPathText.Text = $resolvedReportPath
+                    $script:Ui.OutputFolderText.Text = Split-Path -Parent $resolvedReportPath
+                    Start-Process $resolvedReportPath
+                    Set-UiStatus -Message 'Worker færdig. Rapporten er klar, og FIDO2-reminderen står i sidste trin.'
                 }
-                Set-UiStatus -Message 'Worker færdig. Rapporten er klar, og FIDO2-reminderen står i sidste trin.'
+                else {
+                    Set-UiStatus -Message 'Worker færdig, men report.html blev ikke fundet. Se live-loggen for detaljer.'
+                }
             }
             else {
                 Set-UiStatus -Message ("Worker fejlede med exit code {0}. Se live-loggen og worker-vinduet." -f $exitCode)
