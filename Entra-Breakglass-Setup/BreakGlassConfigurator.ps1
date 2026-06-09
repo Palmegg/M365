@@ -25,7 +25,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 $script:AppName = 'NetIP Entra Break Glass Configurator'
-$script:AppVersion = '1.0.18'
+$script:AppVersion = '1.0.19'
 $script:GraphModulePinnedVersion = [version] '2.31.0'
 $script:ProjectRoot = Split-Path -Parent $PSCommandPath
 if ([string]::IsNullOrWhiteSpace($script:ProjectRoot)) {
@@ -44,6 +44,8 @@ $script:ConnectionWorkerProcess = $null
 $script:ConnectionWorkerConfigFile = ''
 $script:ConnectionWorkerResultPath = ''
 $script:ConnectionWorkerLogFile = ''
+$script:ConnectionWorkerCommandFile = ''
+$script:ConnectionWorkerResultProcessed = $false
 $script:LastLogLength = 0
 $script:WizardMaxStep = 0
 $script:WizardInternalNavigation = $false
@@ -597,13 +599,17 @@ function Start-ConnectionWorker {
     $script:ConnectionWorkerConfigFile = Join-Path -Path $folder -ChildPath 'connection-worker-config.json'
     $script:ConnectionWorkerResultPath = Join-Path -Path $folder -ChildPath 'connection-result.json'
     $script:ConnectionWorkerLogFile = Join-Path -Path $folder -ChildPath 'connection-worker.log'
+    $script:ConnectionWorkerCommandFile = Join-Path -Path $folder -ChildPath 'session-command.json'
+    $script:ConnectionWorkerResultProcessed = $false
 
     $config = [ordered]@{
-        Graph      = [bool] $Graph
-        Azure      = [bool] $Azure
-        Mock       = [bool] $script:State.Mock
-        LogPath    = $script:ConnectionWorkerLogFile
-        ResultPath = $script:ConnectionWorkerResultPath
+        Graph       = [bool] $Graph
+        Azure       = [bool] $Azure
+        Mock        = [bool] $script:State.Mock
+        LogPath     = $script:ConnectionWorkerLogFile
+        ResultPath  = $script:ConnectionWorkerResultPath
+        KeepAlive   = $true
+        CommandPath = $script:ConnectionWorkerCommandFile
     }
     Export-JsonSafe -InputObject $config -Path $script:ConnectionWorkerConfigFile -Depth 10 | Out-Null
 
@@ -753,6 +759,34 @@ function Invoke-ConnectionWorkerMode {
         Export-JsonSafe -InputObject $result -Path $resultPath -Depth 20 | Out-Null
         Write-AppLog -Level PASS -Message 'Connection-worker færdig.'
         Write-Host ''
+        if ([bool] (Get-ObjectPropertyValue -InputObject $config -Name 'KeepAlive')) {
+            Write-Host 'Connection-worker færdig og sessionen holdes åben. Du kan gå tilbage til GUI-vinduet og trykke Kør uden nyt login.' -ForegroundColor Green
+            Write-AppLog -Level PASS -Message 'Session worker klar. Venter på apply-kommando fra GUI.'
+            $commandPath = [string] (Get-ObjectPropertyValue -InputObject $config -Name 'CommandPath')
+            while ($true) {
+                if (-not [string]::IsNullOrWhiteSpace($commandPath) -and (Test-Path -LiteralPath $commandPath -PathType Leaf)) {
+                    $command = Get-Content -LiteralPath $commandPath -Raw -Encoding UTF8 | ConvertFrom-Json
+                    Remove-Item -LiteralPath $commandPath -Force -ErrorAction SilentlyContinue
+                    $commandName = [string] (Get-ObjectPropertyValue -InputObject $command -Name 'Command')
+                    if ($commandName -eq 'Apply') {
+                        $script:SessionOutputFolder = [string] $command.OutputFolder
+                        $script:LogFile = [string] $command.LogFile
+                        Write-AppLog -Message 'Session worker modtog apply-kommando fra GUI. Genbruger eksisterende Graph/Azure session.'
+                        Invoke-BreakGlassConfiguration -Config (ConvertTo-HashtableRecursive -InputObject $command.Config) | Out-Null
+                        Write-AppLog -Level PASS -Message 'Session worker apply færdig.'
+                        exit 0
+                    }
+                    elseif ($commandName -eq 'Exit') {
+                        Write-AppLog -Message 'Session worker modtog exit-kommando.'
+                        exit 0
+                    }
+                    else {
+                        Write-AppLog -Level WARN -Message "Ukendt session worker kommando: $commandName"
+                    }
+                }
+                Start-Sleep -Seconds 1
+            }
+        }
         Write-Host 'Connection-worker færdig. Du kan gå tilbage til GUI-vinduet.' -ForegroundColor Green
         Start-Sleep -Seconds 3
         exit 0
@@ -4324,6 +4358,32 @@ function Start-WorkerApply {
     param([hashtable] $Config)
 
     $output = New-OutputFolder -TenantId $(if ($script:State.TenantId) { $script:State.TenantId } else { 'UnknownTenant' })
+
+    if ($script:ConnectionWorkerProcess -and -not $script:ConnectionWorkerProcess.HasExited -and $script:ConnectionWorkerResultProcessed -and $script:State.GraphConnected) {
+        if (-not [bool] $Config.DisableMonitoring -and -not $script:State.AzureConnected) {
+            throw 'Azure Monitor/Log Analytics er slået til, men Azure-sessionen er ikke connected. Tryk Forbind igen.'
+        }
+        if ([string]::IsNullOrWhiteSpace($script:ConnectionWorkerCommandFile)) {
+            throw 'Session worker command path mangler. Tryk Forbind igen.'
+        }
+
+        $command = [ordered]@{
+            Command      = 'Apply'
+            Config       = $Config
+            OutputFolder = $output
+            LogFile      = $script:LogFile
+        }
+        Export-JsonSafe -InputObject $command -Path $script:ConnectionWorkerCommandFile -Depth 30 | Out-Null
+        $script:WorkerProcess = $script:ConnectionWorkerProcess
+        $script:ConnectionWorkerProcess = $null
+        Write-AppLog -Message 'Apply-kommando sendt til eksisterende session worker. Der forventes ikke nyt login.'
+        return
+    }
+
+    if ($script:State.GraphConnected) {
+        throw 'Den indloggede session-worker kører ikke længere. Tryk Forbind igen før kørsel, så Graph/Azure-login kan genbruges.'
+    }
+
     $workerConfig = @{
         Config = $Config
         State  = @{
@@ -4348,6 +4408,105 @@ function Start-WorkerApply {
     if ($script:State.Mock) { $args += '-Mock' }
     $script:WorkerProcess = Start-Process -FilePath $powerShell -ArgumentList ($args -join ' ') -PassThru -WindowStyle Normal
     Write-AppLog -Message 'Worker process startet i et synligt PowerShell vindue. Sign-in prompts kan blive vist der.'
+}
+
+function Receive-ConnectionWorkerResult {
+    [CmdletBinding()]
+    param(
+        [int] $ConnectionExitCode = 0,
+        [bool] $ProcessExited = $false
+    )
+
+    if (-not $script:ConnectionWorkerResultPath -or -not (Test-Path -LiteralPath $script:ConnectionWorkerResultPath -PathType Leaf)) {
+        if ($ProcessExited) {
+            Set-UiStatus -Message ("Connection-worker sluttede uden resultatfil. Exit code: {0}" -f $ConnectionExitCode)
+        }
+        return $false
+    }
+
+    try {
+        $connectionResult = Get-Content -LiteralPath $script:ConnectionWorkerResultPath -Raw -Encoding UTF8 | ConvertFrom-Json
+        $requestedGraph = [bool] (Get-ObjectPropertyValue -InputObject $connectionResult -Name 'RequestedGraph')
+        $requestedAzure = [bool] (Get-ObjectPropertyValue -InputObject $connectionResult -Name 'RequestedAzure')
+        if ($requestedGraph) {
+            $script:State['GraphConnected'] = [bool] $connectionResult.GraphConnected
+            $script:State['GraphAccount'] = [string] $connectionResult.GraphAccount
+            $script:State['GraphScopes'] = @(Get-ObjectPropertyValue -InputObject $connectionResult -Name 'GraphScopes')
+            $script:State['TenantId'] = [string] $connectionResult.TenantId
+            $script:State['TenantDisplayName'] = [string] $connectionResult.TenantDisplayName
+            $script:State['OnMicrosoftDomain'] = [string] $connectionResult.OnMicrosoftDomain
+            $script:State['ExistingCandidates'] = @($connectionResult.ExistingCandidates)
+            $script:State['GlobalAdminUsers'] = @($connectionResult.GlobalAdminUsers)
+        }
+        if ($requestedAzure) {
+            $script:State['AzureConnected'] = [bool] $connectionResult.AzureConnected
+            $script:State['AzureAccount'] = [string] $connectionResult.AzureAccount
+            $script:State['AzureSubscriptionId'] = [string] $connectionResult.AzureSubscriptionId
+            $script:State['AzureSubscriptionName'] = [string] $connectionResult.AzureSubscriptionName
+            $script:State['LastAzureSubscriptionMissing'] = [bool] (Get-ObjectPropertyValue -InputObject $connectionResult -Name 'AzureSubscriptionMissing')
+            $script:State['LastConnectionError'] = if ($connectionResult.Error) { [string] $connectionResult.Error } elseif ($connectionResult.AzureError) { [string] $connectionResult.AzureError } else { '' }
+            if ($script:State.AzureConnected) {
+                $script:State['LastAzureSubscriptionMissing'] = $false
+                $script:State['LastConnectionError'] = ''
+            }
+        }
+        Update-ConnectionStatusUi
+        if ($requestedGraph) {
+            Update-DiscoveryUi -Candidates @($script:State.ExistingCandidates)
+        }
+        Update-MonitoringUi
+
+        $errorText = if ($connectionResult.Error) { [string] $connectionResult.Error } else { '' }
+        $azureError = if ($connectionResult.PSObject.Properties['AzureError']) { [string] $connectionResult.AzureError } else { '' }
+        if (-not [string]::IsNullOrWhiteSpace($errorText)) {
+            if ($requestedAzure -and [bool] (Get-ObjectPropertyValue -InputObject $connectionResult -Name 'AzureSubscriptionMissing')) {
+                Set-UiStatus -Message 'Azure subscription mangler. Opret/tilknyt en subscription, og tryk Prøv igen på forbindelsesknappen.'
+            }
+            else {
+                Set-UiStatus -Message ("Connection-worker fejlede: {0}" -f $errorText)
+            }
+        }
+        elseif ($requestedAzure -and -not [bool] $connectionResult.AzureConnected -and -not [string]::IsNullOrWhiteSpace($azureError)) {
+            Set-UiStatus -Message ("Azure/subscription mangler. Monitoring kræver Azure-login: {0}" -f $azureError)
+        }
+        elseif ($ProcessExited) {
+            Set-UiStatus -Message 'Connection-worker færdig. Forbindelsesoplysninger er indlæst.'
+        }
+        else {
+            Set-UiStatus -Message 'Forbindelse er klar. Session worker holdes åben, så Kør ikke kræver nyt login.'
+        }
+
+        $script:ConnectionWorkerResultProcessed = $true
+        Set-UiBusy -Busy $false
+        return $true
+    }
+    catch {
+        Write-SafeError -Message 'Kunne ikke læse connection-worker resultat.' -ErrorRecord $_
+        Set-UiStatus -Message 'Connection-worker færdig, men resultatfilen kunne ikke læses.'
+        return $false
+    }
+}
+
+function Stop-SessionWorker {
+    [CmdletBinding()]
+    param()
+
+    try {
+        if ($script:ConnectionWorkerProcess -and -not $script:ConnectionWorkerProcess.HasExited) {
+            if (-not [string]::IsNullOrWhiteSpace($script:ConnectionWorkerCommandFile)) {
+                Export-JsonSafe -InputObject @{ Command = 'Exit' } -Path $script:ConnectionWorkerCommandFile -Depth 5 | Out-Null
+                if (-not $script:ConnectionWorkerProcess.WaitForExit(3000)) {
+                    $script:ConnectionWorkerProcess.Kill()
+                }
+            }
+            else {
+                $script:ConnectionWorkerProcess.Kill()
+            }
+        }
+    }
+    catch {
+        Write-AppLog -Level WARN -Message "Kunne ikke lukke session worker pænt: $(ConvertTo-RedactedError $_)"
+    }
 }
 
 function Invoke-WorkerMode {
@@ -4934,6 +5093,9 @@ function Start-BreakGlassWizard {
     })
 
     $script:Ui.CloseButton.Add_Click({ $script:MainWindow.Close() })
+    $script:MainWindow.Add_Closed({
+        Stop-SessionWorker
+    })
 
     $script:LogPollTimer = New-Object System.Windows.Threading.DispatcherTimer
     $script:LogPollTimer.Interval = [TimeSpan]::FromSeconds(1)
@@ -4979,69 +5141,16 @@ function Start-BreakGlassWizard {
                     # Connection worker log polling is best-effort.
                 }
             }
+            if (-not $script:ConnectionWorkerResultProcessed -and $script:ConnectionWorkerResultPath -and (Test-Path -LiteralPath $script:ConnectionWorkerResultPath -PathType Leaf)) {
+                Receive-ConnectionWorkerResult | Out-Null
+            }
             if (Test-ProcessHasExitedSafe -Process $script:ConnectionWorkerProcess) {
                 $connectionExitCode = $script:ConnectionWorkerProcess.ExitCode
+                if (-not $script:ConnectionWorkerResultProcessed) {
+                    Receive-ConnectionWorkerResult -ConnectionExitCode $connectionExitCode -ProcessExited | Out-Null
+                }
                 $script:ConnectionWorkerProcess.Dispose()
                 $script:ConnectionWorkerProcess = $null
-                if ($script:ConnectionWorkerResultPath -and (Test-Path -LiteralPath $script:ConnectionWorkerResultPath)) {
-                    try {
-                        $connectionResult = Get-Content -LiteralPath $script:ConnectionWorkerResultPath -Raw -Encoding UTF8 | ConvertFrom-Json
-                        $requestedGraph = [bool] (Get-ObjectPropertyValue -InputObject $connectionResult -Name 'RequestedGraph')
-                        $requestedAzure = [bool] (Get-ObjectPropertyValue -InputObject $connectionResult -Name 'RequestedAzure')
-                        if ($requestedGraph) {
-                            $script:State['GraphConnected'] = [bool] $connectionResult.GraphConnected
-                            $script:State['GraphAccount'] = [string] $connectionResult.GraphAccount
-                            $script:State['GraphScopes'] = @(Get-ObjectPropertyValue -InputObject $connectionResult -Name 'GraphScopes')
-                            $script:State['TenantId'] = [string] $connectionResult.TenantId
-                            $script:State['TenantDisplayName'] = [string] $connectionResult.TenantDisplayName
-                            $script:State['OnMicrosoftDomain'] = [string] $connectionResult.OnMicrosoftDomain
-                            $script:State['ExistingCandidates'] = @($connectionResult.ExistingCandidates)
-                            $script:State['GlobalAdminUsers'] = @($connectionResult.GlobalAdminUsers)
-                        }
-                        if ($requestedAzure) {
-                            $script:State['AzureConnected'] = [bool] $connectionResult.AzureConnected
-                            $script:State['AzureAccount'] = [string] $connectionResult.AzureAccount
-                            $script:State['AzureSubscriptionId'] = [string] $connectionResult.AzureSubscriptionId
-                            $script:State['AzureSubscriptionName'] = [string] $connectionResult.AzureSubscriptionName
-                            $script:State['LastAzureSubscriptionMissing'] = [bool] (Get-ObjectPropertyValue -InputObject $connectionResult -Name 'AzureSubscriptionMissing')
-                            $script:State['LastConnectionError'] = if ($connectionResult.Error) { [string] $connectionResult.Error } elseif ($connectionResult.AzureError) { [string] $connectionResult.AzureError } else { '' }
-                            if ($script:State.AzureConnected) {
-                                $script:State['LastAzureSubscriptionMissing'] = $false
-                                $script:State['LastConnectionError'] = ''
-                            }
-                        }
-                        Update-ConnectionStatusUi
-                        if ($requestedGraph) {
-                            Update-DiscoveryUi -Candidates @($script:State.ExistingCandidates)
-                        }
-                        Update-MonitoringUi
-                        if ($connectionExitCode -eq 0) {
-                            $azureError = if ($connectionResult.PSObject.Properties['AzureError']) { [string] $connectionResult.AzureError } else { '' }
-                            if ($requestedAzure -and -not [bool] $connectionResult.AzureConnected -and -not [string]::IsNullOrWhiteSpace($azureError)) {
-                                Set-UiStatus -Message ("Azure/subscription mangler. Monitoring kræver Azure-login: {0}" -f $azureError)
-                            }
-                            else {
-                                Set-UiStatus -Message 'Connection-worker færdig. Forbindelsesoplysninger er indlæst.'
-                            }
-                        }
-                        else {
-                            $errorText = if ($connectionResult.Error) { [string] $connectionResult.Error } else { "exit code $connectionExitCode" }
-                            if ($requestedAzure -and [bool] (Get-ObjectPropertyValue -InputObject $connectionResult -Name 'AzureSubscriptionMissing')) {
-                                Set-UiStatus -Message 'Azure subscription mangler. Opret/tilknyt en subscription, og tryk Prøv igen på forbindelsesknappen.'
-                            }
-                            else {
-                                Set-UiStatus -Message ("Connection-worker fejlede: {0}" -f $errorText)
-                            }
-                        }
-                    }
-                    catch {
-                        Write-SafeError -Message 'Kunne ikke læse connection-worker resultat.' -ErrorRecord $_
-                        Set-UiStatus -Message 'Connection-worker færdig, men resultatfilen kunne ikke læses.'
-                    }
-                }
-                else {
-                    Set-UiStatus -Message ("Connection-worker sluttede uden resultatfil. Exit code: {0}" -f $connectionExitCode)
-                }
                 Set-UiBusy -Busy $false
             }
         }
