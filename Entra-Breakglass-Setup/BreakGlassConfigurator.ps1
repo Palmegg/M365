@@ -214,6 +214,34 @@ function Write-SafeError {
     }
 }
 
+function Write-DetailedError {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string] $Message,
+        [AllowNull()] $ErrorRecord
+    )
+
+    Write-SafeError -Message $Message -ErrorRecord $ErrorRecord
+    if ($ErrorRecord -is [System.Management.Automation.ErrorRecord]) {
+        if ($ErrorRecord.Exception) {
+            Write-AppLog -Level ERROR -Message ("Exception type: {0}" -f $ErrorRecord.Exception.GetType().FullName)
+            if ($ErrorRecord.Exception.StackTrace) {
+                Write-AppLog -Level ERROR -Message ("Exception stack: {0}" -f $ErrorRecord.Exception.StackTrace)
+            }
+            if ($ErrorRecord.Exception.InnerException) {
+                Write-AppLog -Level ERROR -Message ("Inner exception type: {0}" -f $ErrorRecord.Exception.InnerException.GetType().FullName)
+                Write-AppLog -Level ERROR -Message ("Inner exception: {0}" -f $ErrorRecord.Exception.InnerException.Message)
+                if ($ErrorRecord.Exception.InnerException.StackTrace) {
+                    Write-AppLog -Level ERROR -Message ("Inner exception stack: {0}" -f $ErrorRecord.Exception.InnerException.StackTrace)
+                }
+            }
+        }
+        if ($ErrorRecord.ScriptStackTrace) {
+            Write-AppLog -Level ERROR -Message ("PowerShell stack: {0}" -f $ErrorRecord.ScriptStackTrace)
+        }
+    }
+}
+
 function Show-AppMessage {
     [CmdletBinding()]
     param(
@@ -696,7 +724,7 @@ function Invoke-ConnectionWorkerMode {
     catch {
         $result['Error'] = ConvertTo-RedactedError $_
         Export-JsonSafe -InputObject $result -Path $resultPath -Depth 20 | Out-Null
-        Write-SafeError -Message 'Connection-worker fejlede.' -ErrorRecord $_
+        Write-DetailedError -Message 'Connection-worker fejlede.' -ErrorRecord $_
         Write-Host ''
         Write-Host "Connection-worker fejlede: $($result['Error'])" -ForegroundColor Red
         Start-Sleep -Seconds 8
@@ -723,7 +751,20 @@ function Connect-AppGraph {
     Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null
     [string[]] $requiredScopes = @($script:RequiredGraphScopes)
     Write-AppLog -Message "Forbinder til Microsoft Graph med scopes: $($requiredScopes -join ', ')"
-    Connect-MgGraph -Scopes $requiredScopes -ContextScope ([Microsoft.Graph.PowerShell.Authentication.ContextScope]::Process) -NoWelcome -ErrorAction Stop | Out-Null
+    try {
+        Write-AppLog -Message 'Prøver Microsoft Graph native interactive sign-in.'
+        Connect-MgGraph -Scopes $requiredScopes -ContextScope ([Microsoft.Graph.PowerShell.Authentication.ContextScope]::Process) -NoWelcome -ErrorAction Stop | Out-Null
+    }
+    catch {
+        Write-DetailedError -Message 'Microsoft Graph native interactive sign-in fejlede.' -ErrorRecord $_
+        Write-AppLog -Level WARN -Message 'Prøver Microsoft Graph device-code fallback i samme worker-vindue.'
+        Write-Host ''
+        Write-Host 'Native Microsoft Graph login fejlede. Prøver device-code fallback.' -ForegroundColor Yellow
+        Write-Host 'Kopiér koden som vises af Microsoft Graph, åbn https://microsoft.com/devicelogin, og log ind med FIDO/passkey.' -ForegroundColor Yellow
+        Write-Host ''
+        Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null
+        Connect-MgGraph -Scopes $requiredScopes -ContextScope ([Microsoft.Graph.PowerShell.Authentication.ContextScope]::Process) -UseDeviceCode -NoWelcome -ErrorAction Stop | Out-Null
+    }
     $context = Get-MgContext
     if (-not $context) {
         throw 'Microsoft Graph context blev ikke returneret.'
