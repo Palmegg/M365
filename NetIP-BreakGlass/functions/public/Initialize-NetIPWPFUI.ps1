@@ -1,0 +1,37 @@
+function Initialize-NetIPWPFUI {
+    [CmdletBinding()]
+    param()
+
+    $settings = $sync.configs.appsettings
+    $defaults = $sync.configs.defaults
+    $scopes = @($sync.configs.graphScopes)
+    if ($settings) {
+        $sync.App.Name = [string]$settings.name
+        $sync.App.Version = [string]$settings.version
+    }
+    $sync.Form.Title = "$($sync.App.Name) v$($sync.App.Version)"
+    $sync.WPFVersionBadge.Text = "v$($sync.App.Version)"
+    $sync.WPFGraphScopes.Text = ($scopes -join [Environment]::NewLine)
+    $sync.WPFDisplayName1.Text = [string]$defaults.account1DisplayName
+    $sync.WPFUserPrefix1.Text = [string]$defaults.account1Prefix
+    $sync.WPFDisplayName2.Text = [string]$defaults.account2DisplayName
+    $sync.WPFUserPrefix2.Text = [string]$defaults.account2Prefix
+    $sync.WPFGroupName.Text = [string]$settings.groupName
+    $sync.WPFGroupDescription.Text = [string]$settings.groupDescription
+    $sync.WPFCreateUsers.IsChecked = [bool]$defaults.createUsers
+    $sync.WPFCreateGroup.IsChecked = [bool]$defaults.createGroup
+    $sync.WPFAddUsersToGroup.IsChecked = [bool]$defaults.addUsersToGroup
+    $sync.WPFPatchCAPolicies.IsChecked = [bool]$defaults.patchCAPolicies
+
+    if ($sync.App.Mock) {
+        $sync.State.GraphConnected = $true
+        $sync.State.GraphAccount = 'mock.consultant@contoso.onmicrosoft.com'
+        Get-NetIPTenantInfo | Out-Null
+        Write-NetIPStatus -Message 'Mock mode er aktiv. Der kaldes ikke Microsoft Graph.'
+    }
+    else {
+        Write-NetIPStatus -Message 'Klar'
+    }
+    Invoke-NetIPWPFButton -Name 'WPFStepWelcome'
+    Update-NetIPUIState
+}

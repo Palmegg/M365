@@ -1,0 +1,10 @@
+{
+  "account1DisplayName": "BreakGlass 01",
+  "account1Prefix": "BreakGlass01",
+  "account2DisplayName": "BreakGlass 02",
+  "account2Prefix": "BreakGlass02",
+  "createUsers": true,
+  "createGroup": true,
+  "addUsersToGroup": true,
+  "patchCAPolicies": false
+}
