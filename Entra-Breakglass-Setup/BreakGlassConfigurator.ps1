@@ -49,6 +49,7 @@ $script:WizardInternalNavigation = $false
 $script:PrecheckPassed = $false
 $script:DiscoveryReviewed = $false
 $script:PlanBuilt = $false
+$script:UpdatingRmauAdminPicker = $false
 
 $script:RequiredGraphScopes = @(
     'User.ReadWrite.All',
@@ -97,6 +98,7 @@ $script:State = [ordered]@{
     Result                       = $null
     ValidationResults            = @()
     ExistingCandidates           = @()
+    GlobalAdminUsers             = @()
     Warnings                     = New-Object System.Collections.Generic.List[string]
     CaBackupFiles                = @()
     CreatedPasswords             = New-Object System.Collections.Generic.List[object]
@@ -640,6 +642,8 @@ function Invoke-ConnectionWorkerMode {
         AzureAccount          = ''
         AzureSubscriptionId   = ''
         AzureSubscriptionName = ''
+        ExistingCandidates    = @()
+        GlobalAdminUsers      = @()
         AzureError            = ''
         Error                 = ''
     }
@@ -701,6 +705,13 @@ function Invoke-ConnectionWorkerMode {
             $result['TenantId'] = $script:State.TenantId
             $result['TenantDisplayName'] = $script:State.TenantDisplayName
             $result['OnMicrosoftDomain'] = $script:State.OnMicrosoftDomain
+            Write-AppLog -Message 'Henter discovery-data og Global Administrator brugere.'
+            $discoveryConfig = @{
+                UserPrefix1 = 'svc_ea01'
+                UserPrefix2 = 'svc_ea02'
+            }
+            $result['ExistingCandidates'] = @(Find-ExistingEmergencyAccessCandidates -Config $discoveryConfig)
+            $result['GlobalAdminUsers'] = @(Find-GlobalAdministratorUsers)
         }
 
         if ($config.Azure) {
@@ -1256,7 +1267,7 @@ function Get-BreakGlassGroup {
         return $null
     }
     $filter = [uri]::EscapeDataString("displayName eq '$($DisplayName.Replace("'", "''"))'")
-    return Invoke-GraphGetAllPages -Uri "https://graph.microsoft.com/v1.0/groups?`$filter=$filter&`$select=id,displayName,securityEnabled,mailEnabled,isAssignableToRole,groupTypes" | Select-Object -First 1
+    return Invoke-GraphGetAllPages -Uri "https://graph.microsoft.com/v1.0/groups?`$filter=$filter&`$select=id,displayName,description,securityEnabled,mailEnabled,isAssignableToRole,groupTypes" | Select-Object -First 1
 }
 
 function New-BreakGlassRoleAssignableGroup {
@@ -1266,6 +1277,7 @@ function New-BreakGlassRoleAssignableGroup {
     $mailNickname = ($DisplayName -replace '[^a-zA-Z0-9]', '')
     $body = @{
         displayName        = $DisplayName
+        description        = if ($DisplayName -like '*RMAU*Admin*') { 'Scoped administrators for the restricted management administrative unit protecting BreakGlass accounts and group.' } else { 'Role-assignable BreakGlass group. Members inherit permanent Global Administrator and are protected by restricted management administrative unit.' }
         mailEnabled        = $false
         mailNickname       = $mailNickname
         securityEnabled    = $true
@@ -1550,6 +1562,54 @@ function Find-ExistingEmergencyAccessCandidates {
     return $candidates.ToArray()
 }
 
+function Find-GlobalAdministratorUsers {
+    [CmdletBinding()]
+    param()
+
+    if ($script:State.Mock) {
+        return @(
+            [pscustomobject]@{ DisplayName = 'Mock Global Admin 01'; UserPrincipalName = 'admin01@contoso.onmicrosoft.com'; Id = 'mock-ga-user-01'; Source = 'Mock' },
+            [pscustomobject]@{ DisplayName = 'Mock Global Admin 02'; UserPrincipalName = 'admin02@contoso.onmicrosoft.com'; Id = 'mock-ga-user-02'; Source = 'Mock' }
+        )
+    }
+
+    $users = New-Object System.Collections.Generic.List[object]
+    $seen = @{}
+    $gaRole = Get-DirectoryRoleDefinitionByDisplayName -DisplayName 'Global Administrator'
+    if (-not $gaRole) { return @() }
+
+    $filter = [uri]::EscapeDataString("roleDefinitionId eq '$($gaRole.id)'")
+    $assignments = @(Invoke-GraphGetAllPages -Uri "https://graph.microsoft.com/v1.0/roleManagement/directory/roleAssignments?`$filter=$filter")
+    foreach ($assignment in $assignments) {
+        $principal = Get-DirectoryObjectSummary -ObjectId ([string] $assignment.principalId)
+        if (-not $principal) { continue }
+        $odataType = [string] $principal.'@odata.type'
+        if ($odataType -like '*user') {
+            if (-not $seen.ContainsKey($principal.id)) {
+                $seen[$principal.id] = $true
+                $users.Add([pscustomobject]@{ DisplayName = $principal.displayName; UserPrincipalName = $principal.userPrincipalName; Id = $principal.id; Source = 'Direct Global Administrator' }) | Out-Null
+            }
+        }
+        elseif ($odataType -like '*group') {
+            try {
+                $members = @(Invoke-GraphGetAllPages -Uri "https://graph.microsoft.com/v1.0/groups/$($principal.id)/members?`$select=id,displayName,userPrincipalName,accountEnabled")
+                foreach ($member in $members) {
+                    $memberType = [string] $member.'@odata.type'
+                    if ($memberType -like '*user' -and -not $seen.ContainsKey($member.id)) {
+                        $seen[$member.id] = $true
+                        $users.Add([pscustomobject]@{ DisplayName = $member.displayName; UserPrincipalName = $member.userPrincipalName; Id = $member.id; Source = "Member of GA group: $($principal.displayName)" }) | Out-Null
+                    }
+                }
+            }
+            catch {
+                Write-AppLog -Level WARN -Message "Kunne ikke hente medlemmer af GA-gruppen $($principal.displayName): $(ConvertTo-RedactedError $_)"
+            }
+        }
+    }
+
+    return @($users | Sort-Object DisplayName, UserPrincipalName)
+}
+
 function Get-RestrictedManagementAdministrativeUnit {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string] $DisplayName)
@@ -1640,6 +1700,17 @@ function ConvertFrom-DelimitedUpnList {
         ForEach-Object { $_.Trim() } |
         Where-Object { -not [string]::IsNullOrWhiteSpace($_) } |
         Select-Object -Unique)
+}
+
+function ConvertTo-DelimitedUpnText {
+    [CmdletBinding()]
+    param([object[]] $Users)
+
+    return (@($Users | ForEach-Object {
+        $upn = Get-ObjectPropertyValue -InputObject $_ -Name 'UserPrincipalName'
+        if (-not $upn) { $upn = Get-ObjectPropertyValue -InputObject $_ -Name 'userPrincipalName' }
+        [string] $upn
+    } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -Unique) -join ';')
 }
 
 function Ensure-RmauAdminGroupMembers {
@@ -2498,6 +2569,7 @@ function New-HtmlReport {
   <h2>Global Administrator assignment</h2>
   $roleTable
   <h2>Restricted management administrative unit</h2>
+  <p class="muted">RMAU/RBAU-beskyttelsen beskytter BreakGlass-konti og BG-gruppen. Kun RMAU admin-gruppen får scoped User Administrator og Groups Administrator rettigheder til at administrere de beskyttede objekter.</p>
   <table>
     <tr><th>DisplayName</th><td>$(ConvertTo-HtmlEncoded (Get-ReportProperty -Object $Result.RMAU -Name 'displayName'))</td></tr>
     <tr><th>ID</th><td>$(ConvertTo-HtmlEncoded (Get-ReportProperty -Object $Result.RMAU -Name 'id'))</td></tr>
@@ -2574,12 +2646,12 @@ function Build-ConfigFromUi {
         GroupDisplayName       = $script:Ui.GroupDisplayName.Text.Trim()
         RmauDisplayName        = $script:Ui.RmauDisplayName.Text.Trim()
         RmauAdminGroupDisplayName = $script:Ui.RmauAdminGroupDisplayName.Text.Trim()
-        RmauAdminUpns          = $script:Ui.RmauAdminUpns.Text.Trim()
+        RmauAdminUpns          = (@(Get-RmauAdminSelectedUpnsFromUi) -join ';')
         AuthStrengthName       = $script:Ui.AuthStrengthName.Text.Trim()
         CaPolicyName           = $script:Ui.CaPolicyName.Text.Trim()
         CaState                = [string] $script:Ui.CaState.SelectedItem.Content
         ExcludeFromExistingCa  = [bool] $script:Ui.ExcludeExistingCa.IsChecked
-        AllowedAaguids         = $script:Ui.AllowedAaguids.Text
+        AllowedAaguids         = Get-AaguidTextFromUi
         UseExistingWorkspace   = [bool] $script:Ui.UseExistingWorkspace.IsChecked
         SubscriptionId         = $subscriptionId
         ResourceGroupName      = $script:Ui.ResourceGroupName.Text.Trim()
@@ -2606,10 +2678,9 @@ function Update-ConnectionStatusUi {
     $script:Ui.OnMicrosoftDomain.Text = $script:State.OnMicrosoftDomain
     $script:Ui.AzureAccount.Text = $script:State.AzureAccount
     $script:Ui.SubscriptionIdDetected.Text = $script:State.AzureSubscriptionId
-    $script:Ui.ConnectionStatus.Text = "Graph: $($script:State.GraphConnected) | Azure: $($script:State.AzureConnected)"
-    if ($script:Ui.ContainsKey('RmauAdminUpns') -and $script:Ui.RmauAdminUpns -and [string]::IsNullOrWhiteSpace($script:Ui.RmauAdminUpns.Text) -and $script:State.GraphAccount -match '@') {
-        $script:Ui.RmauAdminUpns.Text = $script:State.GraphAccount
-    }
+    $subscriptionText = if ($script:State.AzureSubscriptionName -or $script:State.AzureSubscriptionId) { "$($script:State.AzureSubscriptionName) / $($script:State.AzureSubscriptionId)" } else { 'Ingen valgt subscription' }
+    $script:Ui.ConnectionStatus.Text = "Graph connected: $($script:State.GraphConnected) | Azure connected: $($script:State.AzureConnected) | Subscription valgt: $subscriptionText"
+    Update-RmauAdminPickerOptions
 }
 
 function Update-PrecheckUi {
@@ -2640,6 +2711,182 @@ function Update-DiscoveryUi {
             $script:Ui.DiscoverySummary.Text = ('{0} eksisterende kandidat(er) fundet. Gennemgå dem før du fortsætter med Configuration mode.' -f @($Candidates).Count)
         }
     }
+}
+
+function New-AaguidInputRow {
+    [CmdletBinding()]
+    param([string] $Value = '')
+
+    $row = New-Object System.Windows.Controls.StackPanel
+    $row.Orientation = 'Horizontal'
+    $row.Margin = [System.Windows.Thickness]::new(0, 0, 0, 6)
+
+    $textBox = New-Object System.Windows.Controls.TextBox
+    $textBox.Width = 360
+    $textBox.Margin = [System.Windows.Thickness]::new(0, 0, 8, 0)
+    $textBox.Text = $Value
+    $textBox.Tag = 'AaguidInput'
+    $row.Children.Add($textBox) | Out-Null
+
+    $removeButton = New-Object System.Windows.Controls.Button
+    $removeButton.Content = 'Fjern'
+    $removeButton.Width = 70
+    $removeButton.Height = 26
+    $removeButton.Add_Click({
+        if ($script:Ui.AaguidInputPanel.Children.Count -gt 1) {
+            $script:Ui.AaguidInputPanel.Children.Remove($row)
+        }
+        else {
+            $textBox.Text = ''
+        }
+    })
+    $row.Children.Add($removeButton) | Out-Null
+    return $row
+}
+
+function Add-AaguidInputRow {
+    [CmdletBinding()]
+    param([string] $Value = '')
+
+    if (-not $script:Ui.ContainsKey('AaguidInputPanel') -or -not $script:Ui.AaguidInputPanel) { return }
+    $script:Ui.AaguidInputPanel.Children.Add((New-AaguidInputRow -Value $Value)) | Out-Null
+}
+
+function Get-AaguidTextFromUi {
+    [CmdletBinding()]
+    param()
+
+    if (-not $script:Ui.ContainsKey('AaguidInputPanel') -or -not $script:Ui.AaguidInputPanel) { return '' }
+    $values = New-Object System.Collections.Generic.List[string]
+    foreach ($row in $script:Ui.AaguidInputPanel.Children) {
+        foreach ($child in $row.Children) {
+            if ($child.Tag -eq 'AaguidInput' -and -not [string]::IsNullOrWhiteSpace($child.Text)) {
+                $values.Add($child.Text.Trim()) | Out-Null
+            }
+        }
+    }
+    return ($values.ToArray() -join ';')
+}
+
+function New-RmauAdminComboRow {
+    [CmdletBinding()]
+    param([string] $SelectedUpn = '')
+
+    $row = New-Object System.Windows.Controls.StackPanel
+    $row.Orientation = 'Horizontal'
+    $row.Margin = [System.Windows.Thickness]::new(0, 0, 0, 6)
+
+    $combo = New-Object System.Windows.Controls.ComboBox
+    $combo.Width = 520
+    $combo.Margin = [System.Windows.Thickness]::new(0, 0, 8, 0)
+    $combo.Tag = 'RmauAdminCombo'
+    $combo.DisplayMemberPath = 'Label'
+    if ($SelectedUpn) { $combo.SelectedValue = $SelectedUpn }
+    $combo.Add_SelectionChanged({
+        if (-not $script:UpdatingRmauAdminPicker) {
+            Update-RmauAdminPickerOptions
+        }
+    })
+    $row.Children.Add($combo) | Out-Null
+
+    $removeButton = New-Object System.Windows.Controls.Button
+    $removeButton.Content = 'Fjern'
+    $removeButton.Width = 70
+    $removeButton.Height = 26
+    $removeButton.Add_Click({
+        if ($script:Ui.RmauAdminPickerPanel.Children.Count -gt 1) {
+            $script:Ui.RmauAdminPickerPanel.Children.Remove($row)
+            Update-RmauAdminPickerOptions
+        }
+        else {
+            $combo.SelectedIndex = -1
+        }
+    })
+    $row.Children.Add($removeButton) | Out-Null
+    return $row
+}
+
+function Get-RmauAdminSelectedUpnsFromUi {
+    [CmdletBinding()]
+    param()
+
+    if (-not $script:Ui.ContainsKey('RmauAdminPickerPanel') -or -not $script:Ui.RmauAdminPickerPanel) { return @() }
+    $values = New-Object System.Collections.Generic.List[string]
+    foreach ($row in $script:Ui.RmauAdminPickerPanel.Children) {
+        foreach ($child in $row.Children) {
+            if ($child.Tag -eq 'RmauAdminCombo' -and $child.SelectedItem) {
+                $upn = [string] $child.SelectedItem.UserPrincipalName
+                if (-not [string]::IsNullOrWhiteSpace($upn)) { $values.Add($upn) | Out-Null }
+            }
+        }
+    }
+    return @($values.ToArray() | Select-Object -Unique)
+}
+
+function Update-RmauAdminPickerOptions {
+    [CmdletBinding()]
+    param()
+
+    if (-not $script:Ui.ContainsKey('RmauAdminPickerPanel') -or -not $script:Ui.RmauAdminPickerPanel) { return }
+    if ($script:UpdatingRmauAdminPicker) { return }
+    $script:UpdatingRmauAdminPicker = $true
+    try {
+    $gaUsers = @($script:State.GlobalAdminUsers)
+    $selected = @(Get-RmauAdminSelectedUpnsFromUi)
+    foreach ($row in $script:Ui.RmauAdminPickerPanel.Children) {
+        foreach ($child in $row.Children) {
+            if ($child.Tag -ne 'RmauAdminCombo') { continue }
+            $current = if ($child.SelectedItem) { [string] $child.SelectedItem.UserPrincipalName } else { '' }
+            $child.ItemsSource = $null
+            $items = @($gaUsers | Where-Object {
+                $upn = [string] (Get-ObjectPropertyValue -InputObject $_ -Name 'UserPrincipalName')
+                ($upn -eq $current -or $selected -notcontains $upn)
+            } | ForEach-Object {
+                $upn = [string] (Get-ObjectPropertyValue -InputObject $_ -Name 'UserPrincipalName')
+                $displayName = [string] (Get-ObjectPropertyValue -InputObject $_ -Name 'DisplayName')
+                $source = [string] (Get-ObjectPropertyValue -InputObject $_ -Name 'Source')
+                [pscustomobject]@{
+                    Label = ('{0} <{1}> - {2}' -f $displayName, $upn, $source)
+                    UserPrincipalName = $upn
+                }
+            })
+            $child.ItemsSource = $items
+            if ($current) {
+                foreach ($item in $items) {
+                    if ($item.UserPrincipalName -eq $current) {
+                        $child.SelectedItem = $item
+                        break
+                    }
+                }
+            }
+            elseif ($items.Count -gt 0) {
+                $preferred = @($items | Where-Object { $_.UserPrincipalName -eq $script:State.GraphAccount } | Select-Object -First 1)
+                if ($preferred.Count -eq 0) { $preferred = @($items | Select-Object -First 1) }
+                $child.SelectedItem = $preferred[0]
+            }
+        }
+    }
+    if ($script:Ui.ContainsKey('RmauAdminPickerStatus') -and $script:Ui.RmauAdminPickerStatus) {
+        $script:Ui.RmauAdminPickerStatus.Text = if ($gaUsers.Count -gt 0) {
+            ('{0} Global Administrator bruger(e) fundet.' -f $gaUsers.Count)
+        }
+        else {
+            'Ingen Global Administrator brugere hentet endnu. Forbind til Microsoft Graph først.'
+        }
+    }
+    }
+    finally {
+        $script:UpdatingRmauAdminPicker = $false
+    }
+}
+
+function Add-RmauAdminPickerRow {
+    [CmdletBinding()]
+    param([string] $SelectedUpn = '')
+
+    if (-not $script:Ui.ContainsKey('RmauAdminPickerPanel') -or -not $script:Ui.RmauAdminPickerPanel) { return }
+    $script:Ui.RmauAdminPickerPanel.Children.Add((New-RmauAdminComboRow -SelectedUpn $SelectedUpn)) | Out-Null
+    Update-RmauAdminPickerOptions
 }
 
 function Update-ValidationUi {
@@ -2832,8 +3079,9 @@ function Update-ModeUi {
             $script:Ui.WizardTabs.Items[8].Header = '7. Rapport'
         }
     }
-    $script:Ui.NoApply.IsChecked = $reportOnly
-    $script:Ui.NoApply.Content = if ($reportOnly) { 'Report only: lav kun plan/rapport uden ændringer' } else { 'Configuration mode: gennemfør ændringer ved kørsel' }
+    if ($script:Ui.ContainsKey('ModeStatusText') -and $script:Ui.ModeStatusText) {
+        $script:Ui.ModeStatusText.Text = if ($reportOnly) { 'Aktiv mode: Report only - lav kun plan/rapport uden ændringer' } else { 'Aktiv mode: Configuration - ændringer udføres først når du starter kørsel' }
+    }
     if ($reportOnly) {
         $script:Ui.CaState.SelectedIndex = 0
         Set-UiStatus -Message 'Mode valgt: Report only. Der laves plan og rapport uden tenant-ændringer.'
@@ -2857,6 +3105,11 @@ function Update-MonitoringUi {
         }
     }
     $script:Ui.SubscriptionId.IsEnabled = ($monitoringEnabled -and $useExisting)
+    $subscriptionVisibility = if ($monitoringEnabled -and $useExisting) { 'Visible' } else { 'Collapsed' }
+    if ($script:Ui.ContainsKey('SubscriptionIdLabel') -and $script:Ui.SubscriptionIdLabel) {
+        $script:Ui.SubscriptionIdLabel.Visibility = $subscriptionVisibility
+    }
+    $script:Ui.SubscriptionId.Visibility = $subscriptionVisibility
     if ($monitoringEnabled -and -not $useExisting -and [string]::IsNullOrWhiteSpace($script:Ui.SubscriptionId.Text) -and -not [string]::IsNullOrWhiteSpace($script:State.AzureSubscriptionId)) {
         $script:Ui.SubscriptionId.Text = ''
     }
@@ -2938,8 +3191,14 @@ function Invoke-DiscoveryFromUi {
     [CmdletBinding()]
     param()
 
+    if (-not $script:State.GraphConnected) {
+        Show-AppMessage -Message 'Forbind til Microsoft Graph først.' -Icon 'Warning' | Out-Null
+        Set-UiStatus -Message 'Discovery kræver Microsoft Graph forbindelse.'
+        return @()
+    }
+
     Set-UiStatus -Message 'Finder eksisterende mulige break-glass/emergency access konti...' -Busy -Log
-    $candidates = @(Find-ExistingEmergencyAccessCandidates -Config (Build-ConfigFromUi))
+    $candidates = if ($script:State.Mock) { @(Find-ExistingEmergencyAccessCandidates -Config (Build-ConfigFromUi)) } else { @($script:State.ExistingCandidates) }
     $script:State['ExistingCandidates'] = [object[]] $candidates
     $script:DiscoveryReviewed = $true
     Update-DiscoveryUi -Candidates $candidates
@@ -3014,9 +3273,9 @@ function Move-WizardNext {
                 return
             }
             if (-not $script:State.AzureConnected -and -not [bool] $script:Ui.DisableMonitoring.IsChecked) {
-                $answer = Show-AppMessage -Message "Azure er ikke forbundet. Vil du fortsætte uden Azure Monitor/Log Analytics for denne kørsel?" -Buttons 'YesNo' -Icon 'Question'
-                if ($answer -ne 'Yes') { return }
-                $script:Ui.DisableMonitoring.IsChecked = $true
+                Show-AppMessage -Message 'Azure Monitor/Log Analytics er slået til. Forbind til Azure og vælg en subscription før du fortsætter, eller slå monitoring fra i konfigurationen.' -Icon 'Warning' | Out-Null
+                Set-UiStatus -Message 'Azure mangler. Connect til Azure før wizard kan fortsætte med monitoring slået til.'
+                return
             }
             Invoke-PrecheckFromUi | Out-Null
             if ([bool] $script:Ui.ConfigureModeRadio.IsChecked) {
@@ -3252,6 +3511,7 @@ function Start-BreakGlassWizard {
                             <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
                             <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
                             <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
                             <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
                         </Grid.RowDefinitions>
                         <TextBlock Grid.Row="0" Grid.Column="0" Text="Konto 1 prefix"/>
@@ -3259,17 +3519,17 @@ function Start-BreakGlassWizard {
                         <TextBlock Grid.Row="0" Grid.Column="2" Text="Konto 2 prefix"/>
                         <TextBox x:Name="UserPrefix2" Grid.Row="0" Grid.Column="3" Text="svc_ea02" Margin="0,0,0,8"/>
                         <TextBlock Grid.Row="1" Grid.Column="0" Text="Display name 1"/>
-                        <TextBox x:Name="DisplayName1" Grid.Row="1" Grid.Column="1" Text="Emergency Access 01" Margin="0,0,12,8"/>
+                        <TextBox x:Name="DisplayName1" Grid.Row="1" Grid.Column="1" Text="BreakGlass 01" Margin="0,0,12,8"/>
                         <TextBlock Grid.Row="1" Grid.Column="2" Text="Display name 2"/>
-                        <TextBox x:Name="DisplayName2" Grid.Row="1" Grid.Column="3" Text="Emergency Access 02" Margin="0,0,0,8"/>
+                        <TextBox x:Name="DisplayName2" Grid.Row="1" Grid.Column="3" Text="BreakGlass 02" Margin="0,0,0,8"/>
                         <TextBlock Grid.Row="2" Grid.Column="0" Text="Gruppe"/>
                         <TextBox x:Name="GroupDisplayName" Grid.Row="2" Grid.Column="1" Text="GRP-ENTRA-BreakGlass-Admins" Margin="0,0,12,8"/>
                         <TextBlock Grid.Row="2" Grid.Column="2" Text="RMAU"/>
                         <TextBox x:Name="RmauDisplayName" Grid.Row="2" Grid.Column="3" Text="RMAU-BreakGlass-Protection" Margin="0,0,0,8"/>
                         <TextBlock Grid.Row="3" Grid.Column="0" Text="Authentication strength"/>
-                        <TextBox x:Name="AuthStrengthName" Grid.Row="3" Grid.Column="1" Text="AS-BreakGlass-FIDO2" Margin="0,0,12,8"/>
+                        <TextBox x:Name="AuthStrengthName" Grid.Row="3" Grid.Column="1" Text="BreakGlass-FIDO2" Margin="0,0,12,8"/>
                         <TextBlock Grid.Row="3" Grid.Column="2" Text="CA policy navn"/>
-                        <TextBox x:Name="CaPolicyName" Grid.Row="3" Grid.Column="3" Text="CA-BG-Require-FIDO2-AuthenticationStrength" Margin="0,0,0,8"/>
+                        <TextBox x:Name="CaPolicyName" Grid.Row="3" Grid.Column="3" Text="[NETIP365 CA000] Global-IdentityProtection-AnyApp-AnyPlatform-MFA" Margin="0,0,0,8"/>
                         <TextBlock Grid.Row="4" Grid.Column="0" Text="CA state"/>
                         <ComboBox x:Name="CaState" Grid.Row="4" Grid.Column="1" SelectedIndex="0" Margin="0,0,12,8">
                             <ComboBoxItem Content="reportOnly"/>
@@ -3278,11 +3538,17 @@ function Start-BreakGlassWizard {
                         </ComboBox>
                         <CheckBox x:Name="ExcludeExistingCa" Grid.Row="4" Grid.Column="2" Grid.ColumnSpan="2" Content="Ekskluder break-glass gruppen fra eksisterende CA policies" Margin="0,0,0,8"/>
                         <TextBlock Grid.Row="5" Grid.Column="0" Text="Tilladte FIDO2 AAGUIDs"/>
-                        <TextBox x:Name="AllowedAaguids" Grid.Row="5" Grid.Column="1" Grid.ColumnSpan="3" Height="54" AcceptsReturn="True" TextWrapping="Wrap" Margin="0,0,0,8"/>
-                        <CheckBox x:Name="NoApply" Grid.Row="6" Grid.Column="0" Grid.ColumnSpan="2" Content="Report only: lav kun plan/rapport uden ændringer" IsChecked="True" IsEnabled="False" Margin="0,0,0,8"/>
+                        <StackPanel Grid.Row="5" Grid.Column="1" Grid.ColumnSpan="3" Margin="0,0,0,8">
+                            <StackPanel x:Name="AaguidInputPanel"/>
+                            <StackPanel Orientation="Horizontal" Margin="0,2,0,0">
+                                <Button x:Name="AddAaguidButton" Content="+ AAGUID" Height="28" Width="90" Margin="0,0,10,0"/>
+                                <TextBlock VerticalAlignment="Center" Foreground="#4B5563" Text="Eksempel: a4e62b8c-8fdb-4b3a-9c88-6b8f0f7f4d2a"/>
+                            </StackPanel>
+                        </StackPanel>
+                        <TextBlock x:Name="ModeStatusText" Grid.Row="6" Grid.Column="0" Grid.ColumnSpan="2" FontWeight="SemiBold" Foreground="#374151" Margin="0,0,0,8"/>
                         <CheckBox x:Name="DisableMonitoring" Grid.Row="6" Grid.Column="2" Grid.ColumnSpan="2" Content="Deaktiver Azure Monitor/Log Analytics i denne kørsel" Margin="0,0,0,8"/>
                         <CheckBox x:Name="UseExistingWorkspace" Grid.Row="7" Grid.Column="0" Grid.ColumnSpan="2" Content="Brug eksisterende Log Analytics workspace" Margin="0,0,0,8"/>
-                        <TextBlock Grid.Row="8" Grid.Column="0" Text="Subscription ID ved eksisterende workspace"/>
+                        <TextBlock x:Name="SubscriptionIdLabel" Grid.Row="8" Grid.Column="0" Text="Subscription ID ved eksisterende workspace"/>
                         <TextBox x:Name="SubscriptionId" Grid.Row="8" Grid.Column="1" Margin="0,0,12,8"/>
                         <TextBlock Grid.Row="8" Grid.Column="2" Text="Resource group"/>
                         <TextBox x:Name="ResourceGroupName" Grid.Row="8" Grid.Column="3" Text="rg-breakglass-monitoring" Margin="0,0,0,8"/>
@@ -3299,10 +3565,14 @@ function Start-BreakGlassWizard {
                         <CheckBox x:Name="CreateSignInAlert" Grid.Row="12" Grid.Column="0" Grid.ColumnSpan="2" Content="Opret sign-in alert" IsChecked="True" Margin="0,0,0,8"/>
                         <CheckBox x:Name="CreateAuditAlert" Grid.Row="12" Grid.Column="2" Grid.ColumnSpan="2" Content="Opret audit/change alert" IsChecked="True" Margin="0,0,0,8"/>
                         <TextBlock Grid.Row="13" Grid.Column="0" Text="RMAU admin-gruppe"/>
-                        <TextBox x:Name="RmauAdminGroupDisplayName" Grid.Row="13" Grid.Column="1" Text="GRP-ENTRA-BreakGlass-RMAU-Admins" Margin="0,0,12,8"/>
-                        <TextBlock Grid.Row="13" Grid.Column="2" Text="RMAU admin UPNs"/>
-                        <TextBox x:Name="RmauAdminUpns" Grid.Row="13" Grid.Column="3" Margin="0,0,0,8"/>
-                        <TextBlock Grid.Row="14" Grid.Column="0" Grid.ColumnSpan="4" Foreground="#92400E" TextWrapping="Wrap" Text="RMAU admin-gruppen får User Administrator og Groups Administrator scoped til RMAU'en. Hvis listen efterlades tom, foreslås den konto du logger på med."/>
+                        <TextBox x:Name="RmauAdminGroupDisplayName" Grid.Row="13" Grid.Column="1" Text="SG-BreakGlass-RMAU-Admins" Margin="0,0,12,8"/>
+                        <TextBlock Grid.Row="13" Grid.Column="2" Text="RMAU admin brugere"/>
+                        <StackPanel Grid.Row="13" Grid.Column="3" Margin="0,0,0,8">
+                            <StackPanel x:Name="RmauAdminPickerPanel"/>
+                            <Button x:Name="AddRmauAdminButton" Content="+ Global Admin" Height="28" Width="115" HorizontalAlignment="Left"/>
+                            <TextBlock x:Name="RmauAdminPickerStatus" Margin="0,6,0,0" Foreground="#4B5563"/>
+                        </StackPanel>
+                        <TextBlock Grid.Row="14" Grid.Column="0" Grid.ColumnSpan="4" Foreground="#92400E" TextWrapping="Wrap" Text="RMAU/RBAU-beskyttelsen lægger BreakGlass-konti og BG-gruppen i en restricted management administrative unit. Kun medlemmer af RMAU admin-gruppen får scoped User Administrator og Groups Administrator rettigheder til at administrere de beskyttede objekter."/>
                     </Grid>
                 </ScrollViewer>
             </TabItem>
@@ -3388,15 +3658,16 @@ function Start-BreakGlassWizard {
     $script:MainWindow = [Windows.Markup.XamlReader]::Load($reader)
     foreach ($name in @(
         'UnderstandRisk','ReportModeRadio','ConfigureModeRadio','ConnectGraphButton','ConnectAzureButton','ConnectAllButton','GraphAccount','TenantId','TenantName','OnMicrosoftDomain','AzureAccount','SubscriptionIdDetected','ConnectionStatus',
-        'RunDiscoveryButton','DiscoverySummary','DiscoveryList','UserPrefix1','UserPrefix2','DisplayName1','DisplayName2','GroupDisplayName','RmauDisplayName','RmauAdminGroupDisplayName','RmauAdminUpns','AuthStrengthName','CaPolicyName','CaState',
-        'ExcludeExistingCa','AllowedAaguids','NoApply','DisableMonitoring','UseExistingWorkspace','SubscriptionId','ResourceGroupName','WorkspaceName','AzureRegion','DiagnosticSettingName',
+        'RunDiscoveryButton','DiscoverySummary','DiscoveryList','UserPrefix1','UserPrefix2','DisplayName1','DisplayName2','GroupDisplayName','RmauDisplayName','RmauAdminGroupDisplayName','RmauAdminPickerPanel','AddRmauAdminButton','RmauAdminPickerStatus','AuthStrengthName','CaPolicyName','CaState',
+        'ExcludeExistingCa','AaguidInputPanel','AddAaguidButton','ModeStatusText','DisableMonitoring','UseExistingWorkspace','SubscriptionIdLabel','SubscriptionId','ResourceGroupName','WorkspaceName','AzureRegion','DiagnosticSettingName',
         'ActionGroupName','AlertEmails','CreateSignInAlert','CreateAuditAlert','BuildPlanButton','ExportPlanButton','ApplyButton','PlanText','ProgressBar','ExecutionLog','OpenSecurityInfoButton',
         'ValidateFidoButton','FidoResults','RunValidationButton','ValidationList','OutputFolderText','ReportPathText','OpenReportButton','OpenOutputFolderButton','BackButton','NextButton','CloseButton','BackgroundStatus','StatusProgress','FooterStatus','WizardTabs'
     )) {
     $script:Ui[$name] = $script:MainWindow.FindName($name)
     }
     $script:LogTextBox = $script:Ui.ExecutionLog
-    $script:Ui.NoApply.IsChecked = [bool]($NoApply -or $true)
+    Add-AaguidInputRow
+    Add-RmauAdminPickerRow
     Update-ModeUi
     Update-MonitoringUi
 
@@ -3465,6 +3736,18 @@ function Start-BreakGlassWizard {
         finally {
             Set-UiBusy -Busy $false
         }
+    })
+
+    $script:Ui.AddAaguidButton.Add_Click({
+        Add-AaguidInputRow
+    })
+
+    $script:Ui.AddRmauAdminButton.Add_Click({
+        if (@($script:State.GlobalAdminUsers).Count -eq 0) {
+            Show-AppMessage -Message 'Ingen Global Administrator brugere er hentet endnu. Forbind til Microsoft Graph først.' -Icon 'Warning' | Out-Null
+            return
+        }
+        Add-RmauAdminPickerRow
     })
 
     $script:Ui.BuildPlanButton.Add_Click({
@@ -3710,13 +3993,15 @@ function Start-BreakGlassWizard {
                         $script:State['AzureAccount'] = [string] $connectionResult.AzureAccount
                         $script:State['AzureSubscriptionId'] = [string] $connectionResult.AzureSubscriptionId
                         $script:State['AzureSubscriptionName'] = [string] $connectionResult.AzureSubscriptionName
+                        $script:State['ExistingCandidates'] = @($connectionResult.ExistingCandidates)
+                        $script:State['GlobalAdminUsers'] = @($connectionResult.GlobalAdminUsers)
                         Update-ConnectionStatusUi
+                        Update-DiscoveryUi -Candidates @($script:State.ExistingCandidates)
                         Update-MonitoringUi
                         if ($connectionExitCode -eq 0) {
                             $azureError = if ($connectionResult.PSObject.Properties['AzureError']) { [string] $connectionResult.AzureError } else { '' }
                             if ([bool] $connectionResult.GraphConnected -and -not [bool] $connectionResult.AzureConnected -and -not [string]::IsNullOrWhiteSpace($azureError)) {
-                                $script:Ui.DisableMonitoring.IsChecked = $true
-                                Set-UiStatus -Message ("Graph er forbundet. Azure subscription blev ikke valgt, så monitoring er slået fra for denne kørsel: {0}" -f $azureError)
+                                Set-UiStatus -Message ("Graph er forbundet, men Azure/subscription mangler. Monitoring kræver Azure-login: {0}" -f $azureError)
                             }
                             else {
                                 Set-UiStatus -Message 'Connection-worker færdig. Forbindelsesoplysninger er indlæst.'

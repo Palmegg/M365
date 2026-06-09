@@ -20,6 +20,8 @@ Scriptet hjælper med at konfigurere og validere:
 - Entra diagnostic settings til Log Analytics.
 - Azure Monitor scheduled query alerts og action group.
 - Discovery af eksisterende mulige emergency access/break-glass konti og grupper før Configuration mode fortsætter.
+- Guidet AAGUID-input med eksempel og mulighed for flere FIDO2 AAGUIDs.
+- Valg af RMAU admin-brugere via dropdown med eksisterende Global Administrator brugere.
 - Manuel FIDO2 guidance og efterfølgende validering.
 - HTML- og JSON-rapport.
 
@@ -115,14 +117,14 @@ Til lab uden tenant-ændringer:
 .\BreakGlassConfigurator.ps1 -Mock
 ```
 
-Til plan/report uden apply er `Dry-run/NoApply` slået til som standard i GUI'en. Fjern først fluebenet, når planen er gennemgået og du vil foretage ændringer.
+Til plan/report uden apply vælges `Report only` på startsiden. Vælg først `Configuration`, når planen er gennemgået og du vil foretage ændringer.
 
 ## Wizard-flow
 
 1. Gennemgå velkomst og sikkerhedsbekræftelse.
 2. Tryk `Fortsæt` for at gå videre. Senere trin er låst, indtil de tidligere trin er gennemført.
 3. Brug `Forbind til Graph + Azure` for samlet sign-in. Graph er påkrævet; Azure bruges kun til Log Analytics/Azure Monitor.
-4. Hvis Azure ikke kan forbindes, kan du vælge at fortsætte uden Azure Monitor/Log Analytics for den aktuelle kørsel.
+4. Hvis Azure Monitor/Log Analytics er slået til, skal Azure være forbundet og en subscription være valgt, før wizard'en kan fortsætte til kørsel.
 5. Kør pre-check.
 6. Udfyld konfiguration.
 7. Byg dry-run plan og eksporter den efter behov.
@@ -171,7 +173,7 @@ Version 1 automatiserer ikke FIDO2/FIDO key enrollment. Konsulenten skal manuelt
 ## Foreslået lab-test
 
 1. Start i `-Mock` mode og gennemgå hele GUI'en.
-2. Kør i en testtenant med `Dry-run/NoApply` slået til.
+2. Kør i en testtenant med `Report only` valgt.
 3. Gennemgå `plan.json` og `report.html`.
 4. Kør apply med CA policy state `reportOnly`.
 5. Bekræft brugere, break-glass gruppe, GA assignment på gruppen, RMAU, RMAU admin-gruppe og CA policy i Entra admin center.
