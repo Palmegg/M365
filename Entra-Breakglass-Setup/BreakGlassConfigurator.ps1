@@ -354,7 +354,7 @@ function Test-RequiredModules {
             Version = if ($found) { [string] $found.Version } else { '' }
         }
     }
-    return @($results)
+    return $results
 }
 
 function Get-GraphModuleTargetVersion {
@@ -696,7 +696,7 @@ function Invoke-ConnectionWorkerMode {
             Connect-AppGraph | Out-Null
             $result['GraphConnected'] = $true
             $result['GraphAccount'] = $script:State.GraphAccount
-            $result['GraphScopes'] = @($script:State.GraphScopes)
+            $result['GraphScopes'] = @(Get-ObjectPropertyValue -InputObject $script:State -Name 'GraphScopes')
             $result['TenantId'] = $script:State.TenantId
             $result['TenantDisplayName'] = $script:State.TenantDisplayName
             $result['OnMicrosoftDomain'] = $script:State.OnMicrosoftDomain
@@ -783,7 +783,7 @@ function Connect-AppGraph {
 
     $script:State['GraphConnected'] = $true
     $script:State['GraphAccount'] = [string] $context.Account
-    $script:State['GraphScopes'] = @($context.Scopes)
+    $script:State['GraphScopes'] = @(Get-ObjectPropertyValue -InputObject $context -Name 'Scopes')
     $script:State['TenantId'] = [string] $context.TenantId
     Get-TenantInfo | Out-Null
     Write-AppLog -Message "Graph forbundet som $($script:State.GraphAccount), tenant $($script:State.TenantId)."
@@ -806,11 +806,15 @@ function Test-GraphScopes {
 
     $context = Get-AppGraphContext
     $granted = @()
-    if ($context -and $context.PSObject.Properties['Scopes']) {
-        $granted = @($context.Scopes)
+    $contextScopes = Get-ObjectPropertyValue -InputObject $context -Name 'Scopes'
+    if ($contextScopes) {
+        $granted = @($contextScopes)
     }
-    elseif ($script:State.GraphScopes) {
-        $granted = @($script:State.GraphScopes)
+    else {
+        $stateScopes = Get-ObjectPropertyValue -InputObject $script:State -Name 'GraphScopes'
+        if ($stateScopes) {
+            $granted = @($stateScopes)
+        }
     }
 
     foreach ($scope in $script:RequiredGraphScopes) {
@@ -1635,7 +1639,7 @@ function Add-BreakGlassGroupExclusionToExistingCAPolicies {
             $results.Add([pscustomobject]@{ Policy = $policy.displayName; Status = 'Warning'; Backup = $backup }) | Out-Null
         }
     }
-    return @($results)
+    return $results.ToArray()
 }
 
 function Get-UserFido2Methods {
@@ -1894,7 +1898,7 @@ function Invoke-PreCheck {
     foreach ($scope in Test-GraphScopes) {
         $results.Add([pscustomobject]@{ Check = "Graph scope: $($scope.Scope)"; Status = $scope.Status; Detail = if ($scope.Present) { 'Granted' } else { 'Mangler eller kan ikke detekteres' } }) | Out-Null
     }
-    return @($results)
+    return $results.ToArray()
 }
 
 function New-Plan {
@@ -2090,7 +2094,7 @@ function Invoke-Validation {
         $items += [pscustomobject]@{ Check = 'Azure Monitor konfiguration'; Status = 'Skipped'; Detail = 'Monitoring er slået fra' }
     }
     Write-AppLog -Message 'Samlet validering færdig.'
-    return @($items)
+    return $items
 }
 
 function New-JsonReport {
@@ -2932,7 +2936,7 @@ function Start-BreakGlassWizard {
             Set-UiStatus -Message 'Pre-check færdig.'
         }
         catch {
-            Write-SafeError -Message 'Pre-check fejlede.' -ErrorRecord $_
+            Write-DetailedError -Message 'Pre-check fejlede.' -ErrorRecord $_
             Set-UiStatus -Message 'Pre-check fejlede.'
             Show-AppMessage -Message (ConvertTo-RedactedError $_) -Icon 'Error' | Out-Null
         }
@@ -3139,7 +3143,7 @@ function Start-BreakGlassWizard {
                         $script:State['GraphConnected'] = [bool] $connectionResult.GraphConnected
                         $script:State['AzureConnected'] = [bool] $connectionResult.AzureConnected
                         $script:State['GraphAccount'] = [string] $connectionResult.GraphAccount
-                        $script:State['GraphScopes'] = @($connectionResult.GraphScopes)
+                        $script:State['GraphScopes'] = @(Get-ObjectPropertyValue -InputObject $connectionResult -Name 'GraphScopes')
                         $script:State['TenantId'] = [string] $connectionResult.TenantId
                         $script:State['TenantDisplayName'] = [string] $connectionResult.TenantDisplayName
                         $script:State['OnMicrosoftDomain'] = [string] $connectionResult.OnMicrosoftDomain
