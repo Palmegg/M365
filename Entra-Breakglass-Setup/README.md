@@ -95,7 +95,9 @@ Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
 
 Kør ikke første login/modulinstallation fra VS Code PowerShell Extension Terminal. WPF, Microsoft Graph interactive login og PowerShell Editor Services kan få VS Code extension-terminalen til at lukke. Brug en separat Windows PowerShell 5.1 konsol.
 
-Hvis moduler mangler, starter GUI'en en separat synlig PowerShell worker til modulinstallation. Godkend installationen i det worker-vindue, vent til den er færdig, og tryk derefter connect-knappen i GUI'en igen.
+Connect-knapperne starter en separat synlig PowerShell connection-worker til Graph/Azure login. Det beskytter WPF GUI-processen, hvis Microsoft Graph/WAM-login crasher eller lukker PowerShell-processen.
+
+Hvis moduler mangler, spørger connection-worker-vinduet om installation for `CurrentUser`. Godkend installationen i worker-vinduet, vent til den er færdig, og gå derefter tilbage til GUI'en. Statusbaren i GUI'en viser seneste worker-status.
 
 Til lab uden tenant-ændringer:
 

@@ -16,7 +16,10 @@ param(
     [switch] $WorkerMode,
     [string] $WorkerConfigPath,
     [switch] $ModuleWorkerMode,
-    [string] $ModuleWorkerLogPath
+    [string] $ModuleWorkerLogPath,
+    [switch] $ConnectionWorkerMode,
+    [Alias('CwcPath')]
+    [string] $ConnectionWorkerConfigPath
 )
 
 Set-StrictMode -Version Latest
@@ -37,6 +40,10 @@ $script:LogPollTimer = $null
 $script:WorkerProcess = $null
 $script:ModuleWorkerProcess = $null
 $script:ModuleWorkerLogFile = ''
+$script:ConnectionWorkerProcess = $null
+$script:ConnectionWorkerConfigFile = ''
+$script:ConnectionWorkerResultPath = ''
+$script:ConnectionWorkerLogFile = ''
 $script:LastLogLength = 0
 $script:WizardMaxStep = 0
 $script:WizardInternalNavigation = $false
@@ -101,7 +108,7 @@ function Restart-InStaModeIfNeeded {
     [CmdletBinding()]
     param()
 
-    if ($WorkerMode -or $ModuleWorkerMode) {
+    if ($WorkerMode -or $ModuleWorkerMode -or $ConnectionWorkerMode) {
         return
     }
 
@@ -413,6 +420,149 @@ function Invoke-ModulePreparationWorkerMode {
     Write-Host 'Modulinstallation færdig. Du kan lukke dette vindue og trykke connect i GUI igen.' -ForegroundColor Green
     Start-Sleep -Seconds 3
     exit 0
+}
+
+function Start-ConnectionWorker {
+    [CmdletBinding()]
+    param(
+        [switch] $Graph,
+        [switch] $Azure
+    )
+
+    if ($script:ConnectionWorkerProcess -and -not $script:ConnectionWorkerProcess.HasExited) {
+        Set-UiStatus -Message 'Connection-worker kører allerede i separat PowerShell vindue.' -Busy
+        return
+    }
+
+    $folder = Join-Path -Path $script:DefaultOutputRoot -ChildPath ('Connection-{0}' -f (Get-Date -Format 'yyyyMMdd-HHmmss'))
+    New-Item -ItemType Directory -Force -Path $folder | Out-Null
+    $script:ConnectionWorkerConfigFile = Join-Path -Path $folder -ChildPath 'connection-worker-config.json'
+    $script:ConnectionWorkerResultPath = Join-Path -Path $folder -ChildPath 'connection-result.json'
+    $script:ConnectionWorkerLogFile = Join-Path -Path $folder -ChildPath 'connection-worker.log'
+
+    $config = [ordered]@{
+        Graph      = [bool] $Graph
+        Azure      = [bool] $Azure
+        Mock       = [bool] $script:State.Mock
+        LogPath    = $script:ConnectionWorkerLogFile
+        ResultPath = $script:ConnectionWorkerResultPath
+    }
+    Export-JsonSafe -InputObject $config -Path $script:ConnectionWorkerConfigFile -Depth 10 | Out-Null
+
+    $powerShell = Join-Path -Path $env:SystemRoot -ChildPath 'System32\WindowsPowerShell\v1.0\powershell.exe'
+    $args = @(
+        '-NoProfile',
+        '-ExecutionPolicy',
+        'Bypass',
+        '-STA',
+        '-File',
+        ('"{0}"' -f $PSCommandPath),
+        '-ConnectionWorkerMode',
+        '-CwcPath',
+        ('"{0}"' -f $script:ConnectionWorkerConfigFile)
+    )
+    if ($script:State.Mock) { $args += '-Mock' }
+    $script:ConnectionWorkerProcess = Start-Process -FilePath $powerShell -ArgumentList ($args -join ' ') -PassThru -WindowStyle Normal
+    Set-UiStatus -Message 'Connection-worker startet i separat PowerShell vindue. Gennemfør login dér.' -Busy -Log
+}
+
+function Invoke-ConnectionWorkerMode {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string] $Path)
+
+    $config = Get-Content -LiteralPath $Path -Raw -Encoding UTF8 | ConvertFrom-Json
+    $script:State['Mock'] = [bool] $config.Mock
+    $script:LogFile = [string] $config.LogPath
+    $resultPath = [string] $config.ResultPath
+
+    Write-AppLog -Message 'Connection-worker startet.'
+    Write-Host ''
+    Write-Host 'NetIP Entra Break Glass Configurator - connection worker' -ForegroundColor Cyan
+    Write-Host 'Login kører i dette vindue for at beskytte WPF GUI-processen.' -ForegroundColor Cyan
+    Write-Host ''
+
+    $result = [ordered]@{
+        GraphConnected        = $false
+        AzureConnected        = $false
+        GraphAccount          = ''
+        GraphScopes           = @()
+        TenantId              = ''
+        TenantDisplayName     = ''
+        OnMicrosoftDomain     = ''
+        AzureAccount          = ''
+        AzureSubscriptionId   = ''
+        AzureSubscriptionName = ''
+        Error                 = ''
+    }
+
+    try {
+        if ($config.Graph) {
+            if (-not $script:State.Mock) {
+                Write-AppLog -Message 'Forbereder Graph moduler.'
+                $status = Test-RequiredModules
+                $missing = @($status | Where-Object { -not $_.Present })
+                if ($missing.Count -gt 0) {
+                    Write-AppLog -Level WARN -Message "Manglende moduler: $($missing.Name -join ', ')"
+                    Write-Host 'Manglende moduler skal installeres først:' -ForegroundColor Yellow
+                    foreach ($module in $missing.Name) { Write-Host " - $module" -ForegroundColor Yellow }
+                    Write-Host ''
+                    $answer = Read-Host 'Installer manglende moduler for CurrentUser fra PSGallery? Skriv Y for ja'
+                    if ($answer -notin @('Y','y','YES','Yes','yes','J','j','JA','Ja','ja')) {
+                        throw 'Modulinstallation blev afvist.'
+                    }
+                    [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+                    if (-not (Get-PackageProvider -Name NuGet -ErrorAction SilentlyContinue)) {
+                        Install-PackageProvider -Name NuGet -MinimumVersion '2.8.5.201' -Scope CurrentUser -Force -ErrorAction Stop | Out-Null
+                    }
+                    foreach ($module in $missing.Name) {
+                        Write-AppLog -Message "Installerer modul: $module"
+                        Write-Host "Installerer modul: $module" -ForegroundColor Cyan
+                        Install-Module -Name $module -Scope CurrentUser -Repository PSGallery -AllowClobber -Force -ErrorAction Stop
+                    }
+                }
+                Import-RequiredModules
+            }
+
+            Write-AppLog -Message 'Forbinder til Microsoft Graph.'
+            Write-Host 'Forbinder til Microsoft Graph. Gennemfør loginprompten...' -ForegroundColor Cyan
+            Connect-AppGraph | Out-Null
+            $result['GraphConnected'] = $true
+            $result['GraphAccount'] = $script:State.GraphAccount
+            $result['GraphScopes'] = @($script:State.GraphScopes)
+            $result['TenantId'] = $script:State.TenantId
+            $result['TenantDisplayName'] = $script:State.TenantDisplayName
+            $result['OnMicrosoftDomain'] = $script:State.OnMicrosoftDomain
+        }
+
+        if ($config.Azure) {
+            if (-not $script:State.Mock -and -not $config.Graph) {
+                Import-RequiredModules
+            }
+            Write-AppLog -Message 'Forbinder til Azure Resource Manager.'
+            Write-Host 'Forbinder til Azure Resource Manager. Gennemfør loginprompten...' -ForegroundColor Cyan
+            Connect-AppAzure | Out-Null
+            $result['AzureConnected'] = $true
+            $result['AzureAccount'] = $script:State.AzureAccount
+            $result['AzureSubscriptionId'] = $script:State.AzureSubscriptionId
+            $result['AzureSubscriptionName'] = $script:State.AzureSubscriptionName
+        }
+
+        Export-JsonSafe -InputObject $result -Path $resultPath -Depth 20 | Out-Null
+        Write-AppLog -Level PASS -Message 'Connection-worker færdig.'
+        Write-Host ''
+        Write-Host 'Connection-worker færdig. Du kan gå tilbage til GUI-vinduet.' -ForegroundColor Green
+        Start-Sleep -Seconds 3
+        exit 0
+    }
+    catch {
+        $result['Error'] = ConvertTo-RedactedError $_
+        Export-JsonSafe -InputObject $result -Path $resultPath -Depth 20 | Out-Null
+        Write-SafeError -Message 'Connection-worker fejlede.' -ErrorRecord $_
+        Write-Host ''
+        Write-Host "Connection-worker fejlede: $($result['Error'])" -ForegroundColor Red
+        Start-Sleep -Seconds 8
+        exit 40
+    }
 }
 
 function Connect-AppGraph {
@@ -2422,14 +2572,11 @@ function Start-BreakGlassWizard {
     $script:Ui.NoApply.IsChecked = [bool]($NoApply -or $true)
 
     $script:Ui.ConnectGraphButton.Add_Click({
+        $workerStarted = $false
         try {
             Set-UiBusy -Busy $true
-            Set-UiStatus -Message 'Starter Graph forbindelse...' -Busy -Log
-            if (-not (Ensure-AppModulesFromUi)) { return }
-            Set-UiStatus -Message 'Forbinder til Microsoft Graph. Gennemfør loginprompten, hvis den vises...' -Busy -Log
-            Connect-AppGraph | Out-Null
-            Update-ConnectionStatusUi
-            Set-UiStatus -Message 'Graph forbundet.' -Log
+            Start-ConnectionWorker -Graph
+            $workerStarted = $true
         }
         catch {
             Write-SafeError -Message 'Graph forbindelse fejlede.' -ErrorRecord $_
@@ -2437,19 +2584,16 @@ function Start-BreakGlassWizard {
             Show-AppMessage -Message ("Graph forbindelse fejlede:`r`n{0}" -f (ConvertTo-RedactedError $_)) -Icon 'Error' | Out-Null
         }
         finally {
-            Set-UiBusy -Busy $false
+            if (-not $workerStarted) { Set-UiBusy -Busy $false }
         }
     })
 
     $script:Ui.ConnectAzureButton.Add_Click({
+        $workerStarted = $false
         try {
             Set-UiBusy -Busy $true
-            Set-UiStatus -Message 'Starter Azure forbindelse...' -Busy -Log
-            if (-not (Ensure-AppModulesFromUi)) { return }
-            Set-UiStatus -Message 'Forbinder til Azure Resource Manager. Gennemfør loginprompten, hvis den vises...' -Busy -Log
-            Connect-AppAzure | Out-Null
-            Update-ConnectionStatusUi
-            Set-UiStatus -Message 'Azure forbundet.' -Log
+            Start-ConnectionWorker -Azure
+            $workerStarted = $true
         }
         catch {
             Write-SafeError -Message 'Azure forbindelse fejlede.' -ErrorRecord $_
@@ -2457,16 +2601,16 @@ function Start-BreakGlassWizard {
             Show-AppMessage -Message ("Azure forbindelse fejlede:`r`n{0}" -f (ConvertTo-RedactedError $_)) -Icon 'Error' | Out-Null
         }
         finally {
-            Set-UiBusy -Busy $false
+            if (-not $workerStarted) { Set-UiBusy -Busy $false }
         }
     })
 
     $script:Ui.ConnectAllButton.Add_Click({
+        $workerStarted = $false
         try {
             Set-UiBusy -Busy $true
-            if (-not (Connect-AllFromUi)) { return }
-            Set-WizardMaxStep -Step 2
-            Set-UiStatus -Message 'Forbindelser klar.'
+            Start-ConnectionWorker -Graph:($true) -Azure:(-not [bool] $script:Ui.DisableMonitoring.IsChecked)
+            $workerStarted = $true
         }
         catch {
             Write-SafeError -Message 'Samlet forbindelse fejlede.' -ErrorRecord $_
@@ -2474,7 +2618,7 @@ function Start-BreakGlassWizard {
             Show-AppMessage -Message ("Samlet forbindelse fejlede:`r`n{0}" -f (ConvertTo-RedactedError $_)) -Icon 'Error' | Out-Null
         }
         finally {
-            Set-UiBusy -Busy $false
+            if (-not $workerStarted) { Set-UiBusy -Busy $false }
         }
     })
 
@@ -2671,6 +2815,56 @@ function Start-BreakGlassWizard {
                 Set-UiBusy -Busy $false
             }
         }
+        if ($script:ConnectionWorkerProcess) {
+            if ($script:ConnectionWorkerLogFile -and (Test-Path -LiteralPath $script:ConnectionWorkerLogFile)) {
+                try {
+                    $lastLine = Get-Content -LiteralPath $script:ConnectionWorkerLogFile -Tail 1 -ErrorAction Stop
+                    if ($lastLine) {
+                        Set-UiStatus -Message ("Connection-worker: {0}" -f $lastLine) -Busy
+                    }
+                }
+                catch {
+                    # Connection worker log polling is best-effort.
+                }
+            }
+            if ($script:ConnectionWorkerProcess.HasExited) {
+                $connectionExitCode = $script:ConnectionWorkerProcess.ExitCode
+                $script:ConnectionWorkerProcess.Dispose()
+                $script:ConnectionWorkerProcess = $null
+                if ($script:ConnectionWorkerResultPath -and (Test-Path -LiteralPath $script:ConnectionWorkerResultPath)) {
+                    try {
+                        $connectionResult = Get-Content -LiteralPath $script:ConnectionWorkerResultPath -Raw -Encoding UTF8 | ConvertFrom-Json
+                        $script:State['GraphConnected'] = [bool] $connectionResult.GraphConnected
+                        $script:State['AzureConnected'] = [bool] $connectionResult.AzureConnected
+                        $script:State['GraphAccount'] = [string] $connectionResult.GraphAccount
+                        $script:State['GraphScopes'] = @($connectionResult.GraphScopes)
+                        $script:State['TenantId'] = [string] $connectionResult.TenantId
+                        $script:State['TenantDisplayName'] = [string] $connectionResult.TenantDisplayName
+                        $script:State['OnMicrosoftDomain'] = [string] $connectionResult.OnMicrosoftDomain
+                        $script:State['AzureAccount'] = [string] $connectionResult.AzureAccount
+                        $script:State['AzureSubscriptionId'] = [string] $connectionResult.AzureSubscriptionId
+                        $script:State['AzureSubscriptionName'] = [string] $connectionResult.AzureSubscriptionName
+                        Update-ConnectionStatusUi
+                        if ($connectionExitCode -eq 0) {
+                            Set-WizardMaxStep -Step 2
+                            Set-UiStatus -Message 'Connection-worker færdig. Forbindelsesoplysninger er indlæst.'
+                        }
+                        else {
+                            $errorText = if ($connectionResult.Error) { [string] $connectionResult.Error } else { "exit code $connectionExitCode" }
+                            Set-UiStatus -Message ("Connection-worker fejlede: {0}" -f $errorText)
+                        }
+                    }
+                    catch {
+                        Write-SafeError -Message 'Kunne ikke læse connection-worker resultat.' -ErrorRecord $_
+                        Set-UiStatus -Message 'Connection-worker færdig, men resultatfilen kunne ikke læses.'
+                    }
+                }
+                else {
+                    Set-UiStatus -Message ("Connection-worker sluttede uden resultatfil. Exit code: {0}" -f $connectionExitCode)
+                }
+                Set-UiBusy -Busy $false
+            }
+        }
         if ($script:WorkerProcess -and $script:WorkerProcess.HasExited) {
             $script:LogPollTimer.Stop()
             Sync-LogView
@@ -2698,6 +2892,9 @@ try {
     if ($ModuleWorkerMode) {
         Invoke-ModulePreparationWorkerMode -LogPath $ModuleWorkerLogPath
     }
+    elseif ($ConnectionWorkerMode) {
+        Invoke-ConnectionWorkerMode -Path $ConnectionWorkerConfigPath
+    }
     elseif ($WorkerMode) {
         Invoke-WorkerMode -Path $WorkerConfigPath
     }
@@ -2707,8 +2904,14 @@ try {
 }
 catch {
     Write-SafeError -Message 'Uventet fejl.' -ErrorRecord $_
-    if (-not $WorkerMode -and -not $ModuleWorkerMode) {
+    if (-not $WorkerMode -and -not $ModuleWorkerMode -and -not $ConnectionWorkerMode) {
         Show-AppMessage -Message ("Uventet fejl:`r`n{0}" -f (ConvertTo-RedactedError $_)) -Icon 'Error' | Out-Null
+        Write-Host ''
+        Write-Host 'Værktøjet stoppede med en fejl. Se logfilen:' -ForegroundColor Yellow
+        Write-Host $script:LogFile -ForegroundColor Yellow
+        Write-Host ''
+        Read-Host 'Tryk Enter for at lukke PowerShell-vinduet'
+        exit 1
     }
     throw
 }
