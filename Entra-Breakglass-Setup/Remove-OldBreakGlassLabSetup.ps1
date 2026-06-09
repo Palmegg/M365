@@ -88,7 +88,7 @@ function Get-GraphCollection {
         if ($response.value) {
             $items += @($response.value)
         }
-        $next = $response.'@odata.nextLink'
+        $next = Get-ObjectPropertyValue -InputObject $response -Name '@odata.nextLink'
     }
     return $items
 }
