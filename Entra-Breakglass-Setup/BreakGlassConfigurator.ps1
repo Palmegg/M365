@@ -1790,6 +1790,55 @@ function Update-ValidationUi {
     }
 }
 
+function Update-UiPump {
+    [CmdletBinding()]
+    param()
+
+    if (-not $script:MainWindow) { return }
+    try {
+        $script:MainWindow.Dispatcher.Invoke([Action] { }, [System.Windows.Threading.DispatcherPriority]::Background)
+    }
+    catch {
+        # UI pump refresh is best-effort.
+    }
+}
+
+function Set-UiStatus {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string] $Message,
+        [switch] $Busy,
+        [switch] $Log
+    )
+
+    if ($script:Ui -and $script:Ui.ContainsKey('BackgroundStatus') -and $script:Ui.BackgroundStatus) {
+        $script:Ui.BackgroundStatus.Text = $Message
+    }
+    if ($script:Ui -and $script:Ui.ContainsKey('StatusProgress') -and $script:Ui.StatusProgress) {
+        $script:Ui.StatusProgress.IsIndeterminate = [bool] $Busy
+        $script:Ui.StatusProgress.Visibility = if ($Busy) { 'Visible' } else { 'Collapsed' }
+    }
+    if ($Log) {
+        Write-AppLog -Message $Message
+    }
+    Update-UiPump
+}
+
+function Set-UiBusy {
+    [CmdletBinding()]
+    param([bool] $Busy)
+
+    foreach ($name in @('ConnectAllButton','ConnectGraphButton','ConnectAzureButton','RunPrecheckButton','BuildPlanButton','ExportPlanButton','ApplyButton','BackButton','NextButton')) {
+        if ($script:Ui.ContainsKey($name) -and $script:Ui[$name]) {
+            $script:Ui[$name].IsEnabled = -not $Busy
+        }
+    }
+    if (-not $Busy) {
+        Update-WizardNavigation
+    }
+    Update-UiPump
+}
+
 function Set-WizardMaxStep {
     [CmdletBinding()]
     param([int] $Step)
@@ -1829,9 +1878,15 @@ function Ensure-AppModulesFromUi {
     [CmdletBinding()]
     param()
 
-    if ($script:State.Mock) { return }
+    if ($script:State.Mock) {
+        Set-UiStatus -Message 'Mock mode: module check springes over.' -Busy
+        return
+    }
+    Set-UiStatus -Message 'Tjekker nødvendige PowerShell moduler...' -Busy -Log
     $status = Test-RequiredModules
+    Set-UiStatus -Message 'Installerer manglende moduler, hvis du godkender prompten...' -Busy
     Install-RequiredModulesWithConsent -ModuleStatus $status
+    Set-UiStatus -Message 'Importerer Microsoft Graph og Az moduler...' -Busy -Log
     Import-RequiredModules
 }
 
@@ -1839,10 +1894,13 @@ function Connect-AllFromUi {
     [CmdletBinding()]
     param()
 
+    Set-UiStatus -Message 'Starter samlet forbindelse...' -Busy -Log
     Ensure-AppModulesFromUi
+    Set-UiStatus -Message 'Forbinder til Microsoft Graph. Gennemfør loginprompten, hvis den vises...' -Busy -Log
     Connect-AppGraph | Out-Null
     if (-not [bool] $script:Ui.DisableMonitoring.IsChecked) {
         try {
+            Set-UiStatus -Message 'Forbinder til Azure Resource Manager. Gennemfør loginprompten, hvis den vises...' -Busy -Log
             Connect-AppAzure | Out-Null
         }
         catch {
@@ -1856,6 +1914,7 @@ function Connect-AllFromUi {
         }
     }
     Update-ConnectionStatusUi
+    Set-UiStatus -Message 'Forbindelser klar.' -Log
 }
 
 function Invoke-PrecheckFromUi {
@@ -1910,6 +1969,7 @@ function Move-WizardNext {
             }
             Set-WizardMaxStep -Step 1
             Set-WizardStep -Step 1
+            Set-UiStatus -Message 'Næste trin: forbind til Graph + Azure, eller kun Graph hvis monitoring skal springes over.'
         }
         1 {
             if (-not $script:State.GraphConnected) {
@@ -1923,29 +1983,37 @@ function Move-WizardNext {
             }
             Set-WizardMaxStep -Step 2
             Set-WizardStep -Step 2
+            Set-UiStatus -Message 'Klar til pre-check.'
         }
         2 {
+            Set-UiStatus -Message 'Kører pre-check...' -Busy -Log
             Invoke-PrecheckFromUi | Out-Null
             if (-not $script:PrecheckPassed) {
+                Set-UiStatus -Message 'Pre-check har hard failures.'
                 Show-AppMessage -Message 'Pre-check har hard failures. Ret dem før du fortsætter.' -Icon 'Warning' | Out-Null
                 return
             }
             Set-WizardStep -Step 3
+            Set-UiStatus -Message 'Pre-check OK. Udfyld konfigurationen.'
         }
         3 {
             Test-ConfigurationForWizard | Out-Null
             Set-WizardMaxStep -Step 4
             Set-WizardStep -Step 4
+            Set-UiStatus -Message 'Konfiguration valideret. Byg og gennemgå dry-run planen.'
         }
         4 {
             if (-not $script:PlanBuilt) {
+                Set-UiStatus -Message 'Bygger dry-run plan...' -Busy -Log
                 New-PlanFromUi | Out-Null
             }
             Set-WizardStep -Step 5
+            Set-UiStatus -Message 'Dry-run plan er klar. Apply kan startes fra trin 5.'
         }
         default {
             Set-WizardMaxStep -Step ($index + 1)
             Set-WizardStep -Step ($index + 1)
+            Set-UiStatus -Message ('Wizard flyttet til step {0}.' -f ($script:Ui.WizardTabs.SelectedIndex + 1))
         }
     }
 }
@@ -2225,7 +2293,20 @@ function Start-BreakGlassWizard {
             <Button x:Name="CloseButton" DockPanel.Dock="Right" Content="Luk" Width="90" Height="32"/>
             <Button x:Name="NextButton" DockPanel.Dock="Right" Content="Fortsæt" Width="110" Height="32" Margin="0,0,8,0"/>
             <Button x:Name="BackButton" DockPanel.Dock="Right" Content="Tilbage" Width="110" Height="32" Margin="0,0,8,0"/>
-            <TextBlock x:Name="FooterStatus" Text="Klar" VerticalAlignment="Center"/>
+            <Border BorderBrush="#CBD5E1" BorderThickness="1" Background="#FFFFFF" CornerRadius="3" Padding="8,5" VerticalAlignment="Center">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Grid.Column="0" Text="Status:" FontWeight="SemiBold" Margin="0,0,6,0"/>
+                    <TextBlock x:Name="BackgroundStatus" Grid.Column="1" Text="Klar" TextTrimming="CharacterEllipsis"/>
+                    <ProgressBar x:Name="StatusProgress" Grid.Column="2" Width="90" Height="12" Margin="12,0,12,0" Visibility="Collapsed"/>
+                    <TextBlock x:Name="FooterStatus" Grid.Column="3" Text="Step 1 af 9" Foreground="#475569"/>
+                </Grid>
+            </Border>
         </DockPanel>
     </Grid>
 </Window>
@@ -2238,7 +2319,7 @@ function Start-BreakGlassWizard {
         'RunPrecheckButton','PrecheckList','UserPrefix1','UserPrefix2','DisplayName1','DisplayName2','GroupDisplayName','RmauDisplayName','AuthStrengthName','CaPolicyName','CaState',
         'ExcludeExistingCa','AllowedAaguids','NoApply','DisableMonitoring','UseExistingWorkspace','SubscriptionId','ResourceGroupName','WorkspaceName','AzureRegion','DiagnosticSettingName',
         'ActionGroupName','AlertEmails','CreateSignInAlert','CreateAuditAlert','BuildPlanButton','ExportPlanButton','ApplyButton','PlanText','ProgressBar','ExecutionLog','OpenSecurityInfoButton',
-        'ValidateFidoButton','FidoResults','RunValidationButton','ValidationList','OutputFolderText','OpenOutputFolderButton','BackButton','NextButton','CloseButton','FooterStatus','WizardTabs'
+        'ValidateFidoButton','FidoResults','RunValidationButton','ValidationList','OutputFolderText','OpenOutputFolderButton','BackButton','NextButton','CloseButton','BackgroundStatus','StatusProgress','FooterStatus','WizardTabs'
     )) {
         $script:Ui[$name] = $script:MainWindow.FindName($name)
     }
@@ -2247,80 +2328,122 @@ function Start-BreakGlassWizard {
 
     $script:Ui.ConnectGraphButton.Add_Click({
         try {
+            Set-UiBusy -Busy $true
+            Set-UiStatus -Message 'Starter Graph forbindelse...' -Busy -Log
             Ensure-AppModulesFromUi
+            Set-UiStatus -Message 'Forbinder til Microsoft Graph. Gennemfør loginprompten, hvis den vises...' -Busy -Log
             Connect-AppGraph | Out-Null
             Update-ConnectionStatusUi
-            $script:Ui.FooterStatus.Text = 'Graph forbundet'
+            Set-UiStatus -Message 'Graph forbundet.' -Log
         }
         catch {
             Write-SafeError -Message 'Graph forbindelse fejlede.' -ErrorRecord $_
+            Set-UiStatus -Message 'Graph forbindelse fejlede.'
             Show-AppMessage -Message ("Graph forbindelse fejlede:`r`n{0}" -f (ConvertTo-RedactedError $_)) -Icon 'Error' | Out-Null
+        }
+        finally {
+            Set-UiBusy -Busy $false
         }
     })
 
     $script:Ui.ConnectAzureButton.Add_Click({
         try {
+            Set-UiBusy -Busy $true
+            Set-UiStatus -Message 'Starter Azure forbindelse...' -Busy -Log
             Ensure-AppModulesFromUi
+            Set-UiStatus -Message 'Forbinder til Azure Resource Manager. Gennemfør loginprompten, hvis den vises...' -Busy -Log
             Connect-AppAzure | Out-Null
             Update-ConnectionStatusUi
-            $script:Ui.FooterStatus.Text = 'Azure forbundet'
+            Set-UiStatus -Message 'Azure forbundet.' -Log
         }
         catch {
             Write-SafeError -Message 'Azure forbindelse fejlede.' -ErrorRecord $_
+            Set-UiStatus -Message 'Azure forbindelse fejlede.'
             Show-AppMessage -Message ("Azure forbindelse fejlede:`r`n{0}" -f (ConvertTo-RedactedError $_)) -Icon 'Error' | Out-Null
+        }
+        finally {
+            Set-UiBusy -Busy $false
         }
     })
 
     $script:Ui.ConnectAllButton.Add_Click({
         try {
+            Set-UiBusy -Busy $true
             Connect-AllFromUi
             Set-WizardMaxStep -Step 2
-            $script:Ui.FooterStatus.Text = 'Forbindelser klar'
+            Set-UiStatus -Message 'Forbindelser klar.'
         }
         catch {
             Write-SafeError -Message 'Samlet forbindelse fejlede.' -ErrorRecord $_
+            Set-UiStatus -Message 'Samlet forbindelse fejlede.'
             Show-AppMessage -Message ("Samlet forbindelse fejlede:`r`n{0}" -f (ConvertTo-RedactedError $_)) -Icon 'Error' | Out-Null
+        }
+        finally {
+            Set-UiBusy -Busy $false
         }
     })
 
     $script:Ui.RunPrecheckButton.Add_Click({
         try {
+            Set-UiBusy -Busy $true
+            Set-UiStatus -Message 'Kører pre-check...' -Busy -Log
             Invoke-PrecheckFromUi | Out-Null
+            Set-UiStatus -Message 'Pre-check færdig.'
         }
         catch {
             Write-SafeError -Message 'Pre-check fejlede.' -ErrorRecord $_
+            Set-UiStatus -Message 'Pre-check fejlede.'
             Show-AppMessage -Message (ConvertTo-RedactedError $_) -Icon 'Error' | Out-Null
+        }
+        finally {
+            Set-UiBusy -Busy $false
         }
     })
 
     $script:Ui.BuildPlanButton.Add_Click({
         try {
+            Set-UiBusy -Busy $true
+            Set-UiStatus -Message 'Bygger dry-run plan...' -Busy -Log
             New-PlanFromUi | Out-Null
+            Set-UiStatus -Message 'Dry-run plan bygget.'
         }
         catch {
             Write-SafeError -Message 'Plan kunne ikke bygges.' -ErrorRecord $_
+            Set-UiStatus -Message 'Plan kunne ikke bygges.'
             Show-AppMessage -Message (ConvertTo-RedactedError $_) -Icon 'Error' | Out-Null
+        }
+        finally {
+            Set-UiBusy -Busy $false
         }
     })
 
     $script:Ui.ExportPlanButton.Add_Click({
         try {
+            Set-UiBusy -Busy $true
+            Set-UiStatus -Message 'Eksporterer dry-run plan til JSON...' -Busy -Log
             $config = Build-ConfigFromUi
             $plan = New-Plan -Config $config
             $output = if ($script:SessionOutputFolder) { $script:SessionOutputFolder } else { New-OutputFolder -TenantId $(if ($script:State.TenantId) { $script:State.TenantId } else { 'UnknownTenant' }) }
             $path = Join-Path -Path $output -ChildPath 'plan.json'
             Export-JsonSafe -InputObject $plan -Path $path | Out-Null
             $script:Ui.OutputFolderText.Text = $output
+            Set-UiStatus -Message "Plan eksporteret: $path"
             Show-AppMessage -Message "Plan gemt:`r`n$path" | Out-Null
         }
         catch {
             Write-SafeError -Message 'Plan eksport fejlede.' -ErrorRecord $_
+            Set-UiStatus -Message 'Plan eksport fejlede.'
             Show-AppMessage -Message (ConvertTo-RedactedError $_) -Icon 'Error' | Out-Null
+        }
+        finally {
+            Set-UiBusy -Busy $false
         }
     })
 
     $script:Ui.ApplyButton.Add_Click({
+        $workerStarted = $false
         try {
+            Set-UiBusy -Busy $true
             if (-not [bool] $script:Ui.UnderstandRisk.IsChecked) {
                 Show-AppMessage -Message 'Du skal bekræfte sikkerhedsforståelsen på Velkommen-fanen først.' -Icon 'Warning' | Out-Null
                 return
@@ -2331,21 +2454,29 @@ function Start-BreakGlassWizard {
                     return
                 }
             }
+            Set-UiStatus -Message 'Starter apply/rapportering i separat PowerShell worker...' -Busy -Log
             Start-WorkerApply -Config $config
+            $workerStarted = $true
             $script:Ui.ProgressBar.IsIndeterminate = $true
-            $script:Ui.FooterStatus.Text = 'Kører...'
+            Set-UiStatus -Message 'Worker kører. Følg live-loggen på Udfør-fanen...' -Busy
             Set-WizardMaxStep -Step 5
             Set-WizardStep -Step 5
         }
         catch {
             Write-SafeError -Message 'Apply fejlede.' -ErrorRecord $_
+            Set-UiStatus -Message 'Apply fejlede.'
             Show-AppMessage -Message (ConvertTo-RedactedError $_) -Icon 'Error' | Out-Null
+        }
+        finally {
+            if (-not $workerStarted) {
+                Set-UiBusy -Busy $false
+            }
         }
     })
 
     $script:Ui.UnderstandRisk.Add_Checked({
         Set-WizardMaxStep -Step 1
-        $script:Ui.FooterStatus.Text = 'Sikkerhedsbekræftelse registreret. Tryk Fortsæt.'
+        Set-UiStatus -Message 'Sikkerhedsbekræftelse registreret. Tryk Fortsæt.'
     })
 
     $script:Ui.UnderstandRisk.Add_Unchecked({
@@ -2424,7 +2555,8 @@ function Start-BreakGlassWizard {
             $script:WorkerProcess.Dispose()
             $script:WorkerProcess = $null
             $script:Ui.ProgressBar.IsIndeterminate = $false
-            $script:Ui.FooterStatus.Text = if ($exitCode -eq 0) { 'Færdig' } else { "Fejl: worker exit code $exitCode" }
+            Set-UiStatus -Message $(if ($exitCode -eq 0) { 'Worker færdig. Rapport er genereret.' } else { "Worker fejlede med exit code $exitCode." })
+            Set-UiBusy -Busy $false
             $script:Ui.OutputFolderText.Text = $script:SessionOutputFolder
             if ($exitCode -eq 0) {
                 Set-WizardMaxStep -Step 8
