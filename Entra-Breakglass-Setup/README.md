@@ -1,115 +1,164 @@
-# Microsoft Entra Breakglass Setup
+# NetIP Entra Break Glass Configurator
 
-PowerShell/WPF tool for preparing and documenting Microsoft Entra ID breakglass accounts in a tenant.
+Version 1 af et Windows PowerShell/WPF-værktøj til konsulentvenlig opsætning og dokumentation af en Microsoft Entra break-glass baseline.
 
-The tool uses Microsoft Graph PowerShell modules. It does not use the deprecated AzureAD or MSOnline modules.
+Værktøjet er designet til at være sikkert, idempotent og egnet til lab-test mod en rigtig tenant. Det bruger Microsoft Graph PowerShell, Microsoft Graph REST via `Invoke-MgGraphRequest`, Az PowerShell og ARM REST. Det bruger ikke `AzureAD` eller `MSOnline`.
 
-## Features
+## Formål
 
-- WPF GUI with account prefixes, group, report mode, and action choices.
-- Connects to Microsoft Graph PowerShell.
-- The `.onmicrosoft.com` domain is resolved automatically from the signed-in tenant.
-- Disconnects existing Graph PowerShell context and uses process-scoped context for each run.
-- Uses native Microsoft Graph interactive browser sign-in by default so FIDO/passkey sign-in can happen in the Microsoft login window or browser.
-- Keeps device-code sign-in available as a fallback option, but not as the default.
-- Includes a Save account names button and naming preset buttons for `svr_ea01` / `svr_ea02` and `adm_ea01` / `adm_ea02`.
-- Looks for existing potential emergency access accounts and warns if likely candidates are found.
-- Includes existing potential emergency access accounts in the confidential report, including their membership status in the CA exclusion group.
-- Checks whether two breakglass accounts exist.
-- Creates missing breakglass accounts when selected.
-- Forces breakglass account UPNs to the tenant `.onmicrosoft.com` domain.
-- Accepts either full UPNs or account prefixes. For example, `svr_ea02` becomes `svr_ea02@tenant.onmicrosoft.com`.
-- Finds or creates the `CA-BreakGlassExclude` security group.
-- Adds the breakglass accounts to the group when selected.
-- Shows clear warnings for Conditional Access exclusions and admin SSPR scope.
-- Can disable administrator SSPR tenant-wide when selected.
-- Generates a confidential HTML report with actions, confirmations, manual steps, and newly generated initial passwords.
-- Uses a resizable WPF layout with wrapping action controls and scrollable setup fields.
-- Logs every action to the local `logs` folder.
-- Prompts before every change unless report mode is enabled.
-- Can run Graph work in the current terminal for visible sign-in prompts, or in a separate worker process when preferred.
+Scriptet hjælper med at konfigurere og validere:
 
-## Requirements
+- To cloud-only break-glass konti på tenantens `*.onmicrosoft.com` domæne.
+- Role-assignable sikkerhedsgruppe til break-glass kontiene.
+- Gruppemedlemskab for begge konti.
+- Direkte permanente Global Administrator rolleassignments.
+- Restricted Management Administrative Unit, RMAU.
+- Custom authentication strength til FIDO2, valgfrit begrænset med AAGUIDs.
+- Dedikeret Conditional Access policy, som kræver authentication strength for gruppen.
+- Valgfri opt-in exclusion af break-glass gruppen fra eksisterende Conditional Access policies.
+- Entra diagnostic settings til Log Analytics.
+- Azure Monitor scheduled query alerts og action group.
+- Manuel FIDO2 guidance og efterfølgende validering.
+- HTML- og JSON-rapport.
 
-- Windows PowerShell 5.1 or newer.
-- Internet access to PowerShell Gallery on the first run if Microsoft Graph PowerShell modules are missing.
-- An account with sufficient Entra ID role permissions to create users, create groups, update group membership, and update authorization policy settings.
-- Admin consent for the delegated Microsoft Graph permissions listed below.
+## Krav
 
-If the script is launched from a non-STA shell, it automatically restarts itself in STA Windows PowerShell because WPF requires an STA thread.
+- Windows.
+- Windows PowerShell 5.1.
+- x64 PowerShell anbefales.
+- WPF kræver STA. Scriptet relancerer automatisk i `powershell.exe -STA`, hvis det startes forkert.
+- Internetadgang til Microsoft Graph, Azure Resource Manager og PowerShell Gallery, hvis moduler skal installeres.
+- Delegated interactive sign-in. Version 1 bruger ikke app-only authentication, client secrets eller certifikatbaseret automation.
 
-The script checks for the required Microsoft Graph PowerShell modules when `Run setup` is clicked. If modules are missing, it prompts to install them for the current user:
+Scriptet tjekker disse moduler og kan installere dem for `CurrentUser` efter eksplicit bekræftelse:
 
 - `Microsoft.Graph.Authentication`
 - `Microsoft.Graph.Users`
 - `Microsoft.Graph.Groups`
 - `Microsoft.Graph.Identity.DirectoryManagement`
+- `Microsoft.Graph.Identity.SignIns`
+- `Microsoft.Graph.Identity.Governance`
+- `Az.Accounts`
+- `Az.Resources`
+- `Az.OperationalInsights`
+- `Az.Monitor`
 
-On a blank PC, the script also checks for the NuGet package provider and the default PowerShell Gallery registration, then prompts before setting them up.
+## Nødvendige Microsoft Entra roller
 
-## Graph permissions
+Den indloggede operator skal have roller/rettigheder nok til at oprette brugere, grupper, CA policies, authentication strength policies, directory role assignments og administrative units.
 
-The script requests these delegated Microsoft Graph scopes:
+Typisk kræves en kombination af:
 
-- `Directory.Read.All`
-- `Domain.Read.All`
+- Global Administrator
+- Privileged Role Administrator
+- Conditional Access Administrator
+- Authentication Policy Administrator
+- User Administrator eller tilsvarende rettigheder
+
+Kundens governance kan kræve PIM-aktivering før kørsel.
+
+## Nødvendige Azure roller
+
+Hvis Azure Monitor/Log Analytics skal konfigureres, kræves rettigheder i den valgte subscription, typisk:
+
+- Contributor eller Owner på target resource group/subscription.
+- Monitoring Contributor kan være nødvendig for alert rules/action groups.
+- Log Analytics Contributor kan være nødvendig for workspace-konfiguration.
+
+Hvis monitoring slås fra i GUI'en, bruges Azure-delen ikke.
+
+## Graph permissions/scopes
+
+Scriptet requester disse delegated Graph scopes:
+
 - `User.ReadWrite.All`
 - `Group.ReadWrite.All`
-- `RoleManagement.Read.Directory`
-- `Policy.ReadWrite.Authorization`
+- `Directory.ReadWrite.All`
+- `RoleManagement.ReadWrite.Directory`
+- `Policy.Read.All`
+- `Policy.ReadWrite.ConditionalAccess`
+- `Policy.ReadWrite.AuthenticationMethod`
+- `UserAuthenticationMethod.Read.All`
+- `Organization.Read.All`
 
-`Policy.ReadWrite.Authorization` is required when disabling administrator SSPR through the authorization policy endpoint.
-`RoleManagement.Read.Directory` is used to confirm Global Administrator role membership.
+Admin consent kan være nødvendig i kundens tenant.
 
-Microsoft references:
+## Sådan køres scriptet
 
-- [Microsoft Graph PowerShell authentication](https://learn.microsoft.com/powershell/microsoftgraph/authentication-commands)
-- [Update authorizationPolicy](https://learn.microsoft.com/graph/api/authorizationpolicy-update)
-- [authorizationPolicy resource type](https://learn.microsoft.com/graph/api/resources/authorizationpolicy)
-
-## Usage
-
-Run the script from PowerShell:
+Åbn Windows PowerShell 5.1 og kør:
 
 ```powershell
-.\Invoke-EntraBreakglassSetup.ps1
-```
-
-If execution policy blocks local scripts, use a process-scoped bypass for this PowerShell window only:
-
-```powershell
+Set-Location "C:\Users\jop\OneDrive - netIP\Dokumenter\GitHub\M365\Entra-Breakglass-Setup"
 Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
-.\Invoke-EntraBreakglassSetup.ps1
+.\BreakGlassConfigurator.ps1
 ```
 
-Recommended first run:
+Til lab uden tenant-ændringer:
 
-1. Enter both breakglass UPNs or prefixes, for example `svr_ea01` and `svr_ea02`, or use one of the preset buttons.
-2. Use `Save account names` if you want the selected names written to the run log immediately.
-3. Keep `Run in current terminal` enabled so sign-in prompts stay attached to the PowerShell session that launched the GUI.
-4. Leave `Fallback: device code sign-in` disabled unless native browser sign-in cannot open.
-5. Keep `Report mode (no changes)` enabled.
-6. Review the GUI log and generated report.
-7. Run again with report mode disabled when the planned actions are correct.
+```powershell
+.\BreakGlassConfigurator.ps1 -Mock
+```
 
-## Important behavior
+Til plan/report uden apply er `Dry-run/NoApply` slået til som standard i GUI'en. Fjern først fluebenet, når planen er gennemgået og du vil foretage ændringer.
 
-- The script never deletes existing users, groups, or Conditional Access policies.
-- Conditional Access policies are not modified by this script.
-- You must manually exclude `CA-BreakGlassExclude` from every relevant Conditional Access policy.
-- Administrator SSPR cannot be disabled only for the two breakglass accounts. The setting applies tenant-wide to administrators in administrator roles.
-- Temporary passwords for newly created accounts are written only to the confidential HTML report and are never written to normal logs.
+## Wizard-flow
 
-## Manual steps to complete
+1. Gennemgå velkomst og sikkerhedsbekræftelse.
+2. Connect til Microsoft Graph.
+3. Connect til Azure, medmindre monitoring er slået fra.
+4. Kør pre-check.
+5. Udfyld konfiguration.
+6. Byg dry-run plan og eksporter den efter behov.
+7. Apply configuration.
+8. Registrer FIDO2/FIDO keys manuelt for begge konti.
+9. Kør FIDO2-validering og endelig validering.
+10. Åbn outputmappen og gennemgå rapporterne.
 
-- Register one separate FIDO2 security key per breakglass account.
-- Store the FIDO2 keys physically separated and securely.
-- Exclude `CA-BreakGlassExclude` from all Conditional Access policies.
-- Configure alerting on sign-in for both breakglass accounts.
-- Test the accounts periodically.
-- Never use the accounts for daily administration.
+## Output
 
-## Output folders
+Hver kørsel skriver til:
 
-- `logs`: timestamped run logs.
-- `reports`: generated confidential HTML reports.
+```text
+.\Output\BreakGlassConfig-<TenantId>-<yyyyMMdd-HHmmss>\
+```
+
+Mappen kan indeholde:
+
+- `plan.json`
+- `result.json`
+- `report.html`
+- `app.log`
+- Conditional Access backups, hvis eksisterende policies patches.
+
+Adgangskoder, tokens og secrets skrives ikke til log, JSON eller HTML-rapport.
+
+## Manuel FIDO2 opsætning
+
+Version 1 automatiserer ikke FIDO2/FIDO key enrollment. Konsulenten skal manuelt:
+
+- Registrere en separat FIDO2/FIDO key for hver konto.
+- Sikre at hver key er unik og fysisk adskilt.
+- Følge kundens godkendte nødprocedure for opbevaring.
+- Teste login for hver konto.
+- Køre FIDO2-validering i værktøjet efter enrollment.
+
+## Kendte begrænsninger
+
+- Ingen Sentinel eller SentinelOne integration i version 1.
+- Ingen PIM-konfiguration i version 1.
+- Ingen automatisk rollback.
+- FIDO2 enrollment, PIN, fysisk key-håndtering og password manager-processer er manuelle.
+- Authentication strength og enkelte diagnostic setting endpoints kan ændre sig i Graph/Azure. Scriptet logger fejl pænt og fortsætter hvor det er sikkert.
+- Worker-processen kan vise separat Graph/Azure login, fordi PowerShell auth-kontekst ikke sikkert kan flyttes mellem processer.
+
+## Foreslået lab-test
+
+1. Start i `-Mock` mode og gennemgå hele GUI'en.
+2. Kør i en testtenant med `Dry-run/NoApply` slået til.
+3. Gennemgå `plan.json` og `report.html`.
+4. Kør apply med CA policy state `reportOnly`.
+5. Bekræft brugere, gruppe, GA assignments, RMAU og CA policy i Entra admin center.
+6. Registrer FIDO2 keys manuelt.
+7. Kør FIDO2-validering.
+8. Test sign-in alerts og audit/change alerts.
+9. Skift først CA policy til `enabled`, når rapport og manuelle tests er godkendt.

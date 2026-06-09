@@ -1,2 +1,4 @@
-logs/
-reports/
+Output/
+*.log
+app-startup.log
+worker-config.json

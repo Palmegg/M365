@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="da">
+<head>
+  <meta charset="utf-8">
+  <title>CONFIDENTIAL - NetIP Entra Break Glass Configurator</title>
+  <style>
+    body { font-family: Segoe UI, Arial, sans-serif; margin: 32px; color: #111827; line-height: 1.45; }
+    .banner { background: #7f1d1d; color: #fff; padding: 14px 18px; font-size: 22px; font-weight: 700; letter-spacing: 1px; }
+    .warning { border: 2px solid #b45309; background: #fffbeb; padding: 14px 18px; margin: 18px 0; }
+    h2 { border-bottom: 1px solid #d1d5db; padding-bottom: 6px; margin-top: 28px; }
+    table { border-collapse: collapse; width: 100%; margin: 10px 0 18px 0; }
+    th, td { border: 1px solid #d1d5db; padding: 8px 10px; text-align: left; vertical-align: top; }
+    th { background: #f3f4f6; }
+  </style>
+</head>
+<body>
+  <div class="banner">CONFIDENTIAL</div>
+  <h1>NetIP Entra Break Glass Configurator</h1>
+  <div class="warning">Sample template only. The generated report is written to the Output folder during execution.</div>
+  <h2>Tenant</h2>
+  <table>
+    <tr><th>Tenant ID</th><td>{{TenantId}}</td></tr>
+    <tr><th>Tenant navn</th><td>{{TenantDisplayName}}</td></tr>
+    <tr><th>Timestamp</th><td>{{Timestamp}}</td></tr>
+  </table>
+  <h2>Objekter</h2>
+  <table>
+    <tr><th>Brugere</th><td>{{Users}}</td></tr>
+    <tr><th>Gruppe</th><td>{{Group}}</td></tr>
+    <tr><th>RMAU</th><td>{{RMAU}}</td></tr>
+    <tr><th>Conditional Access</th><td>{{ConditionalAccess}}</td></tr>
+  </table>
+</body>
+</html>
