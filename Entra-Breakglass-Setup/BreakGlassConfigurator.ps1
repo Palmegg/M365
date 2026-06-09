@@ -25,7 +25,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 $script:AppName = 'NetIP Entra Break Glass Configurator'
-$script:AppVersion = '1.0.8'
+$script:AppVersion = '1.0.9'
 $script:ProjectRoot = Split-Path -Parent $PSCommandPath
 if ([string]::IsNullOrWhiteSpace($script:ProjectRoot)) {
     $script:ProjectRoot = (Get-Location).Path
@@ -93,6 +93,8 @@ $script:State = [ordered]@{
     AzureAccount                 = ''
     AzureSubscriptionId          = ''
     AzureSubscriptionName        = ''
+    LastAzureSubscriptionMissing = $false
+    LastConnectionError          = ''
     OutputFolder                 = ''
     Plan                         = $null
     Result                       = $null
@@ -584,6 +586,10 @@ function Start-ConnectionWorker {
         return
     }
 
+    $script:State['LastAzureSubscriptionMissing'] = $false
+    $script:State['LastConnectionError'] = ''
+    Update-MonitoringUi
+
     $folder = Join-Path -Path $script:DefaultOutputRoot -ChildPath ('Connection-{0}' -f (Get-Date -Format 'yyyyMMdd-HHmmss'))
     New-Item -ItemType Directory -Force -Path $folder | Out-Null
     $script:ConnectionWorkerConfigFile = Join-Path -Path $folder -ChildPath 'connection-worker-config.json'
@@ -647,6 +653,7 @@ function Invoke-ConnectionWorkerMode {
         ExistingCandidates    = @()
         GlobalAdminUsers      = @()
         AzureError            = ''
+        AzureSubscriptionMissing = $false
         Error                 = ''
     }
 
@@ -732,6 +739,9 @@ function Invoke-ConnectionWorkerMode {
             catch {
                 $result['AzureConnected'] = $false
                 $result['AzureError'] = ConvertTo-RedactedError $_
+                if ([string] $result['AzureError'] -match 'ingen tilgængelige Azure subscriptions|kræver en eksisterende Azure subscription') {
+                    $result['AzureSubscriptionMissing'] = $true
+                }
                 Write-DetailedError -Message 'Azure forbindelse fejlede.' -ErrorRecord $_
 
                 throw
@@ -747,6 +757,9 @@ function Invoke-ConnectionWorkerMode {
     }
     catch {
         $result['Error'] = ConvertTo-RedactedError $_
+        if ([string] $result['Error'] -match 'ingen tilgængelige Azure subscriptions|kræver en eksisterende Azure subscription') {
+            $result['AzureSubscriptionMissing'] = $true
+        }
         Export-JsonSafe -InputObject $result -Path $resultPath -Depth 20 | Out-Null
         Write-DetailedError -Message 'Connection-worker fejlede.' -ErrorRecord $_
         Write-Host ''
@@ -3228,10 +3241,19 @@ function Update-MonitoringUi {
     $useExisting = [bool] $script:Ui.UseExistingWorkspace.IsChecked
     if ($script:Ui.ContainsKey('MonitoringConnectionRequirement') -and $script:Ui.MonitoringConnectionRequirement) {
         if ($monitoringEnabled) {
-            $script:Ui.MonitoringConnectionRequirement.Text = 'Slået til: forbindelsestrinnet skal bruge både Microsoft Graph og Azure Resource Manager med valgt subscription.'
-            if ($script:Ui.ContainsKey('ConnectAllButton') -and $script:Ui.ConnectAllButton) {
-                $script:Ui.ConnectAllButton.Content = 'Forbind til Graph + Azure'
-                $script:Ui.ConnectAllButton.Width = 190
+            if ([bool] $script:State.LastAzureSubscriptionMissing) {
+                $script:Ui.MonitoringConnectionRequirement.Text = 'Azure subscription mangler: opret eller tilknyt en subscription i Azure Portal, vent til den er aktiv, og tryk Prøv igen.'
+                if ($script:Ui.ContainsKey('ConnectAllButton') -and $script:Ui.ConnectAllButton) {
+                    $script:Ui.ConnectAllButton.Content = 'Prøv igen: Graph + Azure'
+                    $script:Ui.ConnectAllButton.Width = 210
+                }
+            }
+            else {
+                $script:Ui.MonitoringConnectionRequirement.Text = 'Slået til: forbindelsestrinnet skal bruge både Microsoft Graph og Azure Resource Manager med valgt subscription.'
+                if ($script:Ui.ContainsKey('ConnectAllButton') -and $script:Ui.ConnectAllButton) {
+                    $script:Ui.ConnectAllButton.Content = 'Forbind til Graph + Azure'
+                    $script:Ui.ConnectAllButton.Width = 190
+                }
             }
         }
         else {
@@ -4133,6 +4155,12 @@ function Start-BreakGlassWizard {
                             $script:State['AzureAccount'] = [string] $connectionResult.AzureAccount
                             $script:State['AzureSubscriptionId'] = [string] $connectionResult.AzureSubscriptionId
                             $script:State['AzureSubscriptionName'] = [string] $connectionResult.AzureSubscriptionName
+                            $script:State['LastAzureSubscriptionMissing'] = [bool] (Get-ObjectPropertyValue -InputObject $connectionResult -Name 'AzureSubscriptionMissing')
+                            $script:State['LastConnectionError'] = if ($connectionResult.Error) { [string] $connectionResult.Error } elseif ($connectionResult.AzureError) { [string] $connectionResult.AzureError } else { '' }
+                            if ($script:State.AzureConnected) {
+                                $script:State['LastAzureSubscriptionMissing'] = $false
+                                $script:State['LastConnectionError'] = ''
+                            }
                         }
                         Update-ConnectionStatusUi
                         if ($requestedGraph) {
@@ -4150,7 +4178,12 @@ function Start-BreakGlassWizard {
                         }
                         else {
                             $errorText = if ($connectionResult.Error) { [string] $connectionResult.Error } else { "exit code $connectionExitCode" }
-                            Set-UiStatus -Message ("Connection-worker fejlede: {0}" -f $errorText)
+                            if ($requestedAzure -and [bool] (Get-ObjectPropertyValue -InputObject $connectionResult -Name 'AzureSubscriptionMissing')) {
+                                Set-UiStatus -Message 'Azure subscription mangler. Opret/tilknyt en subscription, og tryk Prøv igen på forbindelsesknappen.'
+                            }
+                            else {
+                                Set-UiStatus -Message ("Connection-worker fejlede: {0}" -f $errorText)
+                            }
                         }
                     }
                     catch {
