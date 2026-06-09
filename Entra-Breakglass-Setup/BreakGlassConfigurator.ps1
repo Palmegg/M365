@@ -25,7 +25,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 $script:AppName = 'NetIP Entra Break Glass Configurator'
-$script:AppVersion = '1.0.0'
+$script:AppVersion = '1.0.1'
 $script:ProjectRoot = Split-Path -Parent $PSCommandPath
 if ([string]::IsNullOrWhiteSpace($script:ProjectRoot)) {
     $script:ProjectRoot = (Get-Location).Path
@@ -1245,7 +1245,8 @@ function Ensure-BreakGlassUser {
     $existing = Get-BreakGlassUser -UserPrincipalName $upn
     if ($existing) {
         Write-AppLog -Level PASS -Message "Bruger findes: $upn"
-        if ($existing.accountEnabled -ne $true) {
+        $existingAccountEnabled = Get-ObjectPropertyValue -InputObject $existing -Name 'accountEnabled'
+        if ($existingAccountEnabled -ne $true) {
             Write-AppLog -Level WARN -Message "Brugeren findes men er ikke enabled: $upn"
         }
         return $existing
@@ -1475,29 +1476,38 @@ function Find-ExistingEmergencyAccessCandidates {
         $filter = [uri]::EscapeDataString("roleDefinitionId eq '$($gaRole.id)'")
         $assignments = @(Invoke-GraphGetAllPages -Uri "https://graph.microsoft.com/v1.0/roleManagement/directory/roleAssignments?`$filter=$filter")
         foreach ($assignment in $assignments) {
-            $principal = Get-DirectoryObjectSummary -ObjectId ([string] $assignment.principalId)
+            $principal = Get-DirectoryObjectSummary -ObjectId ([string] (Get-ObjectPropertyValue -InputObject $assignment -Name 'principalId'))
             if (-not $principal) { continue }
-            $odataType = [string] $principal.'@odata.type'
+            $principalId = [string] (Get-ObjectPropertyValue -InputObject $principal -Name 'id')
+            $principalDisplayName = [string] (Get-ObjectPropertyValue -InputObject $principal -Name 'displayName')
+            $principalUpn = [string] (Get-ObjectPropertyValue -InputObject $principal -Name 'userPrincipalName')
+            $principalAccountEnabled = Get-ObjectPropertyValue -InputObject $principal -Name 'accountEnabled'
+            $principalIsAssignableToRole = Get-ObjectPropertyValue -InputObject $principal -Name 'isAssignableToRole'
+            $odataType = [string] (Get-ObjectPropertyValue -InputObject $principal -Name '@odata.type')
             if ($odataType -like '*group') {
-                Add-DiscoveryCandidate -Candidates $candidates -Seen $seen -Source 'Global Administrator assignment' -Type 'Group' -DisplayName $principal.displayName -UserPrincipalName '' -ObjectId $principal.id -Role 'Global Administrator' -Notes ('Group has GA assignment. isAssignableToRole={0}' -f $principal.isAssignableToRole)
+                Add-DiscoveryCandidate -Candidates $candidates -Seen $seen -Source 'Global Administrator assignment' -Type 'Group' -DisplayName $principalDisplayName -UserPrincipalName '' -ObjectId $principalId -Role 'Global Administrator' -Notes ('Group has GA assignment. isAssignableToRole={0}' -f $principalIsAssignableToRole)
                 try {
-                    $members = @(Invoke-GraphGetAllPages -Uri "https://graph.microsoft.com/v1.0/groups/$($principal.id)/members?`$select=id,displayName,userPrincipalName,accountEnabled")
+                    $members = @(Invoke-GraphGetAllPages -Uri "https://graph.microsoft.com/v1.0/groups/$principalId/members?`$select=id,displayName,userPrincipalName,accountEnabled")
                     foreach ($member in $members) {
-                        $memberType = [string] $member.'@odata.type'
+                        $memberType = [string] (Get-ObjectPropertyValue -InputObject $member -Name '@odata.type')
                         if ($memberType -like '*user') {
-                            Add-DiscoveryCandidate -Candidates $candidates -Seen $seen -Source "Member of GA group: $($principal.displayName)" -Type 'User' -DisplayName $member.displayName -UserPrincipalName $member.userPrincipalName -ObjectId $member.id -Role 'Global Administrator via group' -Notes ('accountEnabled={0}' -f $member.accountEnabled)
+                            $memberId = [string] (Get-ObjectPropertyValue -InputObject $member -Name 'id')
+                            $memberDisplayName = [string] (Get-ObjectPropertyValue -InputObject $member -Name 'displayName')
+                            $memberUpn = [string] (Get-ObjectPropertyValue -InputObject $member -Name 'userPrincipalName')
+                            $memberAccountEnabled = Get-ObjectPropertyValue -InputObject $member -Name 'accountEnabled'
+                            Add-DiscoveryCandidate -Candidates $candidates -Seen $seen -Source "Member of GA group: $principalDisplayName" -Type 'User' -DisplayName $memberDisplayName -UserPrincipalName $memberUpn -ObjectId $memberId -Role 'Global Administrator via group' -Notes ('accountEnabled={0}' -f $memberAccountEnabled)
                         }
                     }
                 }
                 catch {
-                    Write-AppLog -Level WARN -Message "Kunne ikke læse medlemmer af GA-gruppen $($principal.displayName): $(ConvertTo-RedactedError $_)"
+                    Write-AppLog -Level WARN -Message "Kunne ikke læse medlemmer af GA-gruppen ${principalDisplayName}: $(ConvertTo-RedactedError $_)"
                 }
             }
             elseif ($odataType -like '*user') {
-                Add-DiscoveryCandidate -Candidates $candidates -Seen $seen -Source 'Direct Global Administrator assignment' -Type 'User' -DisplayName $principal.displayName -UserPrincipalName $principal.userPrincipalName -ObjectId $principal.id -Role 'Global Administrator' -Notes ('accountEnabled={0}' -f $principal.accountEnabled)
+                Add-DiscoveryCandidate -Candidates $candidates -Seen $seen -Source 'Direct Global Administrator assignment' -Type 'User' -DisplayName $principalDisplayName -UserPrincipalName $principalUpn -ObjectId $principalId -Role 'Global Administrator' -Notes ('accountEnabled={0}' -f $principalAccountEnabled)
             }
             else {
-                Add-DiscoveryCandidate -Candidates $candidates -Seen $seen -Source 'Global Administrator assignment' -Type $odataType -DisplayName $principal.displayName -UserPrincipalName '' -ObjectId $principal.id -Role 'Global Administrator' -Notes 'Non-user principal'
+                Add-DiscoveryCandidate -Candidates $candidates -Seen $seen -Source 'Global Administrator assignment' -Type $odataType -DisplayName $principalDisplayName -UserPrincipalName '' -ObjectId $principalId -Role 'Global Administrator' -Notes 'Non-user principal'
             }
         }
     }
@@ -1509,7 +1519,7 @@ function Find-ExistingEmergencyAccessCandidates {
                 $upn = ConvertTo-BreakGlassUpn -Prefix $prefix -OnMicrosoftDomain $targetDomain
                 $targetUser = Get-BreakGlassUser -UserPrincipalName $upn
                 if ($targetUser) {
-                    Add-DiscoveryCandidate -Candidates $candidates -Seen $seen -Source 'Configured target account exists' -Type 'User' -DisplayName $targetUser.displayName -UserPrincipalName $targetUser.userPrincipalName -ObjectId $targetUser.id -Role '' -Notes ('accountEnabled={0}' -f $targetUser.accountEnabled)
+                    Add-DiscoveryCandidate -Candidates $candidates -Seen $seen -Source 'Configured target account exists' -Type 'User' -DisplayName ([string](Get-ObjectPropertyValue -InputObject $targetUser -Name 'displayName')) -UserPrincipalName ([string](Get-ObjectPropertyValue -InputObject $targetUser -Name 'userPrincipalName')) -ObjectId ([string](Get-ObjectPropertyValue -InputObject $targetUser -Name 'id')) -Role '' -Notes ('accountEnabled={0}' -f (Get-ObjectPropertyValue -InputObject $targetUser -Name 'accountEnabled'))
                 }
             }
             catch {
@@ -1531,7 +1541,7 @@ function Find-ExistingEmergencyAccessCandidates {
             $filter = [uri]::EscapeDataString($filterText)
             $matches = @(Invoke-GraphGetAllPages -Uri "https://graph.microsoft.com/v1.0/users?`$filter=$filter&`$select=id,displayName,userPrincipalName,accountEnabled")
             foreach ($match in $matches) {
-                Add-DiscoveryCandidate -Candidates $candidates -Seen $seen -Source "Name/UPN pattern: $filterText" -Type 'User' -DisplayName $match.displayName -UserPrincipalName $match.userPrincipalName -ObjectId $match.id -Role '' -Notes ('accountEnabled={0}' -f $match.accountEnabled)
+                Add-DiscoveryCandidate -Candidates $candidates -Seen $seen -Source "Name/UPN pattern: $filterText" -Type 'User' -DisplayName ([string](Get-ObjectPropertyValue -InputObject $match -Name 'displayName')) -UserPrincipalName ([string](Get-ObjectPropertyValue -InputObject $match -Name 'userPrincipalName')) -ObjectId ([string](Get-ObjectPropertyValue -InputObject $match -Name 'id')) -Role '' -Notes ('accountEnabled={0}' -f (Get-ObjectPropertyValue -InputObject $match -Name 'accountEnabled'))
             }
         }
         catch {
@@ -1551,7 +1561,7 @@ function Find-ExistingEmergencyAccessCandidates {
             $filter = [uri]::EscapeDataString($filterText)
             $matches = @(Invoke-GraphGetAllPages -Uri "https://graph.microsoft.com/v1.0/groups?`$filter=$filter&`$select=id,displayName,mailNickname,securityEnabled,isAssignableToRole")
             foreach ($match in $matches) {
-                Add-DiscoveryCandidate -Candidates $candidates -Seen $seen -Source "Group name pattern: $filterText" -Type 'Group' -DisplayName $match.displayName -UserPrincipalName '' -ObjectId $match.id -Role '' -Notes ('securityEnabled={0}; isAssignableToRole={1}' -f $match.securityEnabled, $match.isAssignableToRole)
+                Add-DiscoveryCandidate -Candidates $candidates -Seen $seen -Source "Group name pattern: $filterText" -Type 'Group' -DisplayName ([string](Get-ObjectPropertyValue -InputObject $match -Name 'displayName')) -UserPrincipalName '' -ObjectId ([string](Get-ObjectPropertyValue -InputObject $match -Name 'id')) -Role '' -Notes ('securityEnabled={0}; isAssignableToRole={1}' -f (Get-ObjectPropertyValue -InputObject $match -Name 'securityEnabled'), (Get-ObjectPropertyValue -InputObject $match -Name 'isAssignableToRole'))
             }
         }
         catch {
@@ -1581,28 +1591,32 @@ function Find-GlobalAdministratorUsers {
     $filter = [uri]::EscapeDataString("roleDefinitionId eq '$($gaRole.id)'")
     $assignments = @(Invoke-GraphGetAllPages -Uri "https://graph.microsoft.com/v1.0/roleManagement/directory/roleAssignments?`$filter=$filter")
     foreach ($assignment in $assignments) {
-        $principal = Get-DirectoryObjectSummary -ObjectId ([string] $assignment.principalId)
+        $principal = Get-DirectoryObjectSummary -ObjectId ([string] (Get-ObjectPropertyValue -InputObject $assignment -Name 'principalId'))
         if (-not $principal) { continue }
-        $odataType = [string] $principal.'@odata.type'
+        $principalId = [string] (Get-ObjectPropertyValue -InputObject $principal -Name 'id')
+        $principalDisplayName = [string] (Get-ObjectPropertyValue -InputObject $principal -Name 'displayName')
+        $principalUpn = [string] (Get-ObjectPropertyValue -InputObject $principal -Name 'userPrincipalName')
+        $odataType = [string] (Get-ObjectPropertyValue -InputObject $principal -Name '@odata.type')
         if ($odataType -like '*user') {
-            if (-not $seen.ContainsKey($principal.id)) {
-                $seen[$principal.id] = $true
-                $users.Add([pscustomobject]@{ DisplayName = $principal.displayName; UserPrincipalName = $principal.userPrincipalName; Id = $principal.id; Source = 'Direct Global Administrator' }) | Out-Null
+            if (-not $seen.ContainsKey($principalId)) {
+                $seen[$principalId] = $true
+                $users.Add([pscustomobject]@{ DisplayName = $principalDisplayName; UserPrincipalName = $principalUpn; Id = $principalId; Source = 'Direct Global Administrator' }) | Out-Null
             }
         }
         elseif ($odataType -like '*group') {
             try {
-                $members = @(Invoke-GraphGetAllPages -Uri "https://graph.microsoft.com/v1.0/groups/$($principal.id)/members?`$select=id,displayName,userPrincipalName,accountEnabled")
+                $members = @(Invoke-GraphGetAllPages -Uri "https://graph.microsoft.com/v1.0/groups/$principalId/members?`$select=id,displayName,userPrincipalName,accountEnabled")
                 foreach ($member in $members) {
-                    $memberType = [string] $member.'@odata.type'
-                    if ($memberType -like '*user' -and -not $seen.ContainsKey($member.id)) {
-                        $seen[$member.id] = $true
-                        $users.Add([pscustomobject]@{ DisplayName = $member.displayName; UserPrincipalName = $member.userPrincipalName; Id = $member.id; Source = "Member of GA group: $($principal.displayName)" }) | Out-Null
+                    $memberType = [string] (Get-ObjectPropertyValue -InputObject $member -Name '@odata.type')
+                    $memberId = [string] (Get-ObjectPropertyValue -InputObject $member -Name 'id')
+                    if ($memberType -like '*user' -and -not $seen.ContainsKey($memberId)) {
+                        $seen[$memberId] = $true
+                        $users.Add([pscustomobject]@{ DisplayName = ([string](Get-ObjectPropertyValue -InputObject $member -Name 'displayName')); UserPrincipalName = ([string](Get-ObjectPropertyValue -InputObject $member -Name 'userPrincipalName')); Id = $memberId; Source = "Member of GA group: $principalDisplayName" }) | Out-Null
                     }
                 }
             }
             catch {
-                Write-AppLog -Level WARN -Message "Kunne ikke hente medlemmer af GA-gruppen $($principal.displayName): $(ConvertTo-RedactedError $_)"
+                Write-AppLog -Level WARN -Message "Kunne ikke hente medlemmer af GA-gruppen ${principalDisplayName}: $(ConvertTo-RedactedError $_)"
             }
         }
     }
@@ -2381,7 +2395,14 @@ function Invoke-BreakGlassConfiguration {
     $result | Add-Member -MemberType NoteProperty -Name Operator -Value $script:State['GraphAccount']
     $result | Add-Member -MemberType NoteProperty -Name OnMicrosoftDomain -Value $domain
     $result | Add-Member -MemberType NoteProperty -Name ExistingCandidates -Value ([object]([object[]]@($existingCandidates)))
-    $resultUsers = [object[]]@($users | Select-Object id,userPrincipalName,displayName,accountEnabled)
+    $resultUsers = [object[]]@($users | ForEach-Object {
+        [pscustomobject]@{
+            id                = [string] (Get-ObjectPropertyValue -InputObject $_ -Name 'id')
+            userPrincipalName = [string] (Get-ObjectPropertyValue -InputObject $_ -Name 'userPrincipalName')
+            displayName       = [string] (Get-ObjectPropertyValue -InputObject $_ -Name 'displayName')
+            accountEnabled    = Get-ObjectPropertyValue -InputObject $_ -Name 'accountEnabled'
+        }
+    })
     $result | Add-Member -MemberType NoteProperty -Name Users -Value ([object]$resultUsers)
     $result | Add-Member -MemberType NoteProperty -Name Group -Value $group
     $result | Add-Member -MemberType NoteProperty -Name Membership -Value ([object]([object[]]@($membership)))
@@ -2425,9 +2446,12 @@ function Invoke-Validation {
     $items = @()
     Write-AppLog -Message 'Starter samlet validering.'
     foreach ($user in $Users) {
-        $items += [pscustomobject]@{ Check = "Bruger findes: $($user.userPrincipalName)"; Status = if ($user.id) { 'Passed' } else { 'Failed' }; Detail = $user.id }
-        $items += [pscustomobject]@{ Check = "Bruger enabled: $($user.userPrincipalName)"; Status = if ($user.accountEnabled -eq $true) { 'Passed' } else { 'Warning' }; Detail = $user.accountEnabled }
-        $items += [pscustomobject]@{ Check = "onmicrosoft.com UPN: $($user.userPrincipalName)"; Status = if ($user.userPrincipalName -like '*@*.onmicrosoft.com') { 'Passed' } else { 'Failed' }; Detail = $user.userPrincipalName }
+        $userId = [string] (Get-ObjectPropertyValue -InputObject $user -Name 'id')
+        $userUpn = [string] (Get-ObjectPropertyValue -InputObject $user -Name 'userPrincipalName')
+        $userAccountEnabled = Get-ObjectPropertyValue -InputObject $user -Name 'accountEnabled'
+        $items += [pscustomobject]@{ Check = "Bruger findes: $userUpn"; Status = if ($userId) { 'Passed' } else { 'Failed' }; Detail = $userId }
+        $items += [pscustomobject]@{ Check = "Bruger enabled: $userUpn"; Status = if ($userAccountEnabled -eq $true) { 'Passed' } else { 'Warning' }; Detail = $userAccountEnabled }
+        $items += [pscustomobject]@{ Check = "onmicrosoft.com UPN: $userUpn"; Status = if ($userUpn -like '*@*.onmicrosoft.com') { 'Passed' } else { 'Failed' }; Detail = $userUpn }
     }
     $items += [pscustomobject]@{ Check = 'Break-glass gruppe findes'; Status = if ($Group.id) { 'Passed' } else { 'Failed' }; Detail = $Group.displayName }
     $items += [pscustomobject]@{ Check = 'Global Administrator på break-glass gruppe'; Status = if (@($RoleAssignments | Where-Object { $_.Role -eq 'Global Administrator' -and $_.Status -match 'Assigned|AlreadyAssigned|Planned|PlannedOrMock' }).Count -ge 1) { 'Passed' } else { 'Warning' }; Detail = (@($RoleAssignments | ForEach-Object { "$($_.Principal):$($_.Status)" }) -join ', ') }
@@ -3425,10 +3449,19 @@ function Start-BreakGlassWizard {
             <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
-        <StackPanel Grid.Row="0" Margin="0,0,0,12">
-            <TextBlock Text="NetIP Entra Break Glass Configurator" FontSize="24" FontWeight="SemiBold" Foreground="#111827"/>
-            <TextBlock Text="Dansk wizard til sikker og ensartet break-glass baseline i Microsoft Entra tenants." Foreground="#4B5563" Margin="0,4,0,0"/>
-        </StackPanel>
+        <Grid Grid.Row="0" Margin="0,0,0,12">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+            <StackPanel Grid.Column="0">
+                <TextBlock Text="NetIP Entra Break Glass Configurator" FontSize="24" FontWeight="SemiBold" Foreground="#111827"/>
+                <TextBlock Text="Dansk wizard til sikker og ensartet break-glass baseline i Microsoft Entra tenants." Foreground="#4B5563" Margin="0,4,0,0"/>
+            </StackPanel>
+            <Border Grid.Column="1" BorderBrush="#CBD5E1" BorderThickness="1" Background="#FFFFFF" CornerRadius="4" Padding="10,5" VerticalAlignment="Top">
+                <TextBlock x:Name="VersionBadge" FontWeight="SemiBold" Foreground="#374151"/>
+            </Border>
+        </Grid>
         <TabControl x:Name="WizardTabs" Grid.Row="1">
             <TabItem Header="1. Start">
                 <ScrollViewer VerticalScrollBarVisibility="Auto">
@@ -3663,7 +3696,7 @@ function Start-BreakGlassWizard {
     $reader = New-Object System.Xml.XmlNodeReader $xaml
     $script:MainWindow = [Windows.Markup.XamlReader]::Load($reader)
     foreach ($name in @(
-        'UnderstandRisk','ReportModeRadio','ConfigureModeRadio','ConnectGraphButton','ConnectAzureButton','ConnectAllButton','GraphAccount','TenantId','TenantName','OnMicrosoftDomain','AzureAccount','SubscriptionIdDetected','ConnectionStatus','GraphScopesRequested',
+        'VersionBadge','UnderstandRisk','ReportModeRadio','ConfigureModeRadio','ConnectGraphButton','ConnectAzureButton','ConnectAllButton','GraphAccount','TenantId','TenantName','OnMicrosoftDomain','AzureAccount','SubscriptionIdDetected','ConnectionStatus','GraphScopesRequested',
         'RunDiscoveryButton','DiscoverySummary','DiscoveryList','UserPrefix1','UserPrefix2','DisplayName1','DisplayName2','GroupDisplayName','RmauDisplayName','RmauAdminGroupDisplayName','RmauAdminPickerPanel','AddRmauAdminButton','RmauAdminPickerStatus','AuthStrengthName','CaPolicyName','CaState',
         'ExcludeExistingCa','AaguidInputPanel','AddAaguidButton','ModeStatusText','DisableMonitoring','UseExistingWorkspace','SubscriptionIdLabel','SubscriptionId','ResourceGroupName','WorkspaceName','AzureRegion','DiagnosticSettingName',
         'ActionGroupName','AlertEmails','CreateSignInAlert','CreateAuditAlert','BuildPlanButton','ExportPlanButton','ApplyButton','PlanText','ProgressBar','ExecutionLog','OpenSecurityInfoButton',
@@ -3672,6 +3705,7 @@ function Start-BreakGlassWizard {
     $script:Ui[$name] = $script:MainWindow.FindName($name)
     }
     $script:LogTextBox = $script:Ui.ExecutionLog
+    $script:Ui.VersionBadge.Text = "v$($script:AppVersion)"
     $script:Ui.GraphScopesRequested.Text = (($script:RequiredGraphScopes | ForEach-Object { "- $_" }) -join [Environment]::NewLine)
     Add-AaguidInputRow
     Add-RmauAdminPickerRow
