@@ -356,10 +356,53 @@ function Install-GraphModulesAtTargetVersion {
     }
 
     $targetVersion = [string] $repairItems[0].TargetVersion
-    foreach ($module in $repairItems.Name) {
+    foreach ($module in @($repairItems | ForEach-Object { $_.Name })) {
         Write-AppLog -Message "Installerer/opdaterer Graph modul $module til version $targetVersion"
         Write-Host "Installerer/opdaterer Graph modul $module til version $targetVersion" -ForegroundColor Cyan
         Install-Module -Name $module -RequiredVersion $targetVersion -Scope CurrentUser -Repository PSGallery -AllowClobber -Force -ErrorAction Stop
+    }
+}
+
+function Initialize-ModuleInstallerSupport {
+    [CmdletBinding()]
+    param()
+
+    [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
+
+    foreach ($module in @('PackageManagement', 'PowerShellGet')) {
+        try {
+            Import-Module $module -ErrorAction Stop
+            Write-AppLog -Message "Importerede bootstrap-modul: $module"
+        }
+        catch {
+            Write-AppLog -Level WARN -Message "Kunne ikke importere bootstrap-modul $module. Forsøger at fortsætte. $(ConvertTo-RedactedError $_)"
+        }
+    }
+
+    try {
+        Get-PackageProvider -Name NuGet -ErrorAction Stop | Out-Null
+        Write-AppLog -Message 'NuGet package provider findes.'
+    }
+    catch {
+        Write-AppLog -Level WARN -Message "NuGet package provider kunne ikke læses. Forsøger installation/bootstrap. $(ConvertTo-RedactedError $_)"
+        try {
+            Install-PackageProvider -Name NuGet -MinimumVersion '2.8.5.201' -Scope CurrentUser -Force -ErrorAction Stop | Out-Null
+            Write-AppLog -Message 'NuGet package provider installeret.'
+        }
+        catch {
+            Write-AppLog -Level WARN -Message "NuGet package provider kunne ikke installeres automatisk. Install-Module forsøges alligevel. $(ConvertTo-RedactedError $_)"
+        }
+    }
+
+    try {
+        $repository = Get-PSRepository -Name PSGallery -ErrorAction Stop
+        if ($repository.InstallationPolicy -ne 'Trusted') {
+            Set-PSRepository -Name PSGallery -InstallationPolicy Trusted -ErrorAction Stop
+            Write-AppLog -Message 'PSGallery blev markeret som Trusted for denne bruger.'
+        }
+    }
+    catch {
+        Write-AppLog -Level WARN -Message "Kunne ikke validere/sætte PSGallery repository policy. $(ConvertTo-RedactedError $_)"
     }
 }
 
@@ -378,10 +421,7 @@ function Install-RequiredModulesWithConsent {
         throw 'Nødvendige moduler mangler, og installation blev afvist.'
     }
 
-    [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
-    if (-not (Get-PackageProvider -Name NuGet -ErrorAction SilentlyContinue)) {
-        Install-PackageProvider -Name NuGet -MinimumVersion '2.8.5.201' -Scope CurrentUser -Force -ErrorAction Stop | Out-Null
-    }
+    Initialize-ModuleInstallerSupport
 
     foreach ($module in $missing.Name) {
         Write-AppLog -Message "Installerer modul: $module"
@@ -453,12 +493,7 @@ function Invoke-ModulePreparationWorkerMode {
         exit 20
     }
 
-    [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
-    if (-not (Get-PackageProvider -Name NuGet -ErrorAction SilentlyContinue)) {
-        Write-AppLog -Message 'Installerer NuGet package provider.'
-        Write-Host 'Installerer NuGet package provider...' -ForegroundColor Cyan
-        Install-PackageProvider -Name NuGet -MinimumVersion '2.8.5.201' -Scope CurrentUser -Force -ErrorAction Stop | Out-Null
-    }
+    Initialize-ModuleInstallerSupport
 
     foreach ($module in $missing.Name) {
         Write-AppLog -Message "Installerer modul: $module"
@@ -584,10 +619,7 @@ function Invoke-ConnectionWorkerMode {
                     if ($answer -notin @('Y','y','YES','Yes','yes','J','j','JA','Ja','ja')) {
                         throw 'Modulinstallation/opdatering blev afvist.'
                     }
-                    [Net.ServicePointManager]::SecurityProtocol = [Net.ServicePointManager]::SecurityProtocol -bor [Net.SecurityProtocolType]::Tls12
-                    if (-not (Get-PackageProvider -Name NuGet -ErrorAction SilentlyContinue)) {
-                        Install-PackageProvider -Name NuGet -MinimumVersion '2.8.5.201' -Scope CurrentUser -Force -ErrorAction Stop | Out-Null
-                    }
+                    Initialize-ModuleInstallerSupport
                     Install-GraphModulesAtTargetVersion -GraphStatus $graphStatus
                     $nonGraphMissing = @($missing | Where-Object { $_.Name -notlike 'Microsoft.Graph.*' })
                     foreach ($module in @($nonGraphMissing | ForEach-Object { $_.Name })) {

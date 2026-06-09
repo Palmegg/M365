@@ -101,6 +101,8 @@ Hvis moduler mangler, eller hvis Microsoft Graph delmoduler er installeret i bla
 
 Graph-moduler skal være version-aligned. En blanding som `Microsoft.Graph.Authentication` 2.37 og `Microsoft.Graph.Groups` 2.31 kan give fejl som `AzureIdentityAccessTokenProvider..ctor method not found`.
 
+Hvis `PackageManagement`/`NuGet` bootstrap fejler, forsøger worker'en at importere `PackageManagement` og `PowerShellGet` eksplicit og fortsætter med `Install-Module`, hvor det er muligt.
+
 Til lab uden tenant-ændringer:
 
 ```powershell
