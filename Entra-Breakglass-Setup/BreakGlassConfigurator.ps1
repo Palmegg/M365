@@ -25,7 +25,8 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 $script:AppName = 'NetIP Entra Break Glass Configurator'
-$script:AppVersion = '1.0.17'
+$script:AppVersion = '1.0.18'
+$script:GraphModulePinnedVersion = [version] '2.31.0'
 $script:ProjectRoot = Split-Path -Parent $PSCommandPath
 if ([string]::IsNullOrWhiteSpace($script:ProjectRoot)) {
     $script:ProjectRoot = (Get-Location).Path
@@ -377,22 +378,7 @@ function Get-GraphModuleTargetVersion {
     [CmdletBinding()]
     param()
 
-    try {
-        $gallery = Find-Module -Name 'Microsoft.Graph.Authentication' -Repository PSGallery -ErrorAction Stop
-        if ($gallery.Version) {
-            return [version] $gallery.Version
-        }
-    }
-    catch {
-        Write-AppLog -Level WARN -Message "Kunne ikke hente seneste Graph version fra PSGallery. Bruger højeste lokalt installerede Graph-version. $(ConvertTo-RedactedError $_)"
-    }
-
-    $local = Get-Module -ListAvailable -Name 'Microsoft.Graph.Authentication' | Sort-Object Version -Descending | Select-Object -First 1
-    if ($local) {
-        return [version] $local.Version
-    }
-
-    return [version] '0.0.0'
+    return $script:GraphModulePinnedVersion
 }
 
 function Get-GraphModuleAlignmentStatus {
@@ -402,14 +388,14 @@ function Get-GraphModuleAlignmentStatus {
     $targetVersion = Get-GraphModuleTargetVersion
     $graphModules = @($script:RequiredGraphModules)
     foreach ($module in $graphModules) {
-        $found = Get-Module -ListAvailable -Name $module | Sort-Object Version -Descending | Select-Object -First 1
-        $version = if ($found) { [version] $found.Version } else { [version] '0.0.0' }
+        $found = Get-Module -ListAvailable -Name $module | Where-Object { [version] $_.Version -eq $targetVersion } | Select-Object -First 1
+        $highest = Get-Module -ListAvailable -Name $module | Sort-Object Version -Descending | Select-Object -First 1
         [pscustomobject]@{
             Name          = $module
             Present       = [bool] $found
-            Version       = if ($found) { [string] $found.Version } else { '' }
+            Version       = if ($found) { [string] $found.Version } elseif ($highest) { [string] $highest.Version } else { '' }
             TargetVersion = [string] $targetVersion
-            NeedsRepair   = (-not $found -or $version -ne $targetVersion)
+            NeedsRepair   = (-not $found)
         }
     }
 }
@@ -504,7 +490,12 @@ function Import-RequiredModules {
 
     foreach ($module in $ModuleName) {
         Write-AppLog -Message "Importerer modul: $module"
-        Import-Module $module -ErrorAction Stop
+        if ($module -like 'Microsoft.Graph.*') {
+            Import-Module $module -RequiredVersion $script:GraphModulePinnedVersion -Force -ErrorAction Stop
+        }
+        else {
+            Import-Module $module -ErrorAction Stop
+        }
     }
 }
 
@@ -795,13 +786,22 @@ function Connect-AppGraph {
         return $script:State
     }
 
-    Import-Module Microsoft.Graph.Authentication -ErrorAction Stop
+    Import-Module Microsoft.Graph.Authentication -RequiredVersion $script:GraphModulePinnedVersion -Force -ErrorAction Stop
     Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null
     [string[]] $requiredScopes = @($script:RequiredGraphScopes)
     Write-AppLog -Message "Forbinder til Microsoft Graph med scopes: $($requiredScopes -join ', ')"
     try {
         Write-AppLog -Message 'Prøver Microsoft Graph native interactive sign-in.'
-        Connect-MgGraph -Scopes $requiredScopes -ContextScope ([Microsoft.Graph.PowerShell.Authentication.ContextScope]::Process) -NoWelcome -ErrorAction Stop | Out-Null
+        $connectParams = @{
+            Scopes       = $requiredScopes
+            ContextScope = ([Microsoft.Graph.PowerShell.Authentication.ContextScope]::Process)
+            NoWelcome    = $true
+            ErrorAction  = 'Stop'
+        }
+        if (-not [string]::IsNullOrWhiteSpace([string] $script:State.TenantId)) {
+            $connectParams['TenantId'] = [string] $script:State.TenantId
+        }
+        Connect-MgGraph @connectParams | Out-Null
     }
     catch {
         Write-DetailedError -Message 'Microsoft Graph native interactive sign-in fejlede.' -ErrorRecord $_
@@ -977,7 +977,20 @@ function Connect-AppAzure {
     }
 
     Import-Module Az.Accounts -ErrorAction Stop
-    Connect-AzAccount -ErrorAction Stop | Out-Null
+    Disable-AzContextAutosave -Scope Process -ErrorAction SilentlyContinue | Out-Null
+    Clear-AzContext -Scope Process -Force -ErrorAction SilentlyContinue | Out-Null
+    $connectParams = @{
+        Scope       = 'Process'
+        Force       = $true
+        ErrorAction = 'Stop'
+    }
+    if (-not [string]::IsNullOrWhiteSpace([string] $script:State.TenantId)) {
+        $connectParams['Tenant'] = [string] $script:State.TenantId
+    }
+    if (-not [string]::IsNullOrWhiteSpace([string] $script:State.GraphAccount)) {
+        $connectParams['AccountId'] = [string] $script:State.GraphAccount
+    }
+    Connect-AzAccount @connectParams | Out-Null
     $context = Resolve-AppAzureSubscriptionContext
     if (-not $context) {
         throw 'Azure context blev ikke returneret.'
@@ -1287,6 +1300,14 @@ function Set-EnsureStatus {
         $Object | Add-Member -MemberType NoteProperty -Name EnsureDetail -Value $Detail -Force
     }
     return $Object
+}
+
+function Test-GraphAuthenticationPromptError {
+    [CmdletBinding()]
+    param([AllowNull()] $ErrorRecord)
+
+    $message = ConvertTo-RedactedError $ErrorRecord
+    return ($message -match 'InteractiveBrowserCredential authentication failed|User canceled authentication|authentication failed|Authentication needed|Please call Connect-MgGraph')
 }
 
 function Get-OnMicrosoftDomain {
@@ -1804,6 +1825,9 @@ function Find-ExistingEmergencyAccessCandidates {
                     }
                 }
                 catch {
+                    if (Test-GraphAuthenticationPromptError $_) {
+                        throw 'Microsoft Graph sessionen mistede authentication under discovery. Luk ekstra loginvinduer og prøv Forbind igen.'
+                    }
                     Write-AppLog -Level WARN -Message "Kunne ikke læse medlemmer af GA-gruppen ${principalDisplayName}: $(ConvertTo-RedactedError $_)"
                 }
             }
@@ -1837,6 +1861,9 @@ function Find-ExistingEmergencyAccessCandidates {
                 }
             }
             catch {
+                if (Test-GraphAuthenticationPromptError $_) {
+                    throw 'Microsoft Graph sessionen mistede authentication under discovery. Luk ekstra loginvinduer og prøv Forbind igen.'
+                }
                 Write-AppLog -Level WARN -Message "Kunne ikke teste konfigureret konto-prefix '$prefix' under discovery: $(ConvertTo-RedactedError $_)"
             }
         }
@@ -1860,6 +1887,9 @@ function Find-ExistingEmergencyAccessCandidates {
             }
         }
         catch {
+            if (Test-GraphAuthenticationPromptError $_) {
+                throw 'Microsoft Graph sessionen mistede authentication under discovery. Luk ekstra loginvinduer og prøv Forbind igen.'
+            }
             Write-AppLog -Level WARN -Message "Discovery filter fejlede '$filterText': $(ConvertTo-RedactedError $_)"
         }
     }
@@ -1880,6 +1910,9 @@ function Find-ExistingEmergencyAccessCandidates {
             }
         }
         catch {
+            if (Test-GraphAuthenticationPromptError $_) {
+                throw 'Microsoft Graph sessionen mistede authentication under discovery. Luk ekstra loginvinduer og prøv Forbind igen.'
+            }
             Write-AppLog -Level WARN -Message "Discovery group filter fejlede '$filterText': $(ConvertTo-RedactedError $_)"
         }
     }
@@ -1931,6 +1964,9 @@ function Find-GlobalAdministratorUsers {
                 }
             }
             catch {
+                if (Test-GraphAuthenticationPromptError $_) {
+                    throw 'Microsoft Graph sessionen mistede authentication under hentning af Global Administrator brugere. Luk ekstra loginvinduer og prøv Forbind igen.'
+                }
                 Write-AppLog -Level WARN -Message "Kunne ikke hente medlemmer af GA-gruppen ${principalDisplayName}: $(ConvertTo-RedactedError $_)"
             }
         }
