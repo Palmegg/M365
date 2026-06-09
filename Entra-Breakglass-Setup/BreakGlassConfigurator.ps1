@@ -25,7 +25,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 $script:AppName = 'NetIP Entra Break Glass Configurator'
-$script:AppVersion = '1.0.6'
+$script:AppVersion = '1.0.7'
 $script:ProjectRoot = Split-Path -Parent $PSCommandPath
 if ([string]::IsNullOrWhiteSpace($script:ProjectRoot)) {
     $script:ProjectRoot = (Get-Location).Path
@@ -3053,7 +3053,7 @@ function Set-UiBusy {
     [CmdletBinding()]
     param([bool] $Busy)
 
-    foreach ($name in @('ConnectAllButton','ConnectGraphButton','ConnectAzureButton','RunDiscoveryButton','BuildPlanButton','ExportPlanButton','ApplyButton','BackButton','NextButton')) {
+    foreach ($name in @('ConnectAllButton','RunDiscoveryButton','BuildPlanButton','ExportPlanButton','ApplyButton','BackButton','NextButton')) {
         if ($script:Ui.ContainsKey($name) -and $script:Ui[$name]) {
             $script:Ui[$name].IsEnabled = -not $Busy
         }
@@ -3218,9 +3218,17 @@ function Update-MonitoringUi {
     if ($script:Ui.ContainsKey('MonitoringConnectionRequirement') -and $script:Ui.MonitoringConnectionRequirement) {
         if ($monitoringEnabled) {
             $script:Ui.MonitoringConnectionRequirement.Text = 'Slået til: forbindelsestrinnet skal bruge både Microsoft Graph og Azure Resource Manager med valgt subscription.'
+            if ($script:Ui.ContainsKey('ConnectAllButton') -and $script:Ui.ConnectAllButton) {
+                $script:Ui.ConnectAllButton.Content = 'Forbind til Graph + Azure'
+                $script:Ui.ConnectAllButton.Width = 190
+            }
         }
         else {
             $script:Ui.MonitoringConnectionRequirement.Text = 'Slået fra: forbindelsestrinnet bruger kun Microsoft Graph.'
+            if ($script:Ui.ContainsKey('ConnectAllButton') -and $script:Ui.ConnectAllButton) {
+                $script:Ui.ConnectAllButton.Content = 'Forbind til Graph'
+                $script:Ui.ConnectAllButton.Width = 150
+            }
         }
     }
     foreach ($name in @('UseExistingWorkspace','ResourceGroupName','WorkspaceName','AzureRegion','DiagnosticSettingName','ActionGroupName','AlertEmails','CreateSignInAlert','CreateAuditAlert')) {
@@ -3609,8 +3617,6 @@ function Start-BreakGlassWizard {
                     </Grid.RowDefinitions>
                     <StackPanel Grid.Row="0" Grid.Column="0" Grid.ColumnSpan="2" Orientation="Horizontal" Margin="0,0,0,10">
                         <Button x:Name="ConnectAllButton" Content="Forbind til Graph + Azure" Height="32" Width="190" Margin="0,0,8,0"/>
-                        <Button x:Name="ConnectGraphButton" Content="Kun Graph" Height="32" Width="110" Margin="0,0,8,0"/>
-                        <Button x:Name="ConnectAzureButton" Content="Kun Azure" Height="32" Width="110"/>
                     </StackPanel>
                     <TextBlock Grid.Row="1" Grid.Column="0" Text="Graph konto" FontWeight="SemiBold"/>
                     <TextBlock x:Name="GraphAccount" Grid.Row="1" Grid.Column="1"/>
@@ -3805,7 +3811,7 @@ function Start-BreakGlassWizard {
     $reader = New-Object System.Xml.XmlNodeReader $xaml
     $script:MainWindow = [Windows.Markup.XamlReader]::Load($reader)
     foreach ($name in @(
-        'VersionBadge','UnderstandRisk','ReportModeRadio','ConfigureModeRadio','ConnectGraphButton','ConnectAzureButton','ConnectAllButton','GraphAccount','TenantId','TenantName','OnMicrosoftDomain','AzureAccount','SubscriptionIdDetected','ConnectionStatus','GraphScopesRequested','MonitoringConnectionRequirement',
+        'VersionBadge','UnderstandRisk','ReportModeRadio','ConfigureModeRadio','ConnectAllButton','GraphAccount','TenantId','TenantName','OnMicrosoftDomain','AzureAccount','SubscriptionIdDetected','ConnectionStatus','GraphScopesRequested','MonitoringConnectionRequirement',
         'RunDiscoveryButton','DiscoverySummary','DiscoveryList','UserPrefix1','UserPrefix2','DisplayName1','DisplayName2','GroupDisplayName','RmauDisplayName','RmauAdminGroupDisplayName','RmauAdminPickerPanel','AddRmauAdminButton','RmauAdminPickerStatus','AuthStrengthName','CaPolicyName','CaState',
         'ExcludeExistingCa','AaguidInputPanel','AddAaguidButton','ModeStatusText','DisableMonitoring','UseExistingWorkspace','SubscriptionIdLabel','SubscriptionId','ResourceGroupName','WorkspaceName','AzureRegion','DiagnosticSettingName',
         'ActionGroupName','AlertEmails','CreateSignInAlert','CreateAuditAlert','BuildPlanButton','ExportPlanButton','ApplyButton','PlanText','ProgressBar','ExecutionLog','OpenSecurityInfoButton',
@@ -3820,40 +3826,6 @@ function Start-BreakGlassWizard {
     Add-RmauAdminPickerRow
     Update-ModeUi
     Update-MonitoringUi
-
-    $script:Ui.ConnectGraphButton.Add_Click({
-        $workerStarted = $false
-        try {
-            Set-UiBusy -Busy $true
-            Start-ConnectionWorker -Graph
-            $workerStarted = $true
-        }
-        catch {
-            Write-SafeError -Message 'Graph forbindelse fejlede.' -ErrorRecord $_
-            Set-UiStatus -Message 'Graph forbindelse fejlede.'
-            Show-AppMessage -Message ("Graph forbindelse fejlede:`r`n{0}" -f (ConvertTo-RedactedError $_)) -Icon 'Error' | Out-Null
-        }
-        finally {
-            if (-not $workerStarted) { Set-UiBusy -Busy $false }
-        }
-    })
-
-    $script:Ui.ConnectAzureButton.Add_Click({
-        $workerStarted = $false
-        try {
-            Set-UiBusy -Busy $true
-            Start-ConnectionWorker -Azure
-            $workerStarted = $true
-        }
-        catch {
-            Write-SafeError -Message 'Azure forbindelse fejlede.' -ErrorRecord $_
-            Set-UiStatus -Message 'Azure forbindelse fejlede.'
-            Show-AppMessage -Message ("Azure forbindelse fejlede:`r`n{0}" -f (ConvertTo-RedactedError $_)) -Icon 'Error' | Out-Null
-        }
-        finally {
-            if (-not $workerStarted) { Set-UiBusy -Busy $false }
-        }
-    })
 
     $script:Ui.ConnectAllButton.Add_Click({
         $workerStarted = $false
