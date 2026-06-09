@@ -11,7 +11,7 @@ function Invoke-NetIPRunspace {
     }
     $sync.UI.ProcessRunning = $true
     if ($sync.WPFProgressBar) {
-        $sync.WPFProgressBar.Dispatcher.Invoke([action]{ $sync.WPFProgressBar.IsIndeterminate = $true })
+        $sync.WPFProgressBar.Dispatcher.Invoke([System.Action]{ $sync.WPFProgressBar.IsIndeterminate = $true })
     }
     $ps = [PowerShell]::Create()
     $ps.RunspacePool = $sync.Runspace
@@ -25,7 +25,7 @@ function Invoke-NetIPRunspace {
             Write-NetIPLog -Level ERROR -Message (ConvertTo-NetIPRedactedError -ErrorRecord $_)
             $sync.State.Errors += $friendly
             if ($sync.Form) {
-                $sync.Form.Dispatcher.Invoke([action]{
+                $sync.Form.Dispatcher.Invoke([System.Action]{
                     $sync.WPFStatusText.Text = $friendly
                     [System.Windows.MessageBox]::Show($friendly, $sync.App.Name, 'OK', 'Error') | Out-Null
                 })
@@ -34,7 +34,7 @@ function Invoke-NetIPRunspace {
         finally {
             $sync.UI.ProcessRunning = $false
             if ($sync.Form) {
-                $sync.Form.Dispatcher.Invoke([action]{
+                $sync.Form.Dispatcher.Invoke([System.Action]{
                     $sync.WPFProgressBar.IsIndeterminate = $false
                     Update-NetIPUIState
                 })

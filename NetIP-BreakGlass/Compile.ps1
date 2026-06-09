@@ -51,7 +51,7 @@ $xaml
 
 $parts.Add((Get-Content -LiteralPath (Join-Path $root 'scripts\main.ps1') -Raw -Encoding UTF8))
 
-Set-Content -LiteralPath $outputPath -Value ($parts -join "`r`n") -Encoding UTF8
+Set-Content -LiteralPath $outputPath -Value ($parts -join "`r`n") -Encoding utf8BOM
 
 $tokens = $null
 $errors = $null

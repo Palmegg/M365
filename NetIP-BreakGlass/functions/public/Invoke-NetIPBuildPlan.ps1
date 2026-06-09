@@ -41,7 +41,7 @@ $($plan.Warnings -join [Environment]::NewLine)
 JSON:
 $($plan | ConvertTo-Json -Depth 30)
 "@
-        $sync.Form.Dispatcher.Invoke([action]{
+        $sync.Form.Dispatcher.Invoke([System.Action]{
             $sync.WPFPlanText.Text = $text
             Invoke-NetIPWPFButton -Name 'WPFStepPlan'
         })

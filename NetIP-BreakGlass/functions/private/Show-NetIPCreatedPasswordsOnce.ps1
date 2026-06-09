@@ -3,7 +3,7 @@ function Show-NetIPCreatedPasswordsOnce {
     param([object[]] $CreatedPasswords)
 
     if (-not $CreatedPasswords -or $CreatedPasswords.Count -eq 0) { return }
-    $sync.Form.Dispatcher.Invoke([action]{
+    $sync.Form.Dispatcher.Invoke([System.Action]{
         $window = New-Object System.Windows.Window
         $window.Title = 'Midlertidige adgangskoder - vises kun én gang'
         $window.Width = 720

@@ -3,6 +3,11 @@ function Update-NetIPUIState {
     param()
 
     if (-not $sync.Form) { return }
+    if (-not $sync.Form.Dispatcher.CheckAccess()) {
+        $sync.Form.Dispatcher.Invoke([System.Action]{ Update-NetIPUIState })
+        return
+    }
+
     $domain = [string]$sync.State.OnMicrosoftDomain
     if ($sync.WPFDomain) { $sync.WPFDomain.Text = $domain }
     if ($sync.WPFUpnPreview1 -and $domain) { $sync.WPFUpnPreview1.Text = "$(if($sync.WPFUserPrefix1){$sync.WPFUserPrefix1.Text})@$domain" }

@@ -46,7 +46,7 @@ function Invoke-NetIPDiscovery {
             "Conditional Access policies: $($policies.Count)",
             "Policies der allerede ekskluderer gruppen: $($already.Count)"
         )
-        $sync.Form.Dispatcher.Invoke([action]{
+        $sync.Form.Dispatcher.Invoke([System.Action]{
             $sync.WPFDiscoverySummary.Text = $summary
             $sync.WPFDiscoveryList.Text = ($lines -join [Environment]::NewLine)
             Invoke-NetIPWPFButton -Name 'WPFStepDiscovery'
