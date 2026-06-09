@@ -135,6 +135,23 @@ function Get-GroupByDisplayName {
     return $groups[0]
 }
 
+function Get-AdministrativeUnitsForDirectoryObject {
+    param(
+        [Parameter(Mandatory)][string] $ObjectId,
+        [Parameter(Mandatory)][string] $ObjectLabel
+    )
+
+    $escapedObjectId = [uri]::EscapeDataString($ObjectId)
+    $uri = "https://graph.microsoft.com/v1.0/directoryObjects/$escapedObjectId/memberOf/microsoft.graph.administrativeUnit?`$select=id,displayName,isMemberManagementRestricted"
+    try {
+        return @(Get-GraphCollection -Uri $uri)
+    }
+    catch {
+        Write-Step -Level WARN -Message "Could not read administrative unit memberships for $ObjectLabel. Continue with explicitly named administrative units only. Error: $($_.Exception.Message)"
+        return @()
+    }
+}
+
 function Get-AdministrativeUnitByDisplayName {
     param([Parameter(Mandatory)][string] $DisplayName)
 
@@ -208,6 +225,7 @@ $scopes = @(
     'User.ReadWrite.All',
     'Group.ReadWrite.All',
     'Directory.ReadWrite.All',
+    'AdministrativeUnit.ReadWrite.All',
     'RoleManagement.ReadWrite.Directory'
 )
 Connect-MgGraph -Scopes $scopes -NoWelcome -ErrorAction Stop | Out-Null
@@ -248,6 +266,41 @@ foreach ($name in $AdministrativeUnitDisplayNames) {
     $unit = Get-AdministrativeUnitByDisplayName -DisplayName $name.Trim()
     if ($unit) { $targetAdministrativeUnits += $unit }
 }
+$administrativeUnitsToDelete = @($targetAdministrativeUnits)
+
+$administrativeUnitById = @{}
+foreach ($unit in $targetAdministrativeUnits) {
+    $unitId = [string] (Get-ObjectPropertyValue -InputObject $unit -Name 'id')
+    if (-not [string]::IsNullOrWhiteSpace($unitId)) {
+        $administrativeUnitById[$unitId] = $unit
+    }
+}
+
+foreach ($user in $targetUsers) {
+    $userId = [string] (Get-ObjectPropertyValue -InputObject $user -Name 'id')
+    $userLabel = [string] (Get-ObjectPropertyValue -InputObject $user -Name 'userPrincipalName')
+    foreach ($unit in @(Get-AdministrativeUnitsForDirectoryObject -ObjectId $userId -ObjectLabel $userLabel)) {
+        $unitId = [string] (Get-ObjectPropertyValue -InputObject $unit -Name 'id')
+        if (-not [string]::IsNullOrWhiteSpace($unitId) -and -not $administrativeUnitById.ContainsKey($unitId)) {
+            Write-Step -Level PLAN -Message "Discovered administrative unit membership for ${userLabel}: $((Get-ObjectPropertyValue -InputObject $unit -Name 'displayName'))"
+            $administrativeUnitById[$unitId] = $unit
+        }
+    }
+}
+
+foreach ($group in $targetGroups) {
+    $groupId = [string] (Get-ObjectPropertyValue -InputObject $group -Name 'id')
+    $groupLabel = [string] (Get-ObjectPropertyValue -InputObject $group -Name 'displayName')
+    foreach ($unit in @(Get-AdministrativeUnitsForDirectoryObject -ObjectId $groupId -ObjectLabel $groupLabel)) {
+        $unitId = [string] (Get-ObjectPropertyValue -InputObject $unit -Name 'id')
+        if (-not [string]::IsNullOrWhiteSpace($unitId) -and -not $administrativeUnitById.ContainsKey($unitId)) {
+            Write-Step -Level PLAN -Message "Discovered administrative unit membership for ${groupLabel}: $((Get-ObjectPropertyValue -InputObject $unit -Name 'displayName'))"
+            $administrativeUnitById[$unitId] = $unit
+        }
+    }
+}
+
+$targetAdministrativeUnits = @($administrativeUnitById.Values)
 
 Write-Host ''
 Write-Step -Message 'Cleanup plan:'
@@ -269,7 +322,7 @@ foreach ($group in $targetGroups) {
     Remove-DirectoryRoleAssignmentsForPrincipal -PrincipalId (Get-ObjectPropertyValue -InputObject $group -Name 'id') -PrincipalLabel (Get-ObjectPropertyValue -InputObject $group -Name 'displayName')
 }
 
-foreach ($unit in $targetAdministrativeUnits) {
+foreach ($unit in $administrativeUnitsToDelete) {
     Remove-AdministrativeUnitScopedRoleMembers -AdministrativeUnit $unit
 }
 
@@ -282,7 +335,7 @@ foreach ($unit in $targetAdministrativeUnits) {
     }
 }
 
-foreach ($unit in $targetAdministrativeUnits) {
+foreach ($unit in $administrativeUnitsToDelete) {
     $auId = Get-ObjectPropertyValue -InputObject $unit -Name 'id'
     $auName = Get-ObjectPropertyValue -InputObject $unit -Name 'displayName'
     Invoke-GraphDelete -Uri "https://graph.microsoft.com/v1.0/directory/administrativeUnits/$auId" -Description "Delete administrative unit $auName"
