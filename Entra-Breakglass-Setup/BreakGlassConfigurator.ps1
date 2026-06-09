@@ -25,7 +25,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 $script:AppName = 'NetIP Entra Break Glass Configurator'
-$script:AppVersion = '1.0.9'
+$script:AppVersion = '1.0.10'
 $script:ProjectRoot = Split-Path -Parent $PSCommandPath
 if ([string]::IsNullOrWhiteSpace($script:ProjectRoot)) {
     $script:ProjectRoot = (Get-Location).Path
@@ -2812,6 +2812,8 @@ function Update-ConnectionStatusUi {
     param()
 
     if (-not $script:MainWindow) { return }
+    $connectedBrush = [System.Windows.Media.Brushes]::ForestGreen
+    $pendingBrush = [System.Windows.Media.Brushes]::DimGray
     $script:Ui.GraphAccount.Text = $script:State.GraphAccount
     $script:Ui.TenantId.Text = $script:State.TenantId
     $script:Ui.TenantName.Text = $script:State.TenantDisplayName
@@ -2820,6 +2822,30 @@ function Update-ConnectionStatusUi {
     $script:Ui.SubscriptionIdDetected.Text = $script:State.AzureSubscriptionId
     $subscriptionText = if ($script:State.AzureSubscriptionName -or $script:State.AzureSubscriptionId) { "$($script:State.AzureSubscriptionName) / $($script:State.AzureSubscriptionId)" } else { 'Ingen valgt subscription' }
     $script:Ui.ConnectionStatus.Text = "Graph connected: $($script:State.GraphConnected) | Azure connected: $($script:State.AzureConnected) | Subscription valgt: $subscriptionText"
+    if ($script:Ui.ContainsKey('GraphConnectionBadge') -and $script:Ui.GraphConnectionBadge) {
+        if ($script:State.GraphConnected) {
+            $script:Ui.GraphConnectionBadge.Text = '✓ Graph connected'
+            $script:Ui.GraphConnectionBadge.Foreground = $connectedBrush
+        }
+        else {
+            $script:Ui.GraphConnectionBadge.Text = '○ Graph ikke forbundet'
+            $script:Ui.GraphConnectionBadge.Foreground = $pendingBrush
+        }
+    }
+    if ($script:Ui.ContainsKey('AzureConnectionBadge') -and $script:Ui.AzureConnectionBadge) {
+        if ($script:State.AzureConnected) {
+            $script:Ui.AzureConnectionBadge.Text = '✓ Azure connected'
+            $script:Ui.AzureConnectionBadge.Foreground = $connectedBrush
+        }
+        elseif ($script:Ui.ContainsKey('DisableMonitoring') -and [bool] $script:Ui.DisableMonitoring.IsChecked) {
+            $script:Ui.AzureConnectionBadge.Text = '○ Azure ikke påkrævet'
+            $script:Ui.AzureConnectionBadge.Foreground = $pendingBrush
+        }
+        else {
+            $script:Ui.AzureConnectionBadge.Text = '○ Azure ikke forbundet'
+            $script:Ui.AzureConnectionBadge.Foreground = $pendingBrush
+        }
+    }
     Update-RmauAdminPickerOptions
 }
 
@@ -3287,6 +3313,7 @@ function Update-MonitoringUi {
     else {
         Set-UiStatus -Message 'Monitoring er slået fra for denne kørsel.'
     }
+    Update-ConnectionStatusUi
 }
 
 function Ensure-AppModulesFromUi {
@@ -3650,6 +3677,8 @@ function Start-BreakGlassWizard {
                     </Grid.RowDefinitions>
                     <StackPanel Grid.Row="0" Grid.Column="0" Grid.ColumnSpan="2" Orientation="Horizontal" Margin="0,0,0,10">
                         <Button x:Name="ConnectAllButton" Content="Forbind til Graph + Azure" Height="32" Width="190" Margin="0,0,8,0"/>
+                        <TextBlock x:Name="GraphConnectionBadge" VerticalAlignment="Center" FontWeight="SemiBold" Margin="8,0,14,0" Text="○ Graph ikke forbundet" Foreground="#4B5563"/>
+                        <TextBlock x:Name="AzureConnectionBadge" VerticalAlignment="Center" FontWeight="SemiBold" Text="○ Azure ikke forbundet" Foreground="#4B5563"/>
                     </StackPanel>
                     <TextBlock Grid.Row="1" Grid.Column="0" Text="Graph konto" FontWeight="SemiBold"/>
                     <TextBlock x:Name="GraphAccount" Grid.Row="1" Grid.Column="1"/>
@@ -3844,7 +3873,7 @@ function Start-BreakGlassWizard {
     $reader = New-Object System.Xml.XmlNodeReader $xaml
     $script:MainWindow = [Windows.Markup.XamlReader]::Load($reader)
     foreach ($name in @(
-        'VersionBadge','UnderstandRisk','ReportModeRadio','ConfigureModeRadio','ConnectAllButton','GraphAccount','TenantId','TenantName','OnMicrosoftDomain','AzureAccount','SubscriptionIdDetected','ConnectionStatus','GraphScopesRequested','MonitoringConnectionRequirement',
+        'VersionBadge','UnderstandRisk','ReportModeRadio','ConfigureModeRadio','ConnectAllButton','GraphConnectionBadge','AzureConnectionBadge','GraphAccount','TenantId','TenantName','OnMicrosoftDomain','AzureAccount','SubscriptionIdDetected','ConnectionStatus','GraphScopesRequested','MonitoringConnectionRequirement',
         'RunDiscoveryButton','DiscoverySummary','DiscoveryList','UserPrefix1','UserPrefix2','DisplayName1','DisplayName2','GroupDisplayName','RmauDisplayName','RmauAdminGroupDisplayName','RmauAdminPickerPanel','AddRmauAdminButton','RmauAdminPickerStatus','AuthStrengthName','CaPolicyName','CaState',
         'ExcludeExistingCa','AaguidInputPanel','AddAaguidButton','ModeStatusText','DisableMonitoring','UseExistingWorkspace','SubscriptionIdLabel','SubscriptionId','ResourceGroupName','WorkspaceName','AzureRegion','DiagnosticSettingName',
         'ActionGroupName','AlertEmails','CreateSignInAlert','CreateAuditAlert','BuildPlanButton','ExportPlanButton','ApplyButton','PlanText','ProgressBar','ExecutionLog','OpenSecurityInfoButton',
