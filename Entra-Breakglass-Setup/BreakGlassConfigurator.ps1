@@ -123,6 +123,46 @@ function Restart-InStaModeIfNeeded {
     }
 }
 
+function Initialize-WindowsPowerShellModulePath {
+    [CmdletBinding()]
+    param()
+
+    if ($PSVersionTable.PSVersion.Major -gt 5) {
+        return
+    }
+
+    $paths = New-Object System.Collections.Generic.List[string]
+    $documents = [Environment]::GetFolderPath('MyDocuments')
+    if (-not [string]::IsNullOrWhiteSpace($documents)) {
+        $paths.Add((Join-Path -Path $documents -ChildPath 'WindowsPowerShell\Modules')) | Out-Null
+    }
+    if (-not [string]::IsNullOrWhiteSpace($env:ProgramFiles)) {
+        $paths.Add((Join-Path -Path $env:ProgramFiles -ChildPath 'WindowsPowerShell\Modules')) | Out-Null
+    }
+    if (-not [string]::IsNullOrWhiteSpace($env:WINDIR)) {
+        $paths.Add((Join-Path -Path $env:WINDIR -ChildPath 'system32\WindowsPowerShell\v1.0\Modules')) | Out-Null
+    }
+
+    $existingWindowsPowerShellPaths = @($env:PSModulePath -split ';' | Where-Object {
+        -not [string]::IsNullOrWhiteSpace($_) -and
+        $_ -match '\\WindowsPowerShell\\Modules' -and
+        $_ -notmatch '\\PowerShell\\7\\Modules' -and
+        $_ -notmatch '\\PowerShell\\Modules'
+    })
+    foreach ($path in $existingWindowsPowerShellPaths) {
+        $paths.Add($path) | Out-Null
+    }
+
+    $unique = @()
+    foreach ($path in $paths) {
+        if (-not [string]::IsNullOrWhiteSpace($path) -and $unique -notcontains $path) {
+            $unique += $path
+        }
+    }
+
+    $env:PSModulePath = ($unique -join ';')
+}
+
 function ConvertTo-RedactedError {
     [CmdletBinding()]
     param([AllowNull()] $ErrorObject)
@@ -226,8 +266,10 @@ function Initialize-AppState {
     param()
 
     Restart-InStaModeIfNeeded
+    Initialize-WindowsPowerShellModulePath
     New-Item -ItemType Directory -Force -Path $script:DefaultOutputRoot | Out-Null
     Write-AppLog -Message "$($script:AppName) v$($script:AppVersion) initialiseret. Mock: $($script:State.Mock). NoApply: $($script:State.NoApply)."
+    Write-AppLog -Message "PSModulePath: $env:PSModulePath"
 }
 
 function New-OutputFolder {
