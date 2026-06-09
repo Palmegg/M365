@@ -639,6 +639,7 @@ function Invoke-ConnectionWorkerMode {
         AzureAccount          = ''
         AzureSubscriptionId   = ''
         AzureSubscriptionName = ''
+        AzureError            = ''
         Error                 = ''
     }
 
@@ -707,11 +708,27 @@ function Invoke-ConnectionWorkerMode {
             }
             Write-AppLog -Message 'Forbinder til Azure Resource Manager.'
             Write-Host 'Forbinder til Azure Resource Manager. Gennemfør loginprompten...' -ForegroundColor Cyan
-            Connect-AppAzure | Out-Null
-            $result['AzureConnected'] = $true
-            $result['AzureAccount'] = $script:State.AzureAccount
-            $result['AzureSubscriptionId'] = $script:State.AzureSubscriptionId
-            $result['AzureSubscriptionName'] = $script:State.AzureSubscriptionName
+            try {
+                Connect-AppAzure | Out-Null
+                $result['AzureConnected'] = $true
+                $result['AzureAccount'] = $script:State.AzureAccount
+                $result['AzureSubscriptionId'] = $script:State.AzureSubscriptionId
+                $result['AzureSubscriptionName'] = $script:State.AzureSubscriptionName
+            }
+            catch {
+                $result['AzureConnected'] = $false
+                $result['AzureError'] = ConvertTo-RedactedError $_
+                Write-DetailedError -Message 'Azure forbindelse fejlede.' -ErrorRecord $_
+
+                if (-not [bool] $result['GraphConnected']) {
+                    throw
+                }
+
+                Write-AppLog -Level WARN -Message 'Graph er forbundet, men Azure subscription blev ikke valgt. Azure Monitor/Log Analytics springes over for denne kørsel.'
+                Write-Host ''
+                Write-Host 'Graph er forbundet, men Azure subscription blev ikke valgt.' -ForegroundColor Yellow
+                Write-Host 'Værktøjet fortsætter uden Azure Monitor/Log Analytics for denne kørsel.' -ForegroundColor Yellow
+            }
         }
 
         Export-JsonSafe -InputObject $result -Path $resultPath -Depth 20 | Out-Null
@@ -3132,7 +3149,14 @@ function Start-BreakGlassWizard {
                         Update-ConnectionStatusUi
                         if ($connectionExitCode -eq 0) {
                             Set-WizardMaxStep -Step 2
-                            Set-UiStatus -Message 'Connection-worker færdig. Forbindelsesoplysninger er indlæst.'
+                            $azureError = if ($connectionResult.PSObject.Properties['AzureError']) { [string] $connectionResult.AzureError } else { '' }
+                            if ([bool] $connectionResult.GraphConnected -and -not [bool] $connectionResult.AzureConnected -and -not [string]::IsNullOrWhiteSpace($azureError)) {
+                                $script:Ui.DisableMonitoring.IsChecked = $true
+                                Set-UiStatus -Message ("Graph er forbundet. Azure subscription blev ikke valgt, så monitoring er slået fra for denne kørsel: {0}" -f $azureError)
+                            }
+                            else {
+                                Set-UiStatus -Message 'Connection-worker færdig. Forbindelsesoplysninger er indlæst.'
+                            }
                         }
                         else {
                             $errorText = if ($connectionResult.Error) { [string] $connectionResult.Error } else { "exit code $connectionExitCode" }
