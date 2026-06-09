@@ -170,6 +170,31 @@ Version 1 automatiserer ikke FIDO2/FIDO key enrollment. Konsulenten skal manuelt
 - Authentication strength og enkelte diagnostic setting endpoints kan ændre sig i Graph/Azure. Scriptet logger fejl pænt og fortsætter hvor det er sikkert.
 - Worker-processen kan vise separat Graph/Azure login, fordi PowerShell auth-kontekst ikke sikkert kan flyttes mellem processer.
 
+## Oprydning efter gammel lab/test-baseline
+
+Hvis en tidligere testkørsel har oprettet gamle break-glass brugere, role-assignable grupper eller RMAU-objekter, så brug `Remove-OldBreakGlassLabSetup.ps1`. Scriptet er dry-run som standard og sletter kun eksakte UPNs/display names, du angiver.
+
+Eksempel, dry-run:
+
+```powershell
+.\Remove-OldBreakGlassLabSetup.ps1 `
+  -UserPrincipalNames "bg-admin-01@tenant.onmicrosoft.com","bg-admin-02@tenant.onmicrosoft.com" `
+  -GroupDisplayNames "SG-BreakGlass-Admins","GRP-ENTRA-BreakGlass-Admins" `
+  -AdministrativeUnitDisplayNames "RMAU-BreakGlass-Protection"
+```
+
+Når planen er gennemgået:
+
+```powershell
+.\Remove-OldBreakGlassLabSetup.ps1 `
+  -UserPrincipalNames "bg-admin-01@tenant.onmicrosoft.com","bg-admin-02@tenant.onmicrosoft.com" `
+  -GroupDisplayNames "SG-BreakGlass-Admins","GRP-ENTRA-BreakGlass-Admins" `
+  -AdministrativeUnitDisplayNames "RMAU-BreakGlass-Protection" `
+  -Apply
+```
+
+Cleanup-scriptet fjerner først Entra role assignments, derefter RMAU scoped role memberships og AU-medlemskaber, og sletter til sidst AU, grupper og brugere. Det sletter ikke Conditional Access policies, authentication strengths, Log Analytics workspaces, Azure Monitor alerts eller Azure resource groups.
+
 ## Foreslået lab-test
 
 1. Start i `-Mock` mode og gennemgå hele GUI'en.
