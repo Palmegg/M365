@@ -3464,6 +3464,7 @@ function Start-BreakGlassWizard {
                         <RowDefinition Height="Auto"/>
                         <RowDefinition Height="Auto"/>
                         <RowDefinition Height="Auto"/>
+                        <RowDefinition Height="Auto"/>
                     </Grid.RowDefinitions>
                     <StackPanel Grid.Row="0" Grid.Column="0" Grid.ColumnSpan="2" Orientation="Horizontal" Margin="0,0,0,10">
                         <Button x:Name="ConnectAllButton" Content="Forbind til Graph + Azure" Height="32" Width="190" Margin="0,0,8,0"/>
@@ -3484,6 +3485,11 @@ function Start-BreakGlassWizard {
                     <TextBlock x:Name="SubscriptionIdDetected" Grid.Row="6" Grid.Column="1"/>
                     <TextBlock Grid.Row="7" Grid.Column="0" Text="Status" FontWeight="SemiBold"/>
                     <TextBlock x:Name="ConnectionStatus" Grid.Row="7" Grid.Column="1" Text="Ikke forbundet"/>
+                    <TextBlock Grid.Row="8" Grid.Column="0" Text="Graph scopes" FontWeight="SemiBold" Margin="0,14,12,0"/>
+                    <StackPanel Grid.Row="8" Grid.Column="1" Margin="0,14,0,0">
+                        <TextBlock Text="Disse delegated Microsoft Graph scopes bliver requested ved Graph sign-in:" Foreground="#4B5563" Margin="0,0,0,6"/>
+                        <TextBox x:Name="GraphScopesRequested" IsReadOnly="True" FontFamily="Consolas" Height="130" AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto"/>
+                    </StackPanel>
                 </Grid>
             </TabItem>
             <TabItem Header="3. Discovery">
@@ -3657,7 +3663,7 @@ function Start-BreakGlassWizard {
     $reader = New-Object System.Xml.XmlNodeReader $xaml
     $script:MainWindow = [Windows.Markup.XamlReader]::Load($reader)
     foreach ($name in @(
-        'UnderstandRisk','ReportModeRadio','ConfigureModeRadio','ConnectGraphButton','ConnectAzureButton','ConnectAllButton','GraphAccount','TenantId','TenantName','OnMicrosoftDomain','AzureAccount','SubscriptionIdDetected','ConnectionStatus',
+        'UnderstandRisk','ReportModeRadio','ConfigureModeRadio','ConnectGraphButton','ConnectAzureButton','ConnectAllButton','GraphAccount','TenantId','TenantName','OnMicrosoftDomain','AzureAccount','SubscriptionIdDetected','ConnectionStatus','GraphScopesRequested',
         'RunDiscoveryButton','DiscoverySummary','DiscoveryList','UserPrefix1','UserPrefix2','DisplayName1','DisplayName2','GroupDisplayName','RmauDisplayName','RmauAdminGroupDisplayName','RmauAdminPickerPanel','AddRmauAdminButton','RmauAdminPickerStatus','AuthStrengthName','CaPolicyName','CaState',
         'ExcludeExistingCa','AaguidInputPanel','AddAaguidButton','ModeStatusText','DisableMonitoring','UseExistingWorkspace','SubscriptionIdLabel','SubscriptionId','ResourceGroupName','WorkspaceName','AzureRegion','DiagnosticSettingName',
         'ActionGroupName','AlertEmails','CreateSignInAlert','CreateAuditAlert','BuildPlanButton','ExportPlanButton','ApplyButton','PlanText','ProgressBar','ExecutionLog','OpenSecurityInfoButton',
@@ -3666,6 +3672,7 @@ function Start-BreakGlassWizard {
     $script:Ui[$name] = $script:MainWindow.FindName($name)
     }
     $script:LogTextBox = $script:Ui.ExecutionLog
+    $script:Ui.GraphScopesRequested.Text = (($script:RequiredGraphScopes | ForEach-Object { "- $_" }) -join [Environment]::NewLine)
     Add-AaguidInputRow
     Add-RmauAdminPickerRow
     Update-ModeUi
