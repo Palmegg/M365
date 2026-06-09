@@ -25,7 +25,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 $script:AppName = 'NetIP Entra Break Glass Configurator'
-$script:AppVersion = '1.0.4'
+$script:AppVersion = '1.0.5'
 $script:ProjectRoot = Split-Path -Parent $PSCommandPath
 if ([string]::IsNullOrWhiteSpace($script:ProjectRoot)) {
     $script:ProjectRoot = (Get-Location).Path
@@ -3121,6 +3121,14 @@ function Update-MonitoringUi {
     if (-not $script:Ui -or -not $script:Ui.ContainsKey('DisableMonitoring')) { return }
     $monitoringEnabled = -not [bool] $script:Ui.DisableMonitoring.IsChecked
     $useExisting = [bool] $script:Ui.UseExistingWorkspace.IsChecked
+    if ($script:Ui.ContainsKey('MonitoringConnectionRequirement') -and $script:Ui.MonitoringConnectionRequirement) {
+        if ($monitoringEnabled) {
+            $script:Ui.MonitoringConnectionRequirement.Text = 'Slået til: forbindelsestrinnet skal bruge både Microsoft Graph og Azure Resource Manager med valgt subscription.'
+        }
+        else {
+            $script:Ui.MonitoringConnectionRequirement.Text = 'Slået fra: forbindelsestrinnet bruger kun Microsoft Graph.'
+        }
+    }
     foreach ($name in @('UseExistingWorkspace','ResourceGroupName','WorkspaceName','AzureRegion','DiagnosticSettingName','ActionGroupName','AlertEmails','CreateSignInAlert','CreateAuditAlert')) {
         if ($script:Ui.ContainsKey($name) -and $script:Ui[$name]) {
             $script:Ui[$name].IsEnabled = $monitoringEnabled
@@ -3476,6 +3484,13 @@ function Start-BreakGlassWizard {
                                 <RadioButton x:Name="ConfigureModeRadio" GroupName="RunMode" Content="Configuration - opret/ret brugere, gruppe, roller, CA og monitoring efter bekræftelse"/>
                             </StackPanel>
                         </Border>
+                        <Border BorderBrush="#CBD5E1" BorderThickness="1" CornerRadius="4" Padding="12" Margin="0,12,0,0">
+                            <StackPanel>
+                                <TextBlock Text="Azure Monitor/Log Analytics" FontWeight="SemiBold" Margin="0,0,0,8"/>
+                                <CheckBox x:Name="DisableMonitoring" Content="Slå Azure Monitor/Log Analytics fra for denne kørsel"/>
+                                <TextBlock TextWrapping="Wrap" Foreground="#4B5563" Margin="0,8,0,0" Text="Hvis monitoring er slået til, kræver forbindelsestrinnet både Microsoft Graph og Azure Resource Manager med valgt subscription. Hvis monitoring slås fra, kræves kun Microsoft Graph."/>
+                            </StackPanel>
+                        </Border>
                         <CheckBox x:Name="UnderstandRisk" Margin="0,20,0,0" Content="Jeg forstår at dette script kan ændre sikkerhedskritisk tenant-konfiguration."/>
                     </StackPanel>
                 </ScrollViewer>
@@ -3522,6 +3537,8 @@ function Start-BreakGlassWizard {
                         <TextBlock Text="Disse delegated Microsoft Graph scopes bliver requested ved Graph sign-in:" Foreground="#4B5563" Margin="0,0,0,6"/>
                         <TextBox x:Name="GraphScopesRequested" IsReadOnly="True" FontFamily="Consolas" Height="130" AcceptsReturn="True" TextWrapping="Wrap" VerticalScrollBarVisibility="Auto"/>
                     </StackPanel>
+                    <TextBlock Grid.Row="9" Grid.Column="0" Text="Monitoring valg" FontWeight="SemiBold" Margin="0,14,12,0"/>
+                    <TextBlock x:Name="MonitoringConnectionRequirement" Grid.Row="9" Grid.Column="1" Margin="0,14,0,0" TextWrapping="Wrap"/>
                 </Grid>
             </TabItem>
             <TabItem Header="3. Discovery">
@@ -3583,8 +3600,7 @@ function Start-BreakGlassWizard {
                                 <TextBlock VerticalAlignment="Center" Foreground="#4B5563" Text="Eksempel: a4e62b8c-8fdb-4b3a-9c88-6b8f0f7f4d2a"/>
                             </StackPanel>
                         </StackPanel>
-                        <TextBlock x:Name="ModeStatusText" Grid.Row="6" Grid.Column="0" Grid.ColumnSpan="2" FontWeight="SemiBold" Foreground="#374151" Margin="0,0,0,8"/>
-                        <CheckBox x:Name="DisableMonitoring" Grid.Row="6" Grid.Column="2" Grid.ColumnSpan="2" Content="Deaktiver Azure Monitor/Log Analytics i denne kørsel" Margin="0,0,0,8"/>
+                        <TextBlock x:Name="ModeStatusText" Grid.Row="6" Grid.Column="0" Grid.ColumnSpan="4" FontWeight="SemiBold" Foreground="#374151" Margin="0,0,0,8"/>
                         <CheckBox x:Name="UseExistingWorkspace" Grid.Row="7" Grid.Column="0" Grid.ColumnSpan="2" Content="Brug eksisterende Log Analytics workspace" Margin="0,0,0,8"/>
                         <TextBlock x:Name="SubscriptionIdLabel" Grid.Row="8" Grid.Column="0" Text="Subscription ID ved eksisterende workspace"/>
                         <TextBox x:Name="SubscriptionId" Grid.Row="8" Grid.Column="1" Margin="0,0,12,8"/>
@@ -3695,7 +3711,7 @@ function Start-BreakGlassWizard {
     $reader = New-Object System.Xml.XmlNodeReader $xaml
     $script:MainWindow = [Windows.Markup.XamlReader]::Load($reader)
     foreach ($name in @(
-        'VersionBadge','UnderstandRisk','ReportModeRadio','ConfigureModeRadio','ConnectGraphButton','ConnectAzureButton','ConnectAllButton','GraphAccount','TenantId','TenantName','OnMicrosoftDomain','AzureAccount','SubscriptionIdDetected','ConnectionStatus','GraphScopesRequested',
+        'VersionBadge','UnderstandRisk','ReportModeRadio','ConfigureModeRadio','ConnectGraphButton','ConnectAzureButton','ConnectAllButton','GraphAccount','TenantId','TenantName','OnMicrosoftDomain','AzureAccount','SubscriptionIdDetected','ConnectionStatus','GraphScopesRequested','MonitoringConnectionRequirement',
         'RunDiscoveryButton','DiscoverySummary','DiscoveryList','UserPrefix1','UserPrefix2','DisplayName1','DisplayName2','GroupDisplayName','RmauDisplayName','RmauAdminGroupDisplayName','RmauAdminPickerPanel','AddRmauAdminButton','RmauAdminPickerStatus','AuthStrengthName','CaPolicyName','CaState',
         'ExcludeExistingCa','AaguidInputPanel','AddAaguidButton','ModeStatusText','DisableMonitoring','UseExistingWorkspace','SubscriptionIdLabel','SubscriptionId','ResourceGroupName','WorkspaceName','AzureRegion','DiagnosticSettingName',
         'ActionGroupName','AlertEmails','CreateSignInAlert','CreateAuditAlert','BuildPlanButton','ExportPlanButton','ApplyButton','PlanText','ProgressBar','ExecutionLog','OpenSecurityInfoButton',
