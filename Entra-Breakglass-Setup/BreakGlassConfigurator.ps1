@@ -25,7 +25,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 $script:AppName = 'NetIP Entra Break Glass Configurator'
-$script:AppVersion = '1.0.12'
+$script:AppVersion = '1.0.13'
 $script:ProjectRoot = Split-Path -Parent $PSCommandPath
 if ([string]::IsNullOrWhiteSpace($script:ProjectRoot)) {
     $script:ProjectRoot = (Get-Location).Path
@@ -185,7 +185,7 @@ function Write-AppLog {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][string] $Message,
-        [ValidateSet('INFO', 'WARN', 'ERROR', 'PLAN', 'SKIP', 'PASS', 'FAIL')]
+        [ValidateSet('INFO', 'WARN', 'ERROR', 'PLAN', 'SKIP', 'PASS', 'FAIL', 'STEP')]
         [string] $Level = 'INFO'
     )
 
@@ -201,6 +201,17 @@ function Write-AppLog {
         $script:LogTextBox.AppendText($line + [Environment]::NewLine)
         $script:LogTextBox.ScrollToEnd()
     }
+}
+
+function Write-ExecutionStep {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string] $Message,
+        [ValidateSet('RUNNING', 'DONE', 'PLAN', 'SKIP', 'WARN', 'FAIL')]
+        [string] $Status = 'RUNNING'
+    )
+
+    Write-AppLog -Level STEP -Message ('{0}|{1}' -f $Status, $Message)
 }
 
 function Write-SafeError {
@@ -2073,6 +2084,7 @@ function Add-BreakGlassGroupExclusionToExistingCAPolicies {
     )
 
     if ($script:State.Mock) {
+        Write-ExecutionStep -Status PLAN -Message 'CA exclusion: Mock existing CA'
         return @([pscustomobject]@{ Policy = 'Mock existing CA'; Status = 'PlannedOrMock' })
     }
 
@@ -2088,11 +2100,13 @@ function Add-BreakGlassGroupExclusionToExistingCAPolicies {
             $excludeGroups = @($policy.conditions.users.excludeGroups)
         }
         if ($excludeGroups -contains $GroupId) {
+            Write-ExecutionStep -Status SKIP -Message "CA exclusion allerede på plads: $($policy.displayName)"
             $results.Add([pscustomobject]@{ Policy = $policy.displayName; Status = 'AlreadyExcluded'; Backup = $backup }) | Out-Null
             continue
         }
 
         if (-not $Apply) {
+            Write-ExecutionStep -Status PLAN -Message "CA exclusion planlagt: $($policy.displayName)"
             $results.Add([pscustomobject]@{ Policy = $policy.displayName; Status = 'Planned'; Backup = $backup }) | Out-Null
             continue
         }
@@ -2103,10 +2117,12 @@ function Add-BreakGlassGroupExclusionToExistingCAPolicies {
                 conditions = $policy.conditions
             }
             Invoke-GraphRequestSafe -Method PATCH -Uri "https://graph.microsoft.com/v1.0/identity/conditionalAccess/policies/$($policy.id)" -Body $body | Out-Null
+            Write-ExecutionStep -Status DONE -Message "CA exclusion opdateret: $($policy.displayName)"
             $results.Add([pscustomobject]@{ Policy = $policy.displayName; Status = 'Updated'; Backup = $backup }) | Out-Null
         }
         catch {
             Write-SafeError -Message "Kunne ikke patche CA policy '$($policy.displayName)'." -ErrorRecord $_
+            Write-ExecutionStep -Status FAIL -Message "CA exclusion fejlede: $($policy.displayName)"
             $results.Add([pscustomobject]@{ Policy = $policy.displayName; Status = 'Warning'; Backup = $backup }) | Out-Null
         }
     }
@@ -2448,6 +2464,7 @@ function Invoke-BreakGlassConfiguration {
     }
 
     Write-AppLog -Message "Starter konfiguration. Apply: $apply"
+    Write-ExecutionStep -Status RUNNING -Message ("Kørsel startet i {0} mode" -f $(if ($apply) { 'Configuration' } else { 'Report only' }))
     $tenant = Get-TenantInfo
     $domain = $tenant.OnMicrosoftDomain
     $existingCandidates = @(Find-ExistingEmergencyAccessCandidates -Config $Config)
@@ -2456,56 +2473,98 @@ function Invoke-BreakGlassConfiguration {
     $plan = New-Plan -Config $Config
     Export-JsonSafe -InputObject $plan -Path (Join-Path $output 'plan.json') | Out-Null
     $users = @()
+    Write-ExecutionStep -Status RUNNING -Message "Sikrer breakglass account: $($Config.UserPrefix1)@$domain"
     $users += Ensure-BreakGlassUser -Prefix $Config.UserPrefix1 -DisplayName $Config.DisplayName1 -OnMicrosoftDomain $domain -Apply $apply
+    Write-ExecutionStep -Status $(if ($apply) { 'DONE' } else { 'PLAN' }) -Message "Breakglass account håndteret: $($users[-1].userPrincipalName)"
+    Write-ExecutionStep -Status RUNNING -Message "Sikrer breakglass account: $($Config.UserPrefix2)@$domain"
     $users += Ensure-BreakGlassUser -Prefix $Config.UserPrefix2 -DisplayName $Config.DisplayName2 -OnMicrosoftDomain $domain -Apply $apply
+    Write-ExecutionStep -Status $(if ($apply) { 'DONE' } else { 'PLAN' }) -Message "Breakglass account håndteret: $($users[-1].userPrincipalName)"
 
+    Write-ExecutionStep -Status RUNNING -Message "Sikrer breakglass admin-gruppe: $($Config.GroupDisplayName)"
     $group = Ensure-BreakGlassGroup -DisplayName $Config.GroupDisplayName -Apply $apply
+    Write-ExecutionStep -Status $(if ($apply) { 'DONE' } else { 'PLAN' }) -Message "Breakglass admin-gruppe håndteret: $($Config.GroupDisplayName)"
+    Write-ExecutionStep -Status RUNNING -Message "Sikrer medlemskab af breakglass admin-gruppe"
     $membership = foreach ($user in $users) { Ensure-GroupMember -Group $group -User $user -Apply $apply }
+    Write-ExecutionStep -Status $(if ($apply) { 'DONE' } else { 'PLAN' }) -Message 'Medlemskab håndteret for breakglass accounts'
+    Write-ExecutionStep -Status RUNNING -Message 'Sikrer Global Administrator rolle på breakglass admin-gruppen'
     $roleAssignments = @(Ensure-BreakGlassGlobalAdminGroupAssignment -Group $group -Apply $apply)
+    Write-ExecutionStep -Status $(if ($apply) { 'DONE' } else { 'PLAN' }) -Message "Global Administrator rolle håndteret for $($Config.GroupDisplayName)"
+    Write-ExecutionStep -Status RUNNING -Message "Sikrer RMAU: $($Config.RmauDisplayName)"
     $rmau = Ensure-RestrictedManagementAdministrativeUnit -DisplayName $Config.RmauDisplayName -Apply $apply
+    Write-ExecutionStep -Status $(if ($apply) { 'DONE' } else { 'PLAN' }) -Message "RMAU håndteret: $($Config.RmauDisplayName)"
+    Write-ExecutionStep -Status RUNNING -Message "Sikrer RMAU admin-gruppe: $($Config.RmauAdminGroupDisplayName)"
     $rmauAdminGroup = Ensure-BreakGlassGroup -DisplayName $Config.RmauAdminGroupDisplayName -Apply $apply
+    Write-ExecutionStep -Status $(if ($apply) { 'DONE' } else { 'PLAN' }) -Message "RMAU admin-gruppe håndteret: $($Config.RmauAdminGroupDisplayName)"
+    Write-ExecutionStep -Status RUNNING -Message 'Sikrer medlemmer i RMAU admin-gruppen'
     $rmauAdminMembership = Ensure-RmauAdminGroupMembers -AdminGroup $rmauAdminGroup -AdminUserPrincipalNames @(ConvertFrom-DelimitedUpnList -Text $Config.RmauAdminUpns) -Apply $apply
+    Write-ExecutionStep -Status $(if ($apply) { 'DONE' } else { 'PLAN' }) -Message 'RMAU admin-gruppe medlemskab håndteret'
+    Write-ExecutionStep -Status RUNNING -Message 'Sikrer scoped RMAU administratorroller'
     $rmauScopedRoleAssignments = Ensure-RmauScopedAdministration -AdministrativeUnit $rmau -AdminGroup $rmauAdminGroup -Apply $apply
+    Write-ExecutionStep -Status $(if ($apply) { 'DONE' } else { 'PLAN' }) -Message 'Scoped RMAU administratorroller håndteret'
     $rmauMembership = @()
+    Write-ExecutionStep -Status RUNNING -Message 'Tilføjer breakglass objekter til RMAU'
     foreach ($user in $users) { $rmauMembership += Ensure-RmauMember -AdministrativeUnit $rmau -DirectoryObject $user -Apply $apply }
     $rmauMembership += Ensure-RmauMember -AdministrativeUnit $rmau -DirectoryObject $group -Apply $apply
+    Write-ExecutionStep -Status $(if ($apply) { 'DONE' } else { 'PLAN' }) -Message 'RMAU medlemskab håndteret for breakglass accounts og gruppe'
 
     $aaguids = Validate-AaguidList -Text $Config.AllowedAaguids
+    Write-ExecutionStep -Status RUNNING -Message "Sikrer authentication strength: $($Config.AuthStrengthName)"
     $authStrength = Ensure-BreakGlassAuthenticationStrengthPolicy -DisplayName $Config.AuthStrengthName -AllowedAaguids $aaguids -Apply $apply
+    Write-ExecutionStep -Status $(if ($apply) { 'DONE' } else { 'PLAN' }) -Message "Authentication strength håndteret: $($Config.AuthStrengthName)"
+    Write-ExecutionStep -Status RUNNING -Message "Sikrer Conditional Access policy: $($Config.CaPolicyName)"
     $caPolicy = Ensure-BreakGlassConditionalAccessPolicy -DisplayName $Config.CaPolicyName -GroupId $group.id -AuthenticationStrengthId $authStrength.id -State $Config.CaState -Apply $apply
+    Write-ExecutionStep -Status $(if ($apply) { 'DONE' } else { 'PLAN' }) -Message "Conditional Access policy håndteret: $($Config.CaPolicyName)"
     $existingCaExclusionResults = @()
     if ($Config.ExcludeFromExistingCa) {
+        Write-ExecutionStep -Status RUNNING -Message 'Gennemgår eksisterende Conditional Access policies for breakglass-ekskludering'
         $existingCaExclusionResults = Add-BreakGlassGroupExclusionToExistingCAPolicies -GroupId $group.id -DedicatedPolicyName $Config.CaPolicyName -Apply $apply -OutputFolder $output
+        Write-ExecutionStep -Status $(if ($apply) { 'DONE' } else { 'PLAN' }) -Message 'Eksisterende Conditional Access policies gennemgået for breakglass-ekskludering'
+    }
+    else {
+        Write-ExecutionStep -Status SKIP -Message 'Ekskludering fra eksisterende Conditional Access policies er fravalgt'
     }
 
     $monitoring = [pscustomobject]@{ Enabled = -not [bool]$Config.DisableMonitoring; Entries = @() }
     if (-not [bool] $Config.DisableMonitoring) {
         try {
+            Write-ExecutionStep -Status RUNNING -Message 'Sikrer Azure Monitor/Log Analytics konfiguration'
             Get-OrSelectSubscription -SubscriptionId $Config.SubscriptionId | Out-Null
             $subscriptionId = $script:State.AzureSubscriptionId
+            Write-ExecutionStep -Status RUNNING -Message "Sikrer resource group: $($Config.ResourceGroupName)"
             $rg = Get-OrCreate-ResourceGroup -Name $Config.ResourceGroupName -Location $Config.AzureRegion -Apply $apply
+            Write-ExecutionStep -Status RUNNING -Message "Sikrer Log Analytics workspace: $($Config.WorkspaceName)"
             $workspace = Get-OrCreate-LogAnalyticsWorkspace -ResourceGroupName $Config.ResourceGroupName -WorkspaceName $Config.WorkspaceName -Location $Config.AzureRegion -Apply $apply
             $workspaceResourceId = if ($workspace.ResourceId) { $workspace.ResourceId } elseif ($workspace.Id) { $workspace.Id } else { "/subscriptions/$subscriptionId/resourceGroups/$($Config.ResourceGroupName)/providers/Microsoft.OperationalInsights/workspaces/$($Config.WorkspaceName)" }
+            Write-ExecutionStep -Status RUNNING -Message "Sikrer Entra diagnostic setting: $($Config.DiagnosticSettingName)"
             $diag = Ensure-EntraDiagnosticSettingToLogAnalytics -DiagnosticSettingName $Config.DiagnosticSettingName -WorkspaceResourceId $workspaceResourceId -Apply $apply
             $emails = @($Config.AlertEmails -split ';' | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
+            Write-ExecutionStep -Status RUNNING -Message "Sikrer action group: $($Config.ActionGroupName)"
             $ag = Get-OrCreate-ActionGroup -SubscriptionId $subscriptionId -ResourceGroupName $Config.ResourceGroupName -Name $Config.ActionGroupName -Location $Config.AzureRegion -EmailRecipients $emails -Apply $apply
             $monitoring.Entries += $diag
             $monitoring.Entries += $ag
             $upns = @($users | ForEach-Object { $_.userPrincipalName })
             $ids = @($users | ForEach-Object { $_.id }) + @($group.id, $rmau.id, $rmauAdminGroup.id, $authStrength.id, $caPolicy.id)
             if ($Config.CreateSignInAlert) {
+                Write-ExecutionStep -Status RUNNING -Message 'Sikrer Azure Monitor alert: breakglass sign-in'
                 $monitoring.Entries += Ensure-ScheduledQueryRule -SubscriptionId $subscriptionId -ResourceGroupName $Config.ResourceGroupName -Name 'alert-breakglass-any-signin' -Location $Config.AzureRegion -WorkspaceResourceId $workspaceResourceId -Query (New-BreakGlassSignInKql -UserPrincipalNames $upns) -ActionGroupId $ag.Id -Apply $apply
             }
             if ($Config.CreateAuditAlert) {
+                Write-ExecutionStep -Status RUNNING -Message 'Sikrer Azure Monitor alert: breakglass object changes'
                 $monitoring.Entries += Ensure-ScheduledQueryRule -SubscriptionId $subscriptionId -ResourceGroupName $Config.ResourceGroupName -Name 'alert-breakglass-object-change' -Location $Config.AzureRegion -WorkspaceResourceId $workspaceResourceId -Query (New-BreakGlassAuditKql -UserPrincipalNames $upns -ObjectIds $ids) -ActionGroupId $ag.Id -Apply $apply
             }
+            Write-ExecutionStep -Status $(if ($apply) { 'DONE' } else { 'PLAN' }) -Message 'Azure Monitor/Log Analytics konfiguration håndteret'
         }
         catch {
             Write-SafeError -Message 'Azure Monitor konfiguration kunne ikke fuldføres.' -ErrorRecord $_
+            Write-ExecutionStep -Status FAIL -Message 'Azure Monitor/Log Analytics konfiguration fejlede'
             $monitoring.Entries += [pscustomobject]@{ Status = 'Warning'; Message = ConvertTo-RedactedError $_ }
         }
     }
+    else {
+        Write-ExecutionStep -Status SKIP -Message 'Azure Monitor/Log Analytics er slået fra'
+    }
 
+    Write-ExecutionStep -Status RUNNING -Message 'Validerer FIDO2 registrering og samlet resultat'
     $fidoStatus = Test-BreakGlassFido2Registration -Users $users
     $validation = Invoke-Validation -Users $users -Group $group -RoleAssignments $roleAssignments -Rmau $rmau -RmauAdminGroup $rmauAdminGroup -RmauScopedRoleAssignments $rmauScopedRoleAssignments -AuthStrength $authStrength -CaPolicy $caPolicy -FidoStatus $fidoStatus -Monitoring $monitoring
     $script:State['ValidationResults'] = $validation
@@ -2543,10 +2602,13 @@ function Invoke-BreakGlassConfiguration {
     $result | Add-Member -MemberType NoteProperty -Name ValidationResults -Value ([object]([object[]]@($validation)))
     $result | Add-Member -MemberType NoteProperty -Name Warnings -Value ([object]([object[]]@($script:State['Warnings'])))
     $result | Add-Member -MemberType NoteProperty -Name CaBackupFiles -Value ([object]([object[]]@($script:State['CaBackupFiles'])))
+    $result | Add-Member -MemberType NoteProperty -Name ExecutionSteps -Value ([object]([object[]]@(Get-ExecutionStepsFromLog)))
     $script:State['Result'] = $result
     New-JsonReport -Result $result -OutputFolder $output | Out-Null
     New-HtmlReport -Result $result -OutputFolder $output | Out-Null
+    Write-ExecutionStep -Status DONE -Message "Rapport genereret: $(Join-Path -Path $output -ChildPath 'report.html')"
     Show-CreatedPasswordsOnce
+    Write-ExecutionStep -Status DONE -Message ("Kørsel færdig i {0} mode" -f $(if ($apply) { 'Configuration' } else { 'Report only' }))
     Write-AppLog -Level PASS -Message 'Konfiguration/rapportering fuldført.'
     return $result
 }
@@ -2669,6 +2731,7 @@ function New-HtmlReport {
     $fidoTable = New-HtmlTable -Items @($Result.Fido2 | Select-Object UserPrincipalName,HasFido2,Count)
     $monitoringTable = New-HtmlTable -Items @($Result.Monitoring.Entries)
     $caExclusionTable = New-HtmlTable -Items @($Result.ExistingCaExclusions)
+    $executionStepsTable = New-HtmlTable -Items @($Result.ExecutionSteps)
     $warnings = if ($Result.Warnings.Count -gt 0) { '<ul>' + (($Result.Warnings | ForEach-Object { '<li>{0}</li>' -f (ConvertTo-HtmlEncoded $_) }) -join '') + '</ul>' } else { '<p>Ingen registrerede advarsler.</p>' }
     $content = @"
 <!doctype html>
@@ -2750,6 +2813,8 @@ function New-HtmlReport {
   $fidoTable
   <h2>Azure Monitor</h2>
   $monitoringTable
+  <h2>Udførte trin</h2>
+  $executionStepsTable
   <h2>Validering</h2>
   $validationTable
   <h2>Advarsler</h2>
@@ -3117,6 +3182,63 @@ function Resolve-ReportPathFromUi {
     return ''
 }
 
+function Get-ExecutionStepsFromLog {
+    [CmdletBinding()]
+    param()
+
+    if (-not (Test-Path -LiteralPath $script:LogFile)) { return @() }
+    $steps = New-Object System.Collections.Generic.List[object]
+    foreach ($line in (Get-Content -LiteralPath $script:LogFile -Encoding UTF8 -ErrorAction SilentlyContinue)) {
+        $match = [regex]::Match($line, '^\[(?<time>[^\]]+)\] \[STEP\] (?<status>[^|]+)\|(?<message>.+)$')
+        if (-not $match.Success) { continue }
+        $steps.Add([pscustomobject]@{
+            Time    = $match.Groups['time'].Value
+            Status  = $match.Groups['status'].Value
+            Message = $match.Groups['message'].Value
+        }) | Out-Null
+    }
+    return $steps.ToArray()
+}
+
+function Sync-ExecutionStepListFromLog {
+    [CmdletBinding()]
+    param()
+
+    if (-not $script:Ui.ContainsKey('ExecutionStepList') -or -not $script:Ui.ExecutionStepList -or -not (Test-Path -LiteralPath $script:LogFile)) { return }
+    try {
+        $lines = Get-Content -LiteralPath $script:LogFile -Encoding UTF8 -ErrorAction Stop
+        $items = New-Object System.Collections.Generic.List[string]
+        foreach ($line in $lines) {
+            $match = [regex]::Match($line, '\] \[STEP\] (?<status>[^|]+)\|(?<message>.+)$')
+            if (-not $match.Success) { continue }
+            $status = $match.Groups['status'].Value
+            $message = $match.Groups['message'].Value
+            $prefix = switch ($status) {
+                'DONE' { '[OK]' }
+                'PLAN' { '[PLAN]' }
+                'SKIP' { '[SKIP]' }
+                'WARN' { '[WARN]' }
+                'FAIL' { '[FAIL]' }
+                default { '[...]' }
+            }
+            $items.Add(('{0} {1}' -f $prefix, $message)) | Out-Null
+        }
+        $current = @($script:Ui.ExecutionStepList.Items)
+        if ($current.Count -ne $items.Count -or (($current -join "`n") -ne ($items.ToArray() -join "`n"))) {
+            $script:Ui.ExecutionStepList.Items.Clear()
+            foreach ($item in $items) {
+                $script:Ui.ExecutionStepList.Items.Add($item) | Out-Null
+            }
+            if ($script:Ui.ExecutionStepList.Items.Count -gt 0) {
+                $script:Ui.ExecutionStepList.ScrollIntoView($script:Ui.ExecutionStepList.Items[$script:Ui.ExecutionStepList.Items.Count - 1])
+            }
+        }
+    }
+    catch {
+        # Step polling is best-effort.
+    }
+}
+
 function Update-UiPump {
     [CmdletBinding()]
     param()
@@ -3299,6 +3421,16 @@ function Update-ModeUi {
     }
     if ($script:Ui.ContainsKey('ModeStatusText') -and $script:Ui.ModeStatusText) {
         $script:Ui.ModeStatusText.Text = if ($reportOnly) { 'Aktiv mode: Report only - lav kun plan/rapport uden ændringer' } else { 'Aktiv mode: Configuration - ændringer udføres først når du starter kørsel' }
+    }
+    if ($script:Ui.ContainsKey('ApplyButton') -and $script:Ui.ApplyButton) {
+        if ($reportOnly) {
+            $script:Ui.ApplyButton.Content = 'Generér rapport'
+            $script:Ui.ApplyButton.Width = 130
+        }
+        else {
+            $script:Ui.ApplyButton.Content = 'Start konfiguration'
+            $script:Ui.ApplyButton.Width = 150
+        }
     }
     if ($reportOnly) {
         $script:Ui.CaState.SelectedIndex = 0
@@ -3580,6 +3712,7 @@ function Sync-LogView {
             $script:LogTextBox.ScrollToEnd()
             $script:LastLogLength = $content.Length
         }
+        Sync-ExecutionStepListFromLog
     }
     catch {
         # Log polling can race with file writes.
@@ -3859,7 +3992,18 @@ function Start-BreakGlassWizard {
                         <Button x:Name="ApplyButton" Content="Start kørsel" Height="32" Width="130" Margin="0,0,10,0"/>
                         <ProgressBar x:Name="ProgressBar" Width="260" Height="18" IsIndeterminate="False" VerticalAlignment="Center"/>
                     </StackPanel>
-                    <TextBox x:Name="ExecutionLog" FontFamily="Consolas" IsReadOnly="True" AcceptsReturn="True" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"/>
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="220"/>
+                            <RowDefinition Height="8"/>
+                            <RowDefinition Height="*"/>
+                        </Grid.RowDefinitions>
+                        <DockPanel Grid.Row="0">
+                            <TextBlock DockPanel.Dock="Top" Text="Udførte trin" FontWeight="SemiBold" Margin="0,0,0,6"/>
+                            <ListBox x:Name="ExecutionStepList" FontFamily="Consolas"/>
+                        </DockPanel>
+                        <TextBox x:Name="ExecutionLog" Grid.Row="2" FontFamily="Consolas" IsReadOnly="True" AcceptsReturn="True" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"/>
+                    </Grid>
                 </DockPanel>
             </TabItem>
             <TabItem Header="7. Manuel FIDO2 opsætning">
@@ -3928,7 +4072,7 @@ function Start-BreakGlassWizard {
         'VersionBadge','UnderstandRisk','ReportModeRadio','ConfigureModeRadio','ConnectAllButton','GraphConnectionBadge','AzureConnectionBadge','GraphAccount','TenantId','TenantName','OnMicrosoftDomain','AzureAccount','SubscriptionIdDetected','ConnectionStatus','GraphScopesRequested','MonitoringConnectionRequirement',
         'RunDiscoveryButton','DiscoverySummary','DiscoveryList','UserPrefix1','UserPrefix2','DisplayName1','DisplayName2','GroupDisplayName','RmauDisplayName','RmauAdminGroupDisplayName','RmauAdminPickerPanel','AddRmauAdminButton','RmauAdminPickerStatus','AuthStrengthName','CaPolicyName','CaState',
         'ExcludeExistingCa','AaguidInputPanel','AddAaguidButton','ModeStatusText','DisableMonitoring','UseExistingWorkspace','SubscriptionIdLabel','SubscriptionId','ResourceGroupName','WorkspaceName','AzureRegion','DiagnosticSettingName',
-        'ActionGroupName','AlertEmails','CreateSignInAlert','CreateAuditAlert','BuildPlanButton','ExportPlanButton','ApplyButton','PlanText','ProgressBar','ExecutionLog','OpenSecurityInfoButton',
+        'ActionGroupName','AlertEmails','CreateSignInAlert','CreateAuditAlert','BuildPlanButton','ExportPlanButton','ApplyButton','PlanText','ProgressBar','ExecutionStepList','ExecutionLog','OpenSecurityInfoButton',
         'ValidateFidoButton','FidoResults','RunValidationButton','ValidationList','OutputFolderText','ReportPathText','OpenReportButton','OpenOutputFolderButton','BackButton','NextButton','CloseButton','BackgroundStatus','StatusProgress','FooterStatus','WizardTabs'
     )) {
     $script:Ui[$name] = $script:MainWindow.FindName($name)
@@ -4039,6 +4183,9 @@ function Start-BreakGlassWizard {
                 if ((Show-AppMessage -Message 'Du har valgt at oprette Conditional Access policy som ENABLED. Dette er sikkerhedskritisk. Fortsæt?' -Buttons 'YesNo' -Icon 'Warning') -ne 'Yes') {
                     return
                 }
+            }
+            if ($script:Ui.ContainsKey('ExecutionStepList') -and $script:Ui.ExecutionStepList) {
+                $script:Ui.ExecutionStepList.Items.Clear()
             }
             Set-UiStatus -Message 'Starter apply/rapportering i separat PowerShell worker...' -Busy -Log
             Start-WorkerApply -Config $config
