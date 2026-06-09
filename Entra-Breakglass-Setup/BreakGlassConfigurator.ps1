@@ -850,9 +850,40 @@ function Invoke-GraphRequestSafe {
     catch {
         if (-not $SuppressErrorLog) {
             Write-SafeError -Message "Graph-kald fejlede: $Method $Uri." -ErrorRecord $_
+            $responseBody = Get-GraphErrorResponseBody -ErrorRecord $_
+            if (-not [string]::IsNullOrWhiteSpace($responseBody)) {
+                Write-AppLog -Level ERROR -Message "Graph response body: $responseBody"
+            }
         }
         throw
     }
+}
+
+function Get-GraphErrorResponseBody {
+    [CmdletBinding()]
+    param([AllowNull()] $ErrorRecord)
+
+    if (-not ($ErrorRecord -is [System.Management.Automation.ErrorRecord])) {
+        return ''
+    }
+
+    foreach ($propertyName in @('ResponseMessage', 'Response')) {
+        $property = $ErrorRecord.Exception.PSObject.Properties[$propertyName]
+        if ($property -and $property.Value) {
+            $response = $property.Value
+            $contentProperty = $response.PSObject.Properties['Content']
+            if ($contentProperty -and $contentProperty.Value) {
+                try {
+                    return [string] $contentProperty.Value.ReadAsStringAsync().GetAwaiter().GetResult()
+                }
+                catch {
+                    return ''
+                }
+            }
+        }
+    }
+
+    return ''
 }
 
 function Invoke-GraphGetAllPages {
@@ -1547,9 +1578,10 @@ function New-BreakGlassConditionalAccessPolicy {
         [Parameter(Mandatory)][string] $State
     )
 
+    $graphState = ConvertTo-GraphConditionalAccessState -State $State
     $body = @{
         displayName = $DisplayName
-        state       = $State
+        state       = $graphState
         conditions  = @{
             users = @{
                 includeGroups = @($GroupId)
@@ -1557,17 +1589,31 @@ function New-BreakGlassConditionalAccessPolicy {
             }
             applications = @{
                 includeApplications = @('All')
+                excludeApplications = @()
             }
             clientAppTypes = @('all')
         }
         grantControls = @{
-            operator = 'AND'
+            operator = 'OR'
             authenticationStrength = @{
                 id = $AuthenticationStrengthId
             }
         }
     }
     return Invoke-GraphRequestSafe -Method POST -Uri 'https://graph.microsoft.com/v1.0/identity/conditionalAccess/policies' -Body $body
+}
+
+function ConvertTo-GraphConditionalAccessState {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string] $State)
+
+    switch ($State) {
+        'reportOnly' { return 'enabledForReportingButNotEnforced' }
+        'enabledForReportingButNotEnforced' { return 'enabledForReportingButNotEnforced' }
+        'enabled' { return 'enabled' }
+        'disabled' { return 'disabled' }
+        default { throw "Ukendt Conditional Access state '$State'." }
+    }
 }
 
 function Ensure-BreakGlassConditionalAccessPolicy {
