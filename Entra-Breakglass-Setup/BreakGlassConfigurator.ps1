@@ -25,7 +25,7 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 $script:AppName = 'NetIP Entra Break Glass Configurator'
-$script:AppVersion = '1.0.19'
+$script:AppVersion = '1.0.20'
 $script:GraphModulePinnedVersion = [version] '2.31.0'
 $script:ProjectRoot = Split-Path -Parent $PSCommandPath
 if ([string]::IsNullOrWhiteSpace($script:ProjectRoot)) {
@@ -1602,22 +1602,27 @@ function Get-BreakGlassGroup {
         return $null
     }
     $filter = [uri]::EscapeDataString("displayName eq '$($DisplayName.Replace("'", "''"))'")
-    return Invoke-GraphGetAllPages -Uri "https://graph.microsoft.com/v1.0/groups?`$filter=$filter&`$select=id,displayName,description,securityEnabled,mailEnabled,isAssignableToRole,groupTypes" | Select-Object -First 1
+    return Invoke-GraphGetAllPages -Uri "https://graph.microsoft.com/v1.0/groups?`$filter=$filter&`$select=id,displayName,description,mailNickname,securityEnabled,mailEnabled,isAssignableToRole,groupTypes" | Select-Object -First 1
 }
 
-function New-BreakGlassRoleAssignableGroup {
+function New-BreakGlassSecurityGroup {
     [CmdletBinding()]
-    param([Parameter(Mandatory)][string] $DisplayName)
+    param(
+        [Parameter(Mandatory)][string] $DisplayName,
+        [Parameter(Mandatory)][bool] $RoleAssignable
+    )
 
     $mailNickname = ($DisplayName -replace '[^a-zA-Z0-9]', '')
     $body = @{
         displayName        = $DisplayName
-        description        = if ($DisplayName -like '*RMAU*Admin*') { 'Scoped administrators for the restricted management administrative unit protecting BreakGlass accounts and group.' } else { 'Role-assignable BreakGlass group. Members inherit permanent Global Administrator and are protected by restricted management administrative unit.' }
+        description        = if ($RoleAssignable) { 'Scoped administrators for the restricted management administrative unit protecting BreakGlass accounts.' } else { 'Security group for break-glass accounts. Used for Conditional Access targeting/exclusions and monitoring. This group does not grant administrator roles.' }
         mailEnabled        = $false
         mailNickname       = $mailNickname
         securityEnabled    = $true
-        isAssignableToRole = $true
         groupTypes         = @()
+    }
+    if ($RoleAssignable) {
+        $body['isAssignableToRole'] = $true
     }
     Invoke-GraphRequestSafe -Method POST -Uri 'https://graph.microsoft.com/v1.0/groups' -Body $body | Out-Null
     return Get-BreakGlassGroup -DisplayName $DisplayName
@@ -1627,29 +1632,41 @@ function Ensure-BreakGlassGroup {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][string] $DisplayName,
-        [Parameter(Mandatory)][bool] $Apply
+        [Parameter(Mandatory)][bool] $Apply,
+        [switch] $RoleAssignable
     )
 
     if ($script:State.Mock) {
-        return [pscustomobject]@{ id = 'mock-bg-group'; displayName = $DisplayName; isAssignableToRole = $true; securityEnabled = $true; mailEnabled = $false; EnsureStatus = 'MockValidated'; EnsureDetail = 'Mock role-assignable group validated.' }
+        $mockId = if ($RoleAssignable) { 'mock-rmau-admin-group' } else { 'mock-bg-ca-exclude-group' }
+        $mockDetail = if ($RoleAssignable) { 'Mock role-assignable RMAU admin group validated.' } else { 'Mock security group validated.' }
+        return [pscustomobject]@{ id = $mockId; displayName = $DisplayName; isAssignableToRole = [bool] $RoleAssignable; securityEnabled = $true; mailEnabled = $false; EnsureStatus = 'MockValidated'; EnsureDetail = $mockDetail }
     }
 
     $group = Get-BreakGlassGroup -DisplayName $DisplayName
     if ($group) {
         Write-AppLog -Level PASS -Message "Gruppe findes: $DisplayName"
-        if ($group.isAssignableToRole -ne $true) {
+        if ($RoleAssignable -and $group.isAssignableToRole -ne $true) {
             Write-AppLog -Level WARN -Message "Gruppen findes, men isAssignableToRole er ikke true. Ny rolle-assignable gruppe kan være nødvendig."
-            return Set-EnsureStatus -Object $group -Status 'Incompatible' -Detail 'Existing group is not role-assignable and cannot receive Entra directory roles.'
+            return Set-EnsureStatus -Object $group -Status 'Incompatible' -Detail 'Existing group is not role-assignable and cannot receive scoped Entra directory roles.'
         }
-        return Set-EnsureStatus -Object $group -Status 'AlreadyExists' -Detail 'Existing role-assignable group reused.'
+        if (-not $RoleAssignable -and $group.isAssignableToRole -eq $true) {
+            Write-AppLog -Level WARN -Message "Gruppen findes og er role-assignable, men standardbaselinen kræver kun en almindelig security group: $DisplayName"
+            return Set-EnsureStatus -Object $group -Status 'AlreadyExists' -Detail 'Existing group reused. Note: group is role-assignable, but this baseline only requires a normal security group.'
+        }
+        $detail = if ($RoleAssignable) { 'Existing role-assignable RMAU admin group reused.' } else { 'Existing security group reused.' }
+        return Set-EnsureStatus -Object $group -Status 'AlreadyExists' -Detail $detail
     }
 
     if (-not $Apply) {
-        Write-AppLog -Level PLAN -Message "Plan: opret rolle-assignable gruppe $DisplayName"
-        return [pscustomobject]@{ id = 'planned-bg-group'; displayName = $DisplayName; isAssignableToRole = $true; securityEnabled = $true; mailEnabled = $false; Planned = $true; EnsureStatus = 'PlannedCreate'; EnsureDetail = 'Role-assignable group will be created in Configuration mode.' }
+        $kind = if ($RoleAssignable) { 'rolle-assignable RMAU admin-gruppe' } else { 'almindelig security group' }
+        $plannedId = if ($RoleAssignable) { 'planned-rmau-admin-group' } else { 'planned-bg-ca-exclude-group' }
+        $detail = if ($RoleAssignable) { 'Role-assignable RMAU admin group will be created in Configuration mode.' } else { 'Security group will be created in Configuration mode.' }
+        Write-AppLog -Level PLAN -Message "Plan: opret $kind $DisplayName"
+        return [pscustomobject]@{ id = $plannedId; displayName = $DisplayName; isAssignableToRole = [bool] $RoleAssignable; securityEnabled = $true; mailEnabled = $false; Planned = $true; EnsureStatus = 'PlannedCreate'; EnsureDetail = $detail }
     }
 
-    return Set-EnsureStatus -Object (New-BreakGlassRoleAssignableGroup -DisplayName $DisplayName) -Status 'Created' -Detail 'Role-assignable group was created.'
+    $createdDetail = if ($RoleAssignable) { 'Role-assignable RMAU admin group was created.' } else { 'Security group was created.' }
+    return Set-EnsureStatus -Object (New-BreakGlassSecurityGroup -DisplayName $DisplayName -RoleAssignable ([bool] $RoleAssignable)) -Status 'Created' -Detail $createdDetail
 }
 
 function Ensure-GroupMember {
@@ -1740,22 +1757,22 @@ function Ensure-DirectoryRoleAssignment {
     return [pscustomobject]@{ Principal = $PrincipalLabel; Role = $RoleDisplayName; Scope = $DirectoryScopeId; Status = 'Assigned'; AssignmentId = $assignment.id }
 }
 
-function Ensure-BreakGlassGlobalAdminGroupAssignment {
+function Ensure-BreakGlassUsersGlobalAdminAssignment {
     [CmdletBinding()]
     param(
-        [Parameter(Mandatory)] $Group,
+        [Parameter(Mandatory)][object[]] $Users,
         [Parameter(Mandatory)][bool] $Apply
     )
 
-    if ($Group.isAssignableToRole -ne $true -and -not ($Group.id -like 'planned-*')) {
-        $message = "Gruppen '$($Group.displayName)' er ikke role-assignable og kan derfor ikke tildeles Global Administrator."
-        if (-not $Apply) {
-            Write-AppLog -Level WARN -Message $message
-            return [pscustomobject]@{ Principal = $Group.displayName; Role = 'Global Administrator'; Scope = '/'; Status = 'Incompatible'; AssignmentId = ''; Message = $message }
+    $results = @()
+    foreach ($user in $Users) {
+        $label = [string] (Get-ObjectPropertyValue -InputObject $user -Name 'userPrincipalName')
+        if ([string]::IsNullOrWhiteSpace($label)) {
+            $label = [string] (Get-ObjectPropertyValue -InputObject $user -Name 'displayName')
         }
-        throw $message
+        $results += Ensure-DirectoryRoleAssignment -Principal $user -PrincipalLabel $label -RoleDisplayName 'Global Administrator' -DirectoryScopeId '/' -Apply $Apply
     }
-    return Ensure-DirectoryRoleAssignment -Principal $Group -PrincipalLabel $Group.displayName -RoleDisplayName 'Global Administrator' -DirectoryScopeId '/' -Apply $Apply
+    return $results
 }
 
 function Get-DirectoryObjectSummary {
@@ -1929,6 +1946,7 @@ function Find-ExistingEmergencyAccessCandidates {
     }
 
     $groupFilters = @(
+        "startsWith(displayName,'SG-BreakGlass')",
         "startsWith(displayName,'GRP-ENTRA-BreakGlass')",
         "startsWith(displayName,'CA-BreakGlass')",
         "startsWith(displayName,'Emergency Access')",
@@ -2075,29 +2093,36 @@ function Ensure-RmauMember {
 
     $auId = [string] $AdministrativeUnit.id
     $objectId = [string] $DirectoryObject.id
+    $objectLabel = [string] (Get-ObjectPropertyValue -InputObject $DirectoryObject -Name 'userPrincipalName')
+    if ([string]::IsNullOrWhiteSpace($objectLabel)) {
+        $objectLabel = [string] (Get-ObjectPropertyValue -InputObject $DirectoryObject -Name 'displayName')
+    }
+    if ([string]::IsNullOrWhiteSpace($objectLabel)) {
+        $objectLabel = $objectId
+    }
     if ($script:State.Mock -or $auId -like 'planned-*' -or $objectId -like 'planned-*') {
-        Write-AppLog -Level PLAN -Message "Plan/mock: tilføj objekt $objectId til RMAU $($AdministrativeUnit.displayName)"
-        return [pscustomobject]@{ ObjectId = $objectId; Status = 'PlannedOrMock' }
+        Write-AppLog -Level PLAN -Message "Plan/mock: tilføj objekt $objectLabel til RMAU $($AdministrativeUnit.displayName)"
+        return [pscustomobject]@{ Object = $objectLabel; ObjectId = $objectId; AdministrativeUnit = $AdministrativeUnit.displayName; Status = 'PlannedOrMock' }
     }
 
     try {
         $members = Invoke-GraphGetAllPages -Uri "https://graph.microsoft.com/beta/directory/administrativeUnits/$auId/members?`$select=id"
         if (@($members | Where-Object { $_.id -eq $objectId }).Count -gt 0) {
-            Write-AppLog -Level PASS -Message "Objekt $objectId er allerede medlem af RMAU."
-            return [pscustomobject]@{ ObjectId = $objectId; Status = 'AlreadyMember' }
+            Write-AppLog -Level PASS -Message "Objekt $objectLabel er allerede medlem af RMAU."
+            return [pscustomobject]@{ Object = $objectLabel; ObjectId = $objectId; AdministrativeUnit = $AdministrativeUnit.displayName; Status = 'AlreadyMember' }
         }
         if (-not $Apply) {
-            Write-AppLog -Level PLAN -Message "Plan: tilføj objekt $objectId til RMAU."
-            return [pscustomobject]@{ ObjectId = $objectId; Status = 'Planned' }
+            Write-AppLog -Level PLAN -Message "Plan: tilføj objekt $objectLabel til RMAU."
+            return [pscustomobject]@{ Object = $objectLabel; ObjectId = $objectId; AdministrativeUnit = $AdministrativeUnit.displayName; Status = 'Planned' }
         }
         $body = @{ '@odata.id' = "https://graph.microsoft.com/v1.0/directoryObjects/$objectId" }
         Invoke-GraphRequestSafe -Method POST -Uri "https://graph.microsoft.com/beta/directory/administrativeUnits/$auId/members/`$ref" -Body $body | Out-Null
-        Write-AppLog -Level PASS -Message "Objekt $objectId tilføjet til RMAU."
-        return [pscustomobject]@{ ObjectId = $objectId; Status = 'Added' }
+        Write-AppLog -Level PASS -Message "Objekt $objectLabel tilføjet til RMAU."
+        return [pscustomobject]@{ Object = $objectLabel; ObjectId = $objectId; AdministrativeUnit = $AdministrativeUnit.displayName; Status = 'Added' }
     }
     catch {
         Write-SafeError -Message 'RMAU medlemskab kunne ikke sættes.' -ErrorRecord $_
-        return [pscustomobject]@{ ObjectId = $objectId; Status = 'Warning'; Message = ConvertTo-RedactedError $_ }
+        return [pscustomobject]@{ Object = $objectLabel; ObjectId = $objectId; AdministrativeUnit = $AdministrativeUnit.displayName; Status = 'Warning'; Message = ConvertTo-RedactedError $_ }
     }
 }
 
@@ -2902,10 +2927,12 @@ function New-Plan {
         }
         PlannedActions        = @(
             "Validate or create users $upn1 and $upn2",
-            "Validate or create role-assignable group $($Config.GroupDisplayName)",
-            "Assign Global Administrator to role-assignable group $($Config.GroupDisplayName)",
+            "Assign Global Administrator directly to $upn1 and $upn2",
+            "Validate or create security group $($Config.GroupDisplayName)",
+            "Add $upn1 and $upn2 to security group $($Config.GroupDisplayName) for Conditional Access targeting/exclusions",
             "Validate or create restricted management administrative unit $($Config.RmauDisplayName)",
-            "Validate or create RMAU administrator group $($Config.RmauAdminGroupDisplayName)",
+            "Add only the break-glass user objects to RMAU $($Config.RmauDisplayName)",
+            "Validate or create role-assignable RMAU administrator group $($Config.RmauAdminGroupDisplayName)",
             'Assign User Administrator and Groups Administrator scoped to the RMAU admin group',
             "Validate or create authentication strength $($Config.AuthStrengthName)",
             "Validate or create Conditional Access policy $($Config.CaPolicyName)",
@@ -2948,20 +2975,20 @@ function Invoke-BreakGlassConfiguration {
     $users += Ensure-BreakGlassUser -Prefix $Config.UserPrefix2 -DisplayName $Config.DisplayName2 -OnMicrosoftDomain $domain -Apply $apply
     Write-ExecutionStep -Status $(if ($apply) { 'DONE' } else { 'PLAN' }) -Message "Breakglass account håndteret: $($users[-1].userPrincipalName)"
 
-    Write-ExecutionStep -Status RUNNING -Message "Sikrer breakglass admin-gruppe: $($Config.GroupDisplayName)"
+    Write-ExecutionStep -Status RUNNING -Message "Sikrer breakglass security group til CA targeting/exclusions: $($Config.GroupDisplayName)"
     $group = Ensure-BreakGlassGroup -DisplayName $Config.GroupDisplayName -Apply $apply
-    Write-ExecutionStep -Status $(if ($apply) { 'DONE' } else { 'PLAN' }) -Message "Breakglass admin-gruppe håndteret: $($Config.GroupDisplayName)"
-    Write-ExecutionStep -Status RUNNING -Message "Sikrer medlemskab af breakglass admin-gruppe"
+    Write-ExecutionStep -Status $(if ($apply) { 'DONE' } else { 'PLAN' }) -Message "Breakglass security group håndteret: $($Config.GroupDisplayName)"
+    Write-ExecutionStep -Status RUNNING -Message "Sikrer medlemskab af breakglass security group"
     $membership = foreach ($user in $users) { Ensure-GroupMember -Group $group -User $user -Apply $apply }
     Write-ExecutionStep -Status $(if ($apply) { 'DONE' } else { 'PLAN' }) -Message 'Medlemskab håndteret for breakglass accounts'
-    Write-ExecutionStep -Status RUNNING -Message 'Sikrer Global Administrator rolle på breakglass admin-gruppen'
-    $roleAssignments = @(Ensure-BreakGlassGlobalAdminGroupAssignment -Group $group -Apply $apply)
-    Write-ExecutionStep -Status $(if ($apply) { 'DONE' } else { 'PLAN' }) -Message "Global Administrator rolle håndteret for $($Config.GroupDisplayName)"
+    Write-ExecutionStep -Status RUNNING -Message 'Sikrer direkte Global Administrator rolle på begge breakglass accounts'
+    $roleAssignments = @(Ensure-BreakGlassUsersGlobalAdminAssignment -Users $users -Apply $apply)
+    Write-ExecutionStep -Status $(if ($apply) { 'DONE' } else { 'PLAN' }) -Message 'Direkte Global Administrator rolle håndteret for begge breakglass accounts'
     Write-ExecutionStep -Status RUNNING -Message "Sikrer RMAU: $($Config.RmauDisplayName)"
     $rmau = Ensure-RestrictedManagementAdministrativeUnit -DisplayName $Config.RmauDisplayName -Apply $apply
     Write-ExecutionStep -Status $(if ($apply) { 'DONE' } else { 'PLAN' }) -Message "RMAU håndteret: $($Config.RmauDisplayName)"
     Write-ExecutionStep -Status RUNNING -Message "Sikrer RMAU admin-gruppe: $($Config.RmauAdminGroupDisplayName)"
-    $rmauAdminGroup = Ensure-BreakGlassGroup -DisplayName $Config.RmauAdminGroupDisplayName -Apply $apply
+    $rmauAdminGroup = Ensure-BreakGlassGroup -DisplayName $Config.RmauAdminGroupDisplayName -Apply $apply -RoleAssignable
     Write-ExecutionStep -Status $(if ($apply) { 'DONE' } else { 'PLAN' }) -Message "RMAU admin-gruppe håndteret: $($Config.RmauAdminGroupDisplayName)"
     Write-ExecutionStep -Status RUNNING -Message 'Sikrer medlemmer i RMAU admin-gruppen'
     $rmauAdminMembership = Ensure-RmauAdminGroupMembers -AdminGroup $rmauAdminGroup -AdminUserPrincipalNames @(ConvertFrom-DelimitedUpnList -Text $Config.RmauAdminUpns) -Apply $apply
@@ -2972,8 +2999,14 @@ function Invoke-BreakGlassConfiguration {
     $rmauMembership = @()
     Write-ExecutionStep -Status RUNNING -Message 'Tilføjer breakglass objekter til RMAU'
     foreach ($user in $users) { $rmauMembership += Ensure-RmauMember -AdministrativeUnit $rmau -DirectoryObject $user -Apply $apply }
-    $rmauMembership += Ensure-RmauMember -AdministrativeUnit $rmau -DirectoryObject $group -Apply $apply
-    Write-ExecutionStep -Status $(if ($apply) { 'DONE' } else { 'PLAN' }) -Message 'RMAU medlemskab håndteret for breakglass accounts og gruppe'
+    $rmauMembership += [pscustomobject]@{
+        Object             = $group.displayName
+        ObjectId           = $group.id
+        AdministrativeUnit = $rmau.displayName
+        Status             = 'Skipped'
+        Detail             = 'Security group is intentionally kept outside RMAU in the P1 baseline. The group grants no directory role; it is used for Conditional Access targeting/exclusions.'
+    }
+    Write-ExecutionStep -Status $(if ($apply) { 'DONE' } else { 'PLAN' }) -Message 'RMAU medlemskab håndteret for breakglass accounts; security group holdes udenfor RMAU'
 
     $aaguids = Validate-AaguidList -Text $Config.AllowedAaguids
     Write-ExecutionStep -Status RUNNING -Message "Sikrer authentication strength: $($Config.AuthStrengthName)"
@@ -3111,8 +3144,8 @@ function Invoke-Validation {
         $items += [pscustomobject]@{ Check = "Bruger enabled: $userUpn"; Status = if ($userAccountEnabled -eq $true) { 'Passed' } else { 'Warning' }; Detail = $userAccountEnabled }
         $items += [pscustomobject]@{ Check = "onmicrosoft.com UPN: $userUpn"; Status = if ($userUpn -like '*@*.onmicrosoft.com') { 'Passed' } else { 'Failed' }; Detail = $userUpn }
     }
-    $items += [pscustomobject]@{ Check = 'Break-glass gruppe findes'; Status = if ($Group.id) { 'Passed' } else { 'Failed' }; Detail = $Group.displayName }
-    $items += [pscustomobject]@{ Check = 'Global Administrator på break-glass gruppe'; Status = if (@($RoleAssignments | Where-Object { $_.Role -eq 'Global Administrator' -and $_.Status -match 'Assigned|AlreadyAssigned|Planned|PlannedOrMock' }).Count -ge 1) { 'Passed' } else { 'Warning' }; Detail = (@($RoleAssignments | ForEach-Object { "$($_.Principal):$($_.Status)" }) -join ', ') }
+    $items += [pscustomobject]@{ Check = 'Break-glass CA security group findes'; Status = if ($Group.id) { 'Passed' } else { 'Failed' }; Detail = $Group.displayName }
+    $items += [pscustomobject]@{ Check = 'Global Administrator direkte på break-glass konti'; Status = if (@($RoleAssignments | Where-Object { $_.Role -eq 'Global Administrator' -and $_.Status -match 'Assigned|AlreadyAssigned|Planned|PlannedOrMock' }).Count -ge 2) { 'Passed' } else { 'Warning' }; Detail = (@($RoleAssignments | ForEach-Object { "$($_.Principal):$($_.Status)" }) -join ', ') }
     $items += [pscustomobject]@{ Check = 'RMAU findes'; Status = if ($Rmau.id) { 'Passed' } else { 'Warning' }; Detail = $Rmau.displayName }
     $items += [pscustomobject]@{ Check = 'RMAU admin-gruppe findes'; Status = if ($RmauAdminGroup.id) { 'Passed' } else { 'Warning' }; Detail = $RmauAdminGroup.displayName }
     $items += [pscustomobject]@{ Check = 'Scoped RMAU admin roles'; Status = if (@($RmauScopedRoleAssignments | Where-Object { $_.Status -match 'Assigned|AlreadyAssigned|Planned|PlannedOrMock' }).Count -ge 2) { 'Passed' } else { 'Warning' }; Detail = (@($RmauScopedRoleAssignments | ForEach-Object { "$($_.Role):$($_.Status)" }) -join ', ') }
@@ -3241,7 +3274,7 @@ function New-HtmlReport {
   $existingCandidatesTable
   <h2>Brugere</h2>
   $usersTable
-  <h2>Role-assignable gruppe</h2>
+  <h2>Conditional Access security group</h2>
   <table>
     <tr><th>DisplayName</th><td>$(ConvertTo-HtmlEncoded (Get-ReportProperty -Object $Result.Group -Name 'displayName'))</td></tr>
     <tr><th>ID</th><td>$(ConvertTo-HtmlEncoded (Get-ReportProperty -Object $Result.Group -Name 'id'))</td></tr>
@@ -3251,10 +3284,10 @@ function New-HtmlReport {
   </table>
   <h2>Gruppemedlemskab</h2>
   $membershipTable
-  <h2>Global Administrator assignment</h2>
+  <h2>Direkte Global Administrator assignments</h2>
   $roleTable
   <h2>Restricted management administrative unit</h2>
-  <p class="muted">RMAU/RBAU-beskyttelsen beskytter BreakGlass-konti og BG-gruppen. Kun RMAU admin-gruppen får scoped User Administrator og Groups Administrator rettigheder til at administrere de beskyttede objekter.</p>
+  <p class="muted">P1-baselinen beskytter BreakGlass-kontiene i RMAU. CA security group holdes udenfor RMAU og giver ingen administratorrolle; den bruges til Conditional Access targeting/exclusions og monitoring. Kun RMAU admin-gruppen får scoped User Administrator og Groups Administrator rettigheder til at administrere de beskyttede konti.</p>
   <table>
     <tr><th>DisplayName</th><td>$(ConvertTo-HtmlEncoded (Get-ReportProperty -Object $Result.RMAU -Name 'displayName'))</td></tr>
     <tr><th>ID</th><td>$(ConvertTo-HtmlEncoded (Get-ReportProperty -Object $Result.RMAU -Name 'id'))</td></tr>
@@ -3366,7 +3399,7 @@ function New-HandoverHtmlDocument {
   </table>
   <h2>Break Glass konti</h2>
   $usersTable
-  <h2>Role-assignable Break Glass gruppe</h2>
+  <h2>Conditional Access security group</h2>
   <table>
     <tr><th>DisplayName</th><td>$(ConvertTo-HtmlEncoded (Get-ReportProperty -Object $Result.Group -Name 'displayName'))</td></tr>
     <tr><th>ID</th><td>$(ConvertTo-HtmlEncoded (Get-ReportProperty -Object $Result.Group -Name 'id'))</td></tr>
@@ -3374,10 +3407,10 @@ function New-HandoverHtmlDocument {
   </table>
   <h2>Gruppemedlemskab</h2>
   $membershipTable
-  <h2>Global Administrator assignment</h2>
+  <h2>Direkte Global Administrator assignments</h2>
   $roleTable
   <h2>RMAU/RBAU beskyttelse</h2>
-  <p class="muted">RMAU/RBAU-beskyttelsen beskytter Break Glass-konti og BG-gruppen. Kun medlemmer af RMAU admin-gruppen får scoped User Administrator og Groups Administrator rettigheder til at administrere de beskyttede objekter.</p>
+  <p class="muted">P1-baselinen beskytter Break Glass-kontiene i RMAU. CA security group holdes udenfor RMAU og giver ingen administratorrolle; den bruges til Conditional Access targeting/exclusions og monitoring. Kun medlemmer af RMAU admin-gruppen får scoped User Administrator og Groups Administrator rettigheder til at administrere de beskyttede konti.</p>
   <table>
     <tr><th>RMAU</th><td>$(ConvertTo-HtmlEncoded (Get-ReportProperty -Object $Result.RMAU -Name 'displayName'))</td></tr>
     <tr><th>RMAU ID</th><td>$(ConvertTo-HtmlEncoded (Get-ReportProperty -Object $Result.RMAU -Name 'id'))</td></tr>
@@ -4580,14 +4613,14 @@ function Start-BreakGlassWizard {
                 <ScrollViewer VerticalScrollBarVisibility="Auto">
                     <StackPanel Margin="18" MaxWidth="980">
                         <TextBlock FontSize="18" FontWeight="SemiBold" Text="Velkommen"/>
-                        <TextBlock TextWrapping="Wrap" Margin="0,10,0,0" Text="Dette værktøj etablerer en break-glass baseline med cloud-only konti, role-assignable Global Administrator-gruppe, RMAU-beskyttelse, FIDO2 authentication strength, Conditional Access, Log Analytics og Azure Monitor alerts."/>
+                        <TextBlock TextWrapping="Wrap" Margin="0,10,0,0" Text="Dette værktøj etablerer en P1-venlig break-glass baseline med to cloud-only konti, direkte Global Administrator rolle på kontiene, almindelig security group til Conditional Access targeting/exclusions, RMAU-beskyttelse af kontiene, FIDO2 authentication strength, Conditional Access, Log Analytics og Azure Monitor alerts."/>
                         <TextBlock TextWrapping="Wrap" Margin="0,10,0,0" Text="FIDO2/FIDO key registrering automatiseres ikke. Du får en tydelig reminder i slutrapporten efter kørsel."/>
                         <TextBlock TextWrapping="Wrap" Margin="0,10,0,0" Text="Microsoft Sentinel og SentinelOne bruges ikke i v1. Overvågning bruger Entra Diagnostic Settings til Log Analytics samt Azure Monitor scheduled query alerts."/>
                         <Border BorderBrush="#CBD5E1" BorderThickness="1" CornerRadius="4" Padding="12" Margin="0,18,0,0">
                             <StackPanel>
                                 <TextBlock Text="Vælg kørselstype" FontWeight="SemiBold" Margin="0,0,0,8"/>
                                 <RadioButton x:Name="ReportModeRadio" GroupName="RunMode" Content="Report only - analysér tenant og generér rapport uden ændringer" IsChecked="True" Margin="0,0,0,6"/>
-                                <RadioButton x:Name="ConfigureModeRadio" GroupName="RunMode" Content="Configuration - opret/ret brugere, gruppe, roller, CA og monitoring efter bekræftelse"/>
+                                <RadioButton x:Name="ConfigureModeRadio" GroupName="RunMode" Content="Configuration - opret/ret brugere, CA security group, roller, CA og monitoring efter bekræftelse"/>
                             </StackPanel>
                         </Border>
                         <Border BorderBrush="#CBD5E1" BorderThickness="1" CornerRadius="4" Padding="12" Margin="0,12,0,0">
@@ -4683,8 +4716,8 @@ function Start-BreakGlassWizard {
                         <TextBox x:Name="DisplayName1" Grid.Row="1" Grid.Column="1" Text="BreakGlass 01" Margin="0,0,12,8"/>
                         <TextBlock Grid.Row="1" Grid.Column="2" Text="Display name 2"/>
                         <TextBox x:Name="DisplayName2" Grid.Row="1" Grid.Column="3" Text="BreakGlass 02" Margin="0,0,0,8"/>
-                        <TextBlock Grid.Row="2" Grid.Column="0" Text="Gruppe"/>
-                        <TextBox x:Name="GroupDisplayName" Grid.Row="2" Grid.Column="1" Text="SG-BreakGlass-Admins" Margin="0,0,12,8"/>
+                        <TextBlock Grid.Row="2" Grid.Column="0" Text="CA security group"/>
+                        <TextBox x:Name="GroupDisplayName" Grid.Row="2" Grid.Column="1" Text="SG-BreakGlass-CA-Exclude" Margin="0,0,12,8"/>
                         <TextBlock Grid.Row="2" Grid.Column="2" Text="RMAU"/>
                         <TextBox x:Name="RmauDisplayName" Grid.Row="2" Grid.Column="3" Text="RMAU-BreakGlass-Protection" Margin="0,0,0,8"/>
                         <TextBlock Grid.Row="3" Grid.Column="0" Text="Authentication strength"/>
@@ -4732,7 +4765,7 @@ function Start-BreakGlassWizard {
                             <Button x:Name="AddRmauAdminButton" Content="+ Global Admin" Height="28" Width="115" HorizontalAlignment="Left"/>
                             <TextBlock x:Name="RmauAdminPickerStatus" Margin="0,6,0,0" Foreground="#4B5563"/>
                         </StackPanel>
-                        <TextBlock Grid.Row="15" Grid.Column="0" Grid.ColumnSpan="4" Foreground="#92400E" TextWrapping="Wrap" Text="RMAU/RBAU-beskyttelsen lægger BreakGlass-konti og BG-gruppen i en restricted management administrative unit. Kun medlemmer af RMAU admin-gruppen får scoped User Administrator og Groups Administrator rettigheder til at administrere de beskyttede objekter."/>
+                        <TextBlock Grid.Row="15" Grid.Column="0" Grid.ColumnSpan="4" Foreground="#92400E" TextWrapping="Wrap" Text="P1-baselinen lægger kun BreakGlass-kontiene i en restricted management administrative unit. CA security group holdes udenfor RMAU og giver ingen administratorrolle. Kun medlemmer af RMAU admin-gruppen får scoped User Administrator og Groups Administrator rettigheder til at administrere de beskyttede konti."/>
                     </Grid>
                 </ScrollViewer>
             </TabItem>

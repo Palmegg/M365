@@ -9,10 +9,10 @@ Værktøjet er designet til at være sikkert, idempotent og egnet til lab-test m
 Scriptet hjælper med at konfigurere og validere:
 
 - To cloud-only break-glass konti på tenantens `*.onmicrosoft.com` domæne.
-- Role-assignable sikkerhedsgruppe til break-glass kontiene.
-- Gruppemedlemskab for begge konti.
-- Permanent Global Administrator assignment til den role-assignable break-glass gruppe.
-- Restricted Management Administrative Unit, RMAU, som beskytter break-glass konti og gruppen.
+- Direkte permanent Global Administrator assignment til begge break-glass konti.
+- Almindelig security group til break-glass kontiene, så gruppen kan bruges til Conditional Access targeting/exclusions og monitoring.
+- Gruppemedlemskab for begge konti i security group'en.
+- Restricted Management Administrative Unit, RMAU, som beskytter break-glass kontiene.
 - Separat role-assignable RMAU administratorgruppe med scoped User Administrator og Groups Administrator roller på RMAU'en.
 - Custom authentication strength til FIDO2, valgfrit begrænset med AAGUIDs.
 - Dedikeret Conditional Access policy, som kræver authentication strength for gruppen.
@@ -57,7 +57,7 @@ Typisk kræves en kombination af:
 - Authentication Policy Administrator
 - User Administrator eller tilsvarende rettigheder
 
-Scriptet bruger ikke PIM. Det tildeler Global Administrator permanent til den role-assignable break-glass gruppe og tildeler RMAU-scopede roller til en separat administratorgruppe.
+Scriptet bruger ikke PIM. Standarddesignet er P1-venligt: det tildeler Global Administrator direkte til de to break-glass konti, opretter en almindelig security group til Conditional Access targeting/exclusions, og tildeler RMAU-scopede roller til en separat role-assignable administratorgruppe.
 
 ## Nødvendige Azure roller
 
@@ -176,7 +176,7 @@ Version 1 automatiserer ikke FIDO2/FIDO key enrollment. Konsulenten skal manuelt
 2. Kør i en testtenant med `Report only` valgt.
 3. Gennemgå `plan.json` og `report.html`.
 4. Kør apply med CA policy state `reportOnly`.
-5. Bekræft brugere, break-glass gruppe, GA assignment på gruppen, RMAU, RMAU admin-gruppe og CA policy i Entra admin center.
+5. Bekræft brugere, direkte GA assignments på kontiene, CA security group, RMAU, RMAU admin-gruppe og CA policy i Entra admin center.
 6. Registrer to FIDO2 keys manuelt for hver konto.
 7. Kør FIDO2-validering.
 8. Test sign-in alerts og audit/change alerts.
