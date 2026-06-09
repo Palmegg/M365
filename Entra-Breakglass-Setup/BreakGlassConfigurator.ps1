@@ -2306,6 +2306,11 @@ function Build-ConfigFromUi {
     [CmdletBinding()]
     param()
 
+    $subscriptionId = $script:Ui.SubscriptionId.Text.Trim()
+    if (-not [bool] $script:Ui.UseExistingWorkspace.IsChecked -and [string]::IsNullOrWhiteSpace($subscriptionId)) {
+        $subscriptionId = [string] $script:State.AzureSubscriptionId
+    }
+
     return @{
         UserPrefix1            = $script:Ui.UserPrefix1.Text.Trim()
         UserPrefix2            = $script:Ui.UserPrefix2.Text.Trim()
@@ -2319,7 +2324,7 @@ function Build-ConfigFromUi {
         ExcludeFromExistingCa  = [bool] $script:Ui.ExcludeExistingCa.IsChecked
         AllowedAaguids         = $script:Ui.AllowedAaguids.Text
         UseExistingWorkspace   = [bool] $script:Ui.UseExistingWorkspace.IsChecked
-        SubscriptionId         = $script:Ui.SubscriptionId.Text.Trim()
+        SubscriptionId         = $subscriptionId
         ResourceGroupName      = $script:Ui.ResourceGroupName.Text.Trim()
         WorkspaceName          = $script:Ui.WorkspaceName.Text.Trim()
         AzureRegion            = $script:Ui.AzureRegion.Text.Trim()
@@ -2329,7 +2334,7 @@ function Build-ConfigFromUi {
         CreateSignInAlert      = [bool] $script:Ui.CreateSignInAlert.IsChecked
         CreateAuditAlert       = [bool] $script:Ui.CreateAuditAlert.IsChecked
         DisableMonitoring      = [bool] $script:Ui.DisableMonitoring.IsChecked
-        NoApply                = [bool] $script:Ui.NoApply.IsChecked
+        NoApply                = [bool] $script:Ui.ReportModeRadio.IsChecked
     }
 }
 
@@ -2416,6 +2421,49 @@ function Set-UiBusy {
     Update-UiPump
 }
 
+function Get-WizardSkippedSteps {
+    [CmdletBinding()]
+    param()
+
+    return @(2, 6, 7)
+}
+
+function Get-WizardVisibleSteps {
+    [CmdletBinding()]
+    param()
+
+    $skipped = @(Get-WizardSkippedSteps)
+    $steps = New-Object System.Collections.Generic.List[int]
+    for ($i = 0; $i -lt $script:Ui.WizardTabs.Items.Count; $i++) {
+        if ($skipped -notcontains $i) {
+            $steps.Add($i)
+        }
+    }
+    return $steps.ToArray()
+}
+
+function Get-NextWizardStep {
+    [CmdletBinding()]
+    param([int] $CurrentStep)
+
+    foreach ($step in (Get-WizardVisibleSteps)) {
+        if ($step -gt $CurrentStep) { return $step }
+    }
+    return $CurrentStep
+}
+
+function Get-PreviousWizardStep {
+    [CmdletBinding()]
+    param([int] $CurrentStep)
+
+    $previous = 0
+    foreach ($step in (Get-WizardVisibleSteps)) {
+        if ($step -ge $CurrentStep) { return $previous }
+        $previous = $step
+    }
+    return $previous
+}
+
 function Test-ProcessHasExitedSafe {
     [CmdletBinding()]
     param([AllowNull()] $Process)
@@ -2456,13 +2504,72 @@ function Update-WizardNavigation {
     param()
 
     if (-not $script:Ui.WizardTabs) { return }
+    $skipped = @(Get-WizardSkippedSteps)
     for ($i = 0; $i -lt $script:Ui.WizardTabs.Items.Count; $i++) {
-        $script:Ui.WizardTabs.Items[$i].IsEnabled = ($i -le $script:WizardMaxStep)
+        $isSkipped = ($skipped -contains $i)
+        $script:Ui.WizardTabs.Items[$i].Visibility = if ($isSkipped) { 'Collapsed' } else { 'Visible' }
+        $script:Ui.WizardTabs.Items[$i].IsEnabled = (-not $isSkipped -and $i -le $script:WizardMaxStep)
     }
     $index = $script:Ui.WizardTabs.SelectedIndex
     $script:Ui.BackButton.IsEnabled = ($index -gt 0)
-    $script:Ui.NextButton.IsEnabled = ($index -lt ($script:Ui.WizardTabs.Items.Count - 1))
-    $script:Ui.FooterStatus.Text = 'Step {0} af {1}' -f ($index + 1), $script:Ui.WizardTabs.Items.Count
+    $nextStep = Get-NextWizardStep -CurrentStep $index
+    $nextAllowed = ($nextStep -gt $index)
+    if ($index -eq 0 -and -not [bool] $script:Ui.UnderstandRisk.IsChecked) {
+        $nextAllowed = $false
+    }
+    if ($script:WorkerProcess) {
+        $nextAllowed = $false
+    }
+    $script:Ui.NextButton.IsEnabled = $nextAllowed
+    $visibleSteps = @(Get-WizardVisibleSteps)
+    $visibleIndex = [Array]::IndexOf($visibleSteps, $index)
+    if ($visibleIndex -lt 0) { $visibleIndex = 0 }
+    $script:Ui.FooterStatus.Text = 'Step {0} af {1}' -f ($visibleIndex + 1), $visibleSteps.Count
+}
+
+function Update-ModeUi {
+    [CmdletBinding()]
+    param()
+
+    if (-not $script:Ui -or -not $script:Ui.ContainsKey('ReportModeRadio')) { return }
+    $reportOnly = [bool] $script:Ui.ReportModeRadio.IsChecked
+    $script:Ui.NoApply.IsChecked = $reportOnly
+    $script:Ui.NoApply.Content = if ($reportOnly) { 'Report only: lav kun plan/rapport uden ændringer' } else { 'Configuration mode: gennemfør ændringer ved kørsel' }
+    if ($reportOnly) {
+        $script:Ui.CaState.SelectedIndex = 0
+        Set-UiStatus -Message 'Mode valgt: Report only. Der laves plan og rapport uden tenant-ændringer.'
+    }
+    else {
+        Set-UiStatus -Message 'Mode valgt: Configuration. Værktøjet kan oprette/ændre ressourcer når du starter kørsel.'
+    }
+    Update-WizardNavigation
+}
+
+function Update-MonitoringUi {
+    [CmdletBinding()]
+    param()
+
+    if (-not $script:Ui -or -not $script:Ui.ContainsKey('DisableMonitoring')) { return }
+    $monitoringEnabled = -not [bool] $script:Ui.DisableMonitoring.IsChecked
+    $useExisting = [bool] $script:Ui.UseExistingWorkspace.IsChecked
+    foreach ($name in @('UseExistingWorkspace','ResourceGroupName','WorkspaceName','AzureRegion','DiagnosticSettingName','ActionGroupName','AlertEmails','CreateSignInAlert','CreateAuditAlert')) {
+        if ($script:Ui.ContainsKey($name) -and $script:Ui[$name]) {
+            $script:Ui[$name].IsEnabled = $monitoringEnabled
+        }
+    }
+    $script:Ui.SubscriptionId.IsEnabled = ($monitoringEnabled -and $useExisting)
+    if ($monitoringEnabled -and -not $useExisting -and [string]::IsNullOrWhiteSpace($script:Ui.SubscriptionId.Text) -and -not [string]::IsNullOrWhiteSpace($script:State.AzureSubscriptionId)) {
+        $script:Ui.SubscriptionId.Text = ''
+    }
+    if ($monitoringEnabled -and $useExisting) {
+        Set-UiStatus -Message 'Eksisterende workspace valgt: indtast Subscription ID, resource group og workspace-navn.'
+    }
+    elseif ($monitoringEnabled) {
+        Set-UiStatus -Message 'Nyt workspace valgt: subscription hentes fra Azure-forbindelsen.'
+    }
+    else {
+        Set-UiStatus -Message 'Monitoring er slået fra for denne kørsel.'
+    }
 }
 
 function Ensure-AppModulesFromUi {
@@ -2552,6 +2659,22 @@ function Test-ConfigurationForWizard {
             throw "Feltet '$field' skal udfyldes."
         }
     }
+    if (-not [bool] $config.DisableMonitoring) {
+        if (-not $script:State.AzureConnected) {
+            throw 'Azure er ikke forbundet. Forbind til Azure, eller slå Azure Monitor/Log Analytics fra for denne kørsel.'
+        }
+        if ([string]::IsNullOrWhiteSpace([string] $config.SubscriptionId)) {
+            throw 'Subscription ID mangler. Ved nyt workspace vælges subscription fra Azure-login. Ved eksisterende workspace skal Subscription ID udfyldes.'
+        }
+        foreach ($field in @('ResourceGroupName','WorkspaceName','AzureRegion','DiagnosticSettingName','ActionGroupName')) {
+            if ([string]::IsNullOrWhiteSpace([string] $config[$field])) {
+                throw "Monitoring-feltet '$field' skal udfyldes."
+            }
+        }
+        if (-not [bool] $config.CreateSignInAlert -and -not [bool] $config.CreateAuditAlert) {
+            throw 'Vælg mindst én alerttype, eller slå Azure Monitor/Log Analytics fra.'
+        }
+    }
     Validate-AaguidList -Text $config.AllowedAaguids | Out-Null
     return $config
 }
@@ -2569,7 +2692,7 @@ function Move-WizardNext {
             }
             Set-WizardMaxStep -Step 1
             Set-WizardStep -Step 1
-            Set-UiStatus -Message 'Næste trin: forbind til Graph + Azure, eller kun Graph hvis monitoring skal springes over.'
+            Set-UiStatus -Message 'Næste trin: forbind til Graph + Azure, eller kun Graph hvis monitoring er slået fra.'
         }
         1 {
             if (-not $script:State.GraphConnected) {
@@ -2581,38 +2704,30 @@ function Move-WizardNext {
                 if ($answer -ne 'Yes') { return }
                 $script:Ui.DisableMonitoring.IsChecked = $true
             }
-            Set-WizardMaxStep -Step 2
-            Set-WizardStep -Step 2
-            Set-UiStatus -Message 'Klar til pre-check.'
-        }
-        2 {
-            Set-UiStatus -Message 'Kører pre-check...' -Busy -Log
+            Set-WizardMaxStep -Step 3
             Invoke-PrecheckFromUi | Out-Null
-            if (-not $script:PrecheckPassed) {
-                Set-UiStatus -Message 'Pre-check har hard failures.'
-                Show-AppMessage -Message 'Pre-check har hard failures. Ret dem før du fortsætter.' -Icon 'Warning' | Out-Null
-                return
-            }
             Set-WizardStep -Step 3
-            Set-UiStatus -Message 'Pre-check OK. Udfyld konfigurationen.'
+            Set-UiStatus -Message 'Forbindelse og automatisk pre-check er klar. Udfyld konfigurationen.'
         }
         3 {
             Test-ConfigurationForWizard | Out-Null
             Set-WizardMaxStep -Step 4
             Set-WizardStep -Step 4
-            Set-UiStatus -Message 'Konfiguration valideret. Byg og gennemgå dry-run planen.'
+            Set-UiStatus -Message 'Konfiguration valideret. Gennemgå planen før kørsel.'
         }
         4 {
             if (-not $script:PlanBuilt) {
-                Set-UiStatus -Message 'Bygger dry-run plan...' -Busy -Log
+                Set-UiStatus -Message 'Bygger plan...' -Busy -Log
                 New-PlanFromUi | Out-Null
             }
+            Set-WizardMaxStep -Step 5
             Set-WizardStep -Step 5
-            Set-UiStatus -Message 'Dry-run plan er klar. Apply kan startes fra trin 5.'
+            Set-UiStatus -Message 'Planen er klar. Start kørsel fra Kørsel-trinnet.'
         }
         default {
-            Set-WizardMaxStep -Step ($index + 1)
-            Set-WizardStep -Step ($index + 1)
+            $next = Get-NextWizardStep -CurrentStep $index
+            Set-WizardMaxStep -Step $next
+            Set-WizardStep -Step $next
             Set-UiStatus -Message ('Wizard flyttet til step {0}.' -f ($script:Ui.WizardTabs.SelectedIndex + 1))
         }
     }
@@ -2726,14 +2841,21 @@ function Start-BreakGlassWizard {
             <TextBlock Text="Dansk wizard til sikker og ensartet break-glass baseline i Microsoft Entra tenants." Foreground="#4B5563" Margin="0,4,0,0"/>
         </StackPanel>
         <TabControl x:Name="WizardTabs" Grid.Row="1">
-            <TabItem Header="1. Velkommen">
+            <TabItem Header="1. Start">
                 <ScrollViewer VerticalScrollBarVisibility="Auto">
                     <StackPanel Margin="18" MaxWidth="980">
                         <TextBlock FontSize="18" FontWeight="SemiBold" Text="Velkommen"/>
                         <TextBlock TextWrapping="Wrap" Margin="0,10,0,0" Text="Dette værktøj etablerer en break-glass baseline med cloud-only konti, rolle-assignable gruppe, direkte Global Administrator roller, RMAU, FIDO2 authentication strength, Conditional Access, Log Analytics og Azure Monitor alerts."/>
-                        <TextBlock TextWrapping="Wrap" Margin="0,10,0,0" Text="FIDO2/FIDO key registrering automatiseres ikke. Konsulenten skal manuelt registrere FIDO2 keys og derefter validere metoderne i værktøjet."/>
+                        <TextBlock TextWrapping="Wrap" Margin="0,10,0,0" Text="FIDO2/FIDO key registrering automatiseres ikke. Du får en tydelig reminder i slutrapporten efter kørsel."/>
                         <TextBlock TextWrapping="Wrap" Margin="0,10,0,0" Text="Microsoft Sentinel og SentinelOne bruges ikke i v1. Overvågning bruger Entra Diagnostic Settings til Log Analytics samt Azure Monitor scheduled query alerts."/>
-                        <CheckBox x:Name="UnderstandRisk" Margin="0,20,0,0" Content="Jeg forstår at dette script ændrer sikkerhedskritisk tenant-konfiguration."/>
+                        <Border BorderBrush="#CBD5E1" BorderThickness="1" CornerRadius="4" Padding="12" Margin="0,18,0,0">
+                            <StackPanel>
+                                <TextBlock Text="Vælg kørselstype" FontWeight="SemiBold" Margin="0,0,0,8"/>
+                                <RadioButton x:Name="ReportModeRadio" GroupName="RunMode" Content="Report only - analysér tenant og generér rapport uden ændringer" IsChecked="True" Margin="0,0,0,6"/>
+                                <RadioButton x:Name="ConfigureModeRadio" GroupName="RunMode" Content="Configuration - opret/ret brugere, gruppe, roller, CA og monitoring efter bekræftelse"/>
+                            </StackPanel>
+                        </Border>
+                        <CheckBox x:Name="UnderstandRisk" Margin="0,20,0,0" Content="Jeg forstår at dette script kan ændre sikkerhedskritisk tenant-konfiguration."/>
                     </StackPanel>
                 </ScrollViewer>
             </TabItem>
@@ -2781,7 +2903,7 @@ function Start-BreakGlassWizard {
                     <ListBox x:Name="PrecheckList" FontFamily="Consolas"/>
                 </DockPanel>
             </TabItem>
-            <TabItem Header="4. Konfiguration">
+            <TabItem Header="3. Konfiguration">
                 <ScrollViewer VerticalScrollBarVisibility="Auto">
                     <Grid Margin="18">
                         <Grid.ColumnDefinitions>
@@ -2798,13 +2920,13 @@ function Start-BreakGlassWizard {
                             <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
                         </Grid.RowDefinitions>
                         <TextBlock Grid.Row="0" Grid.Column="0" Text="Konto 1 prefix"/>
-                        <TextBox x:Name="UserPrefix1" Grid.Row="0" Grid.Column="1" Text="bg-admin-01" Margin="0,0,12,8"/>
+                        <TextBox x:Name="UserPrefix1" Grid.Row="0" Grid.Column="1" Text="svc_ea01" Margin="0,0,12,8"/>
                         <TextBlock Grid.Row="0" Grid.Column="2" Text="Konto 2 prefix"/>
-                        <TextBox x:Name="UserPrefix2" Grid.Row="0" Grid.Column="3" Text="bg-admin-02" Margin="0,0,0,8"/>
+                        <TextBox x:Name="UserPrefix2" Grid.Row="0" Grid.Column="3" Text="svc_ea02" Margin="0,0,0,8"/>
                         <TextBlock Grid.Row="1" Grid.Column="0" Text="Display name 1"/>
-                        <TextBox x:Name="DisplayName1" Grid.Row="1" Grid.Column="1" Text="Break Glass Admin 01" Margin="0,0,12,8"/>
+                        <TextBox x:Name="DisplayName1" Grid.Row="1" Grid.Column="1" Text="Emergency Access 01" Margin="0,0,12,8"/>
                         <TextBlock Grid.Row="1" Grid.Column="2" Text="Display name 2"/>
-                        <TextBox x:Name="DisplayName2" Grid.Row="1" Grid.Column="3" Text="Break Glass Admin 02" Margin="0,0,0,8"/>
+                        <TextBox x:Name="DisplayName2" Grid.Row="1" Grid.Column="3" Text="Emergency Access 02" Margin="0,0,0,8"/>
                         <TextBlock Grid.Row="2" Grid.Column="0" Text="Gruppe"/>
                         <TextBox x:Name="GroupDisplayName" Grid.Row="2" Grid.Column="1" Text="GRP-ENTRA-BreakGlass-Admins" Margin="0,0,12,8"/>
                         <TextBlock Grid.Row="2" Grid.Column="2" Text="RMAU"/>
@@ -2822,10 +2944,10 @@ function Start-BreakGlassWizard {
                         <CheckBox x:Name="ExcludeExistingCa" Grid.Row="4" Grid.Column="2" Grid.ColumnSpan="2" Content="Ekskluder break-glass gruppen fra eksisterende CA policies" Margin="0,0,0,8"/>
                         <TextBlock Grid.Row="5" Grid.Column="0" Text="Tilladte FIDO2 AAGUIDs"/>
                         <TextBox x:Name="AllowedAaguids" Grid.Row="5" Grid.Column="1" Grid.ColumnSpan="3" Height="54" AcceptsReturn="True" TextWrapping="Wrap" Margin="0,0,0,8"/>
-                        <CheckBox x:Name="NoApply" Grid.Row="6" Grid.Column="0" Grid.ColumnSpan="2" Content="Dry-run/NoApply: lav kun plan og rapport" IsChecked="True" Margin="0,0,0,8"/>
+                        <CheckBox x:Name="NoApply" Grid.Row="6" Grid.Column="0" Grid.ColumnSpan="2" Content="Report only: lav kun plan/rapport uden ændringer" IsChecked="True" IsEnabled="False" Margin="0,0,0,8"/>
                         <CheckBox x:Name="DisableMonitoring" Grid.Row="6" Grid.Column="2" Grid.ColumnSpan="2" Content="Deaktiver Azure Monitor/Log Analytics i denne kørsel" Margin="0,0,0,8"/>
                         <CheckBox x:Name="UseExistingWorkspace" Grid.Row="7" Grid.Column="0" Grid.ColumnSpan="2" Content="Brug eksisterende Log Analytics workspace" Margin="0,0,0,8"/>
-                        <TextBlock Grid.Row="8" Grid.Column="0" Text="Subscription ID"/>
+                        <TextBlock Grid.Row="8" Grid.Column="0" Text="Subscription ID ved eksisterende workspace"/>
                         <TextBox x:Name="SubscriptionId" Grid.Row="8" Grid.Column="1" Margin="0,0,12,8"/>
                         <TextBlock Grid.Row="8" Grid.Column="2" Text="Resource group"/>
                         <TextBox x:Name="ResourceGroupName" Grid.Row="8" Grid.Column="3" Text="rg-breakglass-monitoring" Margin="0,0,0,8"/>
@@ -2844,19 +2966,21 @@ function Start-BreakGlassWizard {
                     </Grid>
                 </ScrollViewer>
             </TabItem>
-            <TabItem Header="5. Dry-run">
+            <TabItem Header="4. Plan">
                 <DockPanel Margin="18">
                     <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,10">
-                        <Button x:Name="BuildPlanButton" Content="Byg plan" Height="32" Width="100" Margin="0,0,8,0"/>
-                        <Button x:Name="ExportPlanButton" Content="Eksporter plan JSON" Height="32" Width="150" Margin="0,0,8,0"/>
-                        <Button x:Name="ApplyButton" Content="Apply configuration" Height="32" Width="160"/>
+                        <Button x:Name="BuildPlanButton" Content="Byg/refresh plan" Height="32" Width="130" Margin="0,0,8,0"/>
+                        <Button x:Name="ExportPlanButton" Content="Eksporter plan JSON" Height="32" Width="150"/>
                     </StackPanel>
                     <TextBox x:Name="PlanText" FontFamily="Consolas" IsReadOnly="True" AcceptsReturn="True" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"/>
                 </DockPanel>
             </TabItem>
-            <TabItem Header="6. Udfør">
+            <TabItem Header="5. Kørsel">
                 <DockPanel Margin="18">
-                    <ProgressBar x:Name="ProgressBar" DockPanel.Dock="Top" Height="18" IsIndeterminate="False" Margin="0,0,0,10"/>
+                    <StackPanel DockPanel.Dock="Top" Orientation="Horizontal" Margin="0,0,0,10">
+                        <Button x:Name="ApplyButton" Content="Start kørsel" Height="32" Width="130" Margin="0,0,10,0"/>
+                        <ProgressBar x:Name="ProgressBar" Width="260" Height="18" IsIndeterminate="False" VerticalAlignment="Center"/>
+                    </StackPanel>
                     <TextBox x:Name="ExecutionLog" FontFamily="Consolas" IsReadOnly="True" AcceptsReturn="True" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"/>
                 </DockPanel>
             </TabItem>
@@ -2881,12 +3005,19 @@ function Start-BreakGlassWizard {
                     <ListBox x:Name="ValidationList" FontFamily="Consolas"/>
                 </DockPanel>
             </TabItem>
-            <TabItem Header="9. Rapport">
+            <TabItem Header="6. Rapport">
                 <StackPanel Margin="18">
-                    <TextBlock Text="Rapporter genereres automatisk efter kørsel." FontSize="16" FontWeight="SemiBold"/>
+                    <TextBlock Text="Rapport og næste manuelle steps" FontSize="16" FontWeight="SemiBold"/>
+                    <TextBlock TextWrapping="Wrap" Margin="0,8,0,0" Text="Rapporten genereres automatisk efter kørsel. FIDO2 keys skal stadig registreres manuelt for begge konti, og credentials skal flyttes til godkendt password manager eller nødprocedure."/>
                     <TextBlock Text="Outputmappe:" Margin="0,12,0,0"/>
                     <TextBox x:Name="OutputFolderText" IsReadOnly="True" Margin="0,4,0,10"/>
-                    <Button x:Name="OpenOutputFolderButton" Content="Åbn outputmappe" Height="32" Width="150"/>
+                    <TextBlock Text="Rapportfil:" Margin="0,6,0,0"/>
+                    <TextBox x:Name="ReportPathText" IsReadOnly="True" Margin="0,4,0,10"/>
+                    <StackPanel Orientation="Horizontal">
+                        <Button x:Name="OpenReportButton" Content="Åbn rapport" Height="32" Width="130" Margin="0,0,8,0"/>
+                        <Button x:Name="OpenOutputFolderButton" Content="Åbn outputmappe" Height="32" Width="150"/>
+                    </StackPanel>
+                    <TextBlock TextWrapping="Wrap" Margin="0,16,0,0" Foreground="#92400E" Text="Reminder: registrer én separat FIDO2 key pr. konto, opbevar keys fysisk adskilt og sikkert, ekskluder ikke break-glass-kontiene fra overvågning, og test kontiene periodisk."/>
                 </StackPanel>
             </TabItem>
         </TabControl>
@@ -2916,16 +3047,18 @@ function Start-BreakGlassWizard {
     $reader = New-Object System.Xml.XmlNodeReader $xaml
     $script:MainWindow = [Windows.Markup.XamlReader]::Load($reader)
     foreach ($name in @(
-        'UnderstandRisk','ConnectGraphButton','ConnectAzureButton','ConnectAllButton','GraphAccount','TenantId','TenantName','OnMicrosoftDomain','AzureAccount','SubscriptionIdDetected','ConnectionStatus',
+        'UnderstandRisk','ReportModeRadio','ConfigureModeRadio','ConnectGraphButton','ConnectAzureButton','ConnectAllButton','GraphAccount','TenantId','TenantName','OnMicrosoftDomain','AzureAccount','SubscriptionIdDetected','ConnectionStatus',
         'RunPrecheckButton','PrecheckList','UserPrefix1','UserPrefix2','DisplayName1','DisplayName2','GroupDisplayName','RmauDisplayName','AuthStrengthName','CaPolicyName','CaState',
         'ExcludeExistingCa','AllowedAaguids','NoApply','DisableMonitoring','UseExistingWorkspace','SubscriptionId','ResourceGroupName','WorkspaceName','AzureRegion','DiagnosticSettingName',
         'ActionGroupName','AlertEmails','CreateSignInAlert','CreateAuditAlert','BuildPlanButton','ExportPlanButton','ApplyButton','PlanText','ProgressBar','ExecutionLog','OpenSecurityInfoButton',
-        'ValidateFidoButton','FidoResults','RunValidationButton','ValidationList','OutputFolderText','OpenOutputFolderButton','BackButton','NextButton','CloseButton','BackgroundStatus','StatusProgress','FooterStatus','WizardTabs'
+        'ValidateFidoButton','FidoResults','RunValidationButton','ValidationList','OutputFolderText','ReportPathText','OpenReportButton','OpenOutputFolderButton','BackButton','NextButton','CloseButton','BackgroundStatus','StatusProgress','FooterStatus','WizardTabs'
     )) {
-        $script:Ui[$name] = $script:MainWindow.FindName($name)
+    $script:Ui[$name] = $script:MainWindow.FindName($name)
     }
     $script:LogTextBox = $script:Ui.ExecutionLog
     $script:Ui.NoApply.IsChecked = [bool]($NoApply -or $true)
+    Update-ModeUi
+    Update-MonitoringUi
 
     $script:Ui.ConnectGraphButton.Add_Click({
         $workerStarted = $false
@@ -3043,7 +3176,7 @@ function Start-BreakGlassWizard {
                 Show-AppMessage -Message 'Du skal bekræfte sikkerhedsforståelsen på Velkommen-fanen først.' -Icon 'Warning' | Out-Null
                 return
             }
-            $config = Build-ConfigFromUi
+            $config = Test-ConfigurationForWizard
             if ($config.CaState -eq 'enabled') {
                 if ((Show-AppMessage -Message 'Du har valgt at oprette Conditional Access policy som ENABLED. Dette er sikkerhedskritisk. Fortsæt?' -Buttons 'YesNo' -Icon 'Warning') -ne 'Yes') {
                     return
@@ -3070,8 +3203,8 @@ function Start-BreakGlassWizard {
     })
 
     $script:Ui.UnderstandRisk.Add_Checked({
-        Set-WizardMaxStep -Step 1
         Set-UiStatus -Message 'Sikkerhedsbekræftelse registreret. Tryk Fortsæt.'
+        Update-WizardNavigation
     })
 
     $script:Ui.UnderstandRisk.Add_Unchecked({
@@ -3079,8 +3212,32 @@ function Start-BreakGlassWizard {
         Set-WizardStep -Step 0
     })
 
+    $script:Ui.ReportModeRadio.Add_Checked({
+        Update-ModeUi
+    })
+
+    $script:Ui.ConfigureModeRadio.Add_Checked({
+        Update-ModeUi
+    })
+
+    $script:Ui.DisableMonitoring.Add_Checked({
+        Update-MonitoringUi
+    })
+
+    $script:Ui.DisableMonitoring.Add_Unchecked({
+        Update-MonitoringUi
+    })
+
+    $script:Ui.UseExistingWorkspace.Add_Checked({
+        Update-MonitoringUi
+    })
+
+    $script:Ui.UseExistingWorkspace.Add_Unchecked({
+        Update-MonitoringUi
+    })
+
     $script:Ui.BackButton.Add_Click({
-        Set-WizardStep -Step ($script:Ui.WizardTabs.SelectedIndex - 1)
+        Set-WizardStep -Step (Get-PreviousWizardStep -CurrentStep $script:Ui.WizardTabs.SelectedIndex)
     })
 
     $script:Ui.NextButton.Add_Click({
@@ -3095,7 +3252,8 @@ function Start-BreakGlassWizard {
 
     $script:Ui.WizardTabs.Add_SelectionChanged({
         if ($script:WizardInternalNavigation) { return }
-        if ($script:Ui.WizardTabs.SelectedIndex -gt $script:WizardMaxStep) {
+        $selected = $script:Ui.WizardTabs.SelectedIndex
+        if ((@(Get-WizardSkippedSteps) -contains $selected) -or $selected -gt $script:WizardMaxStep) {
             Show-AppMessage -Message 'Gennemfør de tidligere wizard-steps før du går videre.' -Icon 'Warning' | Out-Null
             Set-WizardStep -Step $script:WizardMaxStep
             return
@@ -3134,6 +3292,19 @@ function Start-BreakGlassWizard {
     $script:Ui.OpenOutputFolderButton.Add_Click({
         if ($script:SessionOutputFolder -and (Test-Path -Path $script:SessionOutputFolder)) {
             Start-Process explorer.exe -ArgumentList $script:SessionOutputFolder
+        }
+    })
+
+    $script:Ui.OpenReportButton.Add_Click({
+        $reportPath = $script:Ui.ReportPathText.Text
+        if ($reportPath -and (Test-Path -LiteralPath $reportPath)) {
+            Start-Process $reportPath
+        }
+        elseif ($script:SessionOutputFolder -and (Test-Path -LiteralPath (Join-Path -Path $script:SessionOutputFolder -ChildPath 'report.html'))) {
+            Start-Process (Join-Path -Path $script:SessionOutputFolder -ChildPath 'report.html')
+        }
+        else {
+            Show-AppMessage -Message 'Rapporten er ikke genereret endnu.' -Icon 'Information' | Out-Null
         }
     })
 
@@ -3201,8 +3372,8 @@ function Start-BreakGlassWizard {
                         $script:State['AzureSubscriptionId'] = [string] $connectionResult.AzureSubscriptionId
                         $script:State['AzureSubscriptionName'] = [string] $connectionResult.AzureSubscriptionName
                         Update-ConnectionStatusUi
+                        Update-MonitoringUi
                         if ($connectionExitCode -eq 0) {
-                            Set-WizardMaxStep -Step 2
                             $azureError = if ($connectionResult.PSObject.Properties['AzureError']) { [string] $connectionResult.AzureError } else { '' }
                             if ([bool] $connectionResult.GraphConnected -and -not [bool] $connectionResult.AzureConnected -and -not [string]::IsNullOrWhiteSpace($azureError)) {
                                 $script:Ui.DisableMonitoring.IsChecked = $true
@@ -3228,18 +3399,39 @@ function Start-BreakGlassWizard {
                 Set-UiBusy -Busy $false
             }
         }
+        if ($script:WorkerProcess) {
+            if ($script:LogFile -and (Test-Path -LiteralPath $script:LogFile)) {
+                try {
+                    $lastLine = Get-Content -LiteralPath $script:LogFile -Tail 1 -Encoding UTF8 -ErrorAction Stop
+                    if ($lastLine) {
+                        Set-UiStatus -Message ("Worker: {0}" -f $lastLine) -Busy
+                    }
+                }
+                catch {
+                    # Worker log polling is best-effort.
+                }
+            }
+        }
         if ($script:WorkerProcess -and (Test-ProcessHasExitedSafe -Process $script:WorkerProcess)) {
-            $script:LogPollTimer.Stop()
             Sync-LogView
             $exitCode = $script:WorkerProcess.ExitCode
             $script:WorkerProcess.Dispose()
             $script:WorkerProcess = $null
             $script:Ui.ProgressBar.IsIndeterminate = $false
-            Set-UiStatus -Message $(if ($exitCode -eq 0) { 'Worker færdig. Rapport er genereret.' } else { "Worker fejlede med exit code $exitCode." })
             Set-UiBusy -Busy $false
             $script:Ui.OutputFolderText.Text = $script:SessionOutputFolder
+            $reportPath = if ($script:SessionOutputFolder) { Join-Path -Path $script:SessionOutputFolder -ChildPath 'report.html' } else { '' }
+            $script:Ui.ReportPathText.Text = $reportPath
             if ($exitCode -eq 0) {
                 Set-WizardMaxStep -Step 8
+                Set-WizardStep -Step 8
+                if ($reportPath -and (Test-Path -LiteralPath $reportPath)) {
+                    Start-Process $reportPath
+                }
+                Set-UiStatus -Message 'Worker færdig. Rapporten er klar, og FIDO2-reminderen står i sidste trin.'
+            }
+            else {
+                Set-UiStatus -Message ("Worker fejlede med exit code {0}. Se live-loggen og worker-vinduet." -f $exitCode)
             }
         }
     })
