@@ -24,6 +24,10 @@ function Set-NetIPWPFStep {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string] $Step)
 
+    if ($Step -eq 'Config') {
+        $sync.UI.ConfigVisited = $true
+    }
+
     foreach ($page in @('WPFPageWelcome','WPFPageConnect','WPFPageDiscovery','WPFPageConfig','WPFPagePlan','WPFPageApply','WPFPageHandoff')) {
         $sync[$page].Visibility = 'Collapsed'
     }
@@ -37,4 +41,5 @@ function Set-NetIPWPFStep {
         'Handoff' { 'WPFPageHandoff' }
     }
     $sync[$target].Visibility = 'Visible'
+    Update-NetIPUIState
 }

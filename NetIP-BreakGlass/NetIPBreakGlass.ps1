@@ -46,6 +46,7 @@ $sync.State = [Hashtable]::Synchronized(@{
 $sync.UI = [Hashtable]::Synchronized(@{
     CurrentStep    = 'Velkommen'
     ProcessRunning = $false
+    ConfigVisited  = $false
 })
 
 $sync.Paths = @{
@@ -813,12 +814,19 @@ function Update-NetIPUIState {
     if ($sync.WPFOutputFolder) { $sync.WPFOutputFolder.Text = [string]$sync.State.OutputFolder }
     if ($sync.WPFHandoffPath) { $sync.WPFHandoffPath.Text = [string]$sync.State.HandoffPath }
     $risk = [bool]$sync.WPFWelcomeRiskAccepted.IsChecked
+    $hasGraph = [bool]$sync.State.GraphConnected
+    $hasDiscovery = $null -ne $sync.State.Discovery
+    $hasVisitedConfig = [bool]$sync.UI.ConfigVisited
+    $hasPlan = $null -ne $sync.State.Plan
+    $hasHandoff = -not [string]::IsNullOrWhiteSpace([string]$sync.State.HandoffPath)
+
+    $sync.WPFStepWelcome.IsEnabled = $true
     $sync.WPFStepConnect.IsEnabled = $risk
-    $sync.WPFStepDiscovery.IsEnabled = $risk -and [bool]$sync.State.GraphConnected
-    $sync.WPFStepConfig.IsEnabled = $risk -and [bool]$sync.State.GraphConnected
-    $sync.WPFStepPlan.IsEnabled = $risk -and [bool]$sync.State.GraphConnected
-    $sync.WPFStepApply.IsEnabled = $risk -and $null -ne $sync.State.Plan
-    $sync.WPFStepHandoff.IsEnabled = $risk -and -not [string]::IsNullOrWhiteSpace([string]$sync.State.HandoffPath)
+    $sync.WPFStepDiscovery.IsEnabled = $risk -and $hasGraph
+    $sync.WPFStepConfig.IsEnabled = $risk -and $hasGraph -and $hasDiscovery
+    $sync.WPFStepPlan.IsEnabled = $risk -and $hasGraph -and $hasDiscovery -and $hasVisitedConfig
+    $sync.WPFStepApply.IsEnabled = $risk -and $hasGraph -and $hasPlan
+    $sync.WPFStepHandoff.IsEnabled = $risk -and $hasHandoff
 }
 
 function Write-NetIPLog {
@@ -1160,10 +1168,11 @@ function Invoke-NetIPDiscovery {
         $group = Get-NetIPGroupByDisplayName -DisplayName $config.GroupName
         $policies = @(Get-NetIPConditionalAccessPolicies)
         $already = @()
-        if ($group -and $group.id) {
+        $groupId = [string](Get-NetIPObjectPropertyValue -InputObject $group -Name 'id')
+        if ($group -and $groupId) {
             foreach ($policy in $policies) {
                 $excludeGroups = @(Get-NetIPObjectPropertyValue -InputObject (Get-NetIPObjectPropertyValue -InputObject (Get-NetIPObjectPropertyValue -InputObject $policy -Name 'conditions') -Name 'users') -Name 'excludeGroups')
-                if ($excludeGroups -contains $group.id) { $already += $policy }
+                if ($excludeGroups -contains $groupId) { $already += $policy }
             }
         }
         $discovery = [pscustomobject]@{
@@ -1179,18 +1188,67 @@ function Invoke-NetIPDiscovery {
         }
         $sync.State.Discovery = $discovery
         $summary = "User1: $(if($user1){'findes'}else{'mangler'}); User2: $(if($user2){'findes'}else{'mangler'}); Gruppe: $(if($group){'findes'}else{'mangler'}); CA policies: $($policies.Count)"
+        $userMissingSeverity = if ($config.CreateUsers) { 'Warning' } else { 'Bad' }
+        $groupMissingSeverity = if ($config.CreateGroup) { 'Warning' } else { 'Bad' }
+        $excludedSeverity = if ($policies.Count -eq 0) {
+            'Good'
+        }
+        elseif ($already.Count -eq $policies.Count) {
+            'Good'
+        }
+        elseif ($config.PatchCAPolicies) {
+            'Warning'
+        }
+        else {
+            'Bad'
+        }
+        $summarySeverity = if ((-not $user1 -and -not $config.CreateUsers) -or (-not $user2 -and -not $config.CreateUsers) -or (-not $group -and -not $config.CreateGroup) -or $excludedSeverity -eq 'Bad') {
+            'Bad'
+        }
+        elseif (-not $user1 -or -not $user2 -or -not $group -or $excludedSeverity -eq 'Warning') {
+            'Warning'
+        }
+        else {
+            'Good'
+        }
         $lines = @(
-            "Tenant: $($tenant.TenantDisplayName) / $($tenant.TenantId)",
-            "Domain: $($tenant.OnMicrosoftDomain)",
-            "Target user 1: $upn1 - $(if($user1){'Findes'}else{'Mangler'})",
-            "Target user 2: $upn2 - $(if($user2){'Findes'}else{'Mangler'})",
-            "Group $($config.GroupName): $(if($group){'Findes'}else{'Mangler'})",
-            "Conditional Access policies: $($policies.Count)",
-            "Policies der allerede ekskluderer gruppen: $($already.Count)"
+            [pscustomobject]@{ Severity = 'Info'; Text = "Tenant: $($tenant.TenantDisplayName) / $($tenant.TenantId)" },
+            [pscustomobject]@{ Severity = 'Info'; Text = "Domain: $($tenant.OnMicrosoftDomain)" },
+            [pscustomobject]@{ Severity = if($user1){'Good'}else{$userMissingSeverity}; Text = "Target user 1: $upn1 - $(if($user1){'Findes'}elseif($config.CreateUsers){'Mangler - planlagt oprettet'}else{'Mangler - oprettelse er fravalgt'})" },
+            [pscustomobject]@{ Severity = if($user2){'Good'}else{$userMissingSeverity}; Text = "Target user 2: $upn2 - $(if($user2){'Findes'}elseif($config.CreateUsers){'Mangler - planlagt oprettet'}else{'Mangler - oprettelse er fravalgt'})" },
+            [pscustomobject]@{ Severity = if($group){'Good'}else{$groupMissingSeverity}; Text = "Group $($config.GroupName): $(if($group){'Findes'}elseif($config.CreateGroup){'Mangler - planlagt oprettet'}else{'Mangler - oprettelse er fravalgt'})" },
+            [pscustomobject]@{ Severity = 'Info'; Text = "Conditional Access policies: $($policies.Count)" },
+            [pscustomobject]@{ Severity = $excludedSeverity; Text = "Policies der allerede ekskluderer gruppen: $($already.Count) af $($policies.Count)" }
         )
         $sync.Form.Dispatcher.Invoke([System.Action]{
             $sync.WPFDiscoverySummary.Text = $summary
-            $sync.WPFDiscoveryList.Text = ($lines -join [Environment]::NewLine)
+            $sync.WPFDiscoverySummary.Foreground = switch ($summarySeverity) {
+                'Good' { [System.Windows.Media.Brushes]::ForestGreen }
+                'Warning' { [System.Windows.Media.Brushes]::DarkOrange }
+                'Bad' { [System.Windows.Media.Brushes]::Firebrick }
+                default { [System.Windows.Media.Brushes]::Black }
+            }
+            $document = New-Object System.Windows.Documents.FlowDocument
+            foreach ($line in $lines) {
+                $paragraph = New-Object System.Windows.Documents.Paragraph
+                $prefix = switch ($line.Severity) {
+                    'Good' { '[OK] ' }
+                    'Warning' { '[ADVARSEL] ' }
+                    'Bad' { '[FEJL] ' }
+                    default { '[INFO] ' }
+                }
+                $run = New-Object System.Windows.Documents.Run ($prefix + $line.Text)
+                $run.Foreground = switch ($line.Severity) {
+                    'Good' { [System.Windows.Media.Brushes]::ForestGreen }
+                    'Warning' { [System.Windows.Media.Brushes]::DarkOrange }
+                    'Bad' { [System.Windows.Media.Brushes]::Firebrick }
+                    default { [System.Windows.Media.Brushes]::SlateGray }
+                }
+                $run.FontWeight = if ($line.Severity -eq 'Info') { [System.Windows.FontWeights]::Normal } else { [System.Windows.FontWeights]::SemiBold }
+                [void]$paragraph.Inlines.Add($run)
+                [void]$document.Blocks.Add($paragraph)
+            }
+            $sync.WPFDiscoveryList.Document = $document
             Invoke-NetIPWPFButton -Name 'WPFStepDiscovery'
         })
         Write-NetIPStatus -Message 'Discovery er færdig.'
@@ -1247,6 +1305,10 @@ function Set-NetIPWPFStep {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string] $Step)
 
+    if ($Step -eq 'Config') {
+        $sync.UI.ConfigVisited = $true
+    }
+
     foreach ($page in @('WPFPageWelcome','WPFPageConnect','WPFPageDiscovery','WPFPageConfig','WPFPagePlan','WPFPageApply','WPFPageHandoff')) {
         $sync[$page].Visibility = 'Collapsed'
     }
@@ -1260,12 +1322,13 @@ function Set-NetIPWPFStep {
         'Handoff' { 'WPFPageHandoff' }
     }
     $sync[$target].Visibility = 'Visible'
+    Update-NetIPUIState
 }
 
 $sync.configs.appsettings = @'
 {
   "name": "NetIP Entra Break Glass Configurator",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "outputRoot": ".\\Output",
   "groupName": "CA-BreakGlass-Exclude",
   "groupDescription": "Security group used to exclude dedicated break-glass accounts from existing Conditional Access policies."
@@ -1406,7 +1469,7 @@ $inputXML = @'
                             <Button x:Name="WPFRunDiscovery" Content="Kør discovery" Width="150" HorizontalAlignment="Left" Margin="0,14,0,8"/>
                             <TextBlock x:Name="WPFDiscoverySummary" FontWeight="SemiBold"/>
                         </StackPanel>
-                        <TextBox x:Name="WPFDiscoveryList" IsReadOnly="True" AcceptsReturn="True" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" FontFamily="Consolas"/>
+                        <RichTextBox x:Name="WPFDiscoveryList" IsReadOnly="True" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" FontFamily="Consolas" BorderBrush="#CBD5E1" BorderThickness="1" Background="White"/>
                     </DockPanel>
                 </Grid>
 

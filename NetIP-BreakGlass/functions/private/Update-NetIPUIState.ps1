@@ -20,10 +20,17 @@ function Update-NetIPUIState {
     if ($sync.WPFOutputFolder) { $sync.WPFOutputFolder.Text = [string]$sync.State.OutputFolder }
     if ($sync.WPFHandoffPath) { $sync.WPFHandoffPath.Text = [string]$sync.State.HandoffPath }
     $risk = [bool]$sync.WPFWelcomeRiskAccepted.IsChecked
+    $hasGraph = [bool]$sync.State.GraphConnected
+    $hasDiscovery = $null -ne $sync.State.Discovery
+    $hasVisitedConfig = [bool]$sync.UI.ConfigVisited
+    $hasPlan = $null -ne $sync.State.Plan
+    $hasHandoff = -not [string]::IsNullOrWhiteSpace([string]$sync.State.HandoffPath)
+
+    $sync.WPFStepWelcome.IsEnabled = $true
     $sync.WPFStepConnect.IsEnabled = $risk
-    $sync.WPFStepDiscovery.IsEnabled = $risk -and [bool]$sync.State.GraphConnected
-    $sync.WPFStepConfig.IsEnabled = $risk -and [bool]$sync.State.GraphConnected
-    $sync.WPFStepPlan.IsEnabled = $risk -and [bool]$sync.State.GraphConnected
-    $sync.WPFStepApply.IsEnabled = $risk -and $null -ne $sync.State.Plan
-    $sync.WPFStepHandoff.IsEnabled = $risk -and -not [string]::IsNullOrWhiteSpace([string]$sync.State.HandoffPath)
+    $sync.WPFStepDiscovery.IsEnabled = $risk -and $hasGraph
+    $sync.WPFStepConfig.IsEnabled = $risk -and $hasGraph -and $hasDiscovery
+    $sync.WPFStepPlan.IsEnabled = $risk -and $hasGraph -and $hasDiscovery -and $hasVisitedConfig
+    $sync.WPFStepApply.IsEnabled = $risk -and $hasGraph -and $hasPlan
+    $sync.WPFStepHandoff.IsEnabled = $risk -and $hasHandoff
 }

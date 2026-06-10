@@ -107,7 +107,7 @@
                             <Button x:Name="WPFRunDiscovery" Content="Kør discovery" Width="150" HorizontalAlignment="Left" Margin="0,14,0,8"/>
                             <TextBlock x:Name="WPFDiscoverySummary" FontWeight="SemiBold"/>
                         </StackPanel>
-                        <TextBox x:Name="WPFDiscoveryList" IsReadOnly="True" AcceptsReturn="True" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" FontFamily="Consolas"/>
+                        <RichTextBox x:Name="WPFDiscoveryList" IsReadOnly="True" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" FontFamily="Consolas" BorderBrush="#CBD5E1" BorderThickness="1" Background="White"/>
                     </DockPanel>
                 </Grid>
 
