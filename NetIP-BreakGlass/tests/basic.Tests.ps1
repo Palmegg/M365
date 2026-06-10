@@ -47,6 +47,26 @@ Describe 'NetIP-BreakGlass basic functions' {
         if ($result.UserPrincipalName -ne 'svc_ea_02@contoso.onmicrosoft.com') { throw "Unexpected membership user: $($result.UserPrincipalName)" }
     }
 
+    It 'plans Global Administrator assignment' {
+        $config = @{
+            UserPrefix1 = 'BreakGlass01'; UserPrefix2 = 'BreakGlass02'
+            DisplayName1 = 'BreakGlass 01'; DisplayName2 = 'BreakGlass 02'
+            GroupName = 'CA-BreakGlass-Exclude'; CreateUsers = $true; CreateGroup = $true
+            AddUsersToGroup = $true; PatchCAPolicies = $false
+        }
+        $plan = New-NetIPPlanObject -Config $config
+        if (-not $plan.AssignGlobalAdministrator) { throw 'Plan does not include Global Administrator assignment.' }
+        if ($plan.RoleAssignmentScope -ne '/') { throw "Unexpected role assignment scope: $($plan.RoleAssignmentScope)" }
+    }
+
+    It 'handles Global Administrator role assignment in mock mode' {
+        $role = Get-NetIPGlobalAdministratorRoleDefinition
+        $user = @{ id = 'mock-user-2'; userPrincipalName = 'svc_ea_02@contoso.onmicrosoft.com' }
+        $result = Ensure-NetIPGlobalAdministratorAssignment -User $user -RoleDefinition $role -Apply $true
+        if ($result.Status -ne 'Assigned') { throw "Unexpected role assignment status: $($result.Status)" }
+        if ($result.Role -ne 'Global Administrator') { throw "Unexpected role assignment role: $($result.Role)" }
+    }
+
     It 'reads properties case-insensitively without numeric index binding' {
         $user = @{ id = 'mock-user-3'; userPrincipalName = 'svc_ea_03@contoso.onmicrosoft.com' }
         $upn = Get-NetIPObjectPropertyValue -InputObject $user -Name 'UserPrincipalName'
@@ -65,6 +85,7 @@ Describe 'NetIP-BreakGlass basic functions' {
             Account2 = @{ DisplayName = 'BreakGlass 02'; UserPrincipalName = 'svc_ea_02@contoso.onmicrosoft.com'; Status = 'Created' }
             Group = @{ DisplayName = 'CA-BreakGlass-Exclude'; Id = 'group-id'; Status = 'Created' }
             GroupMembership = @(@{ UserPrincipalName = 'svc_ea_01@contoso.onmicrosoft.com'; Group = 'CA-BreakGlass-Exclude'; Status = 'Added' })
+            RoleAssignments = @(@{ UserPrincipalName = 'svc_ea_01@contoso.onmicrosoft.com'; Role = 'Global Administrator'; Scope = '/'; Status = 'Assigned' })
             CAExclusionsEnabled = $false
             CAPoliciesChangedCount = 0
             CABackupPath = ''
@@ -77,5 +98,6 @@ Describe 'NetIP-BreakGlass basic functions' {
         if (-not (Test-Path -LiteralPath $path)) { throw 'Handoff file was not created.' }
         $html = Get-Content -LiteralPath $path -Raw
         if ($html -notmatch 'svc_ea_01@contoso.onmicrosoft.com') { throw 'Handoff missing account UPN.' }
+        if ($html -notmatch 'Global Administrator') { throw 'Handoff missing Global Administrator assignment.' }
     }
 }

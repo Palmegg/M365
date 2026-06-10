@@ -32,11 +32,13 @@ function New-NetIPHandoffHtml {
     $already = @(Get-NetIPObjectPropertyValue -InputObject $Result -Name 'CAPoliciesAlreadyExcluded')
     $failed = @(Get-NetIPObjectPropertyValue -InputObject $Result -Name 'CAPoliciesFailed')
     $memberships = @(Get-NetIPObjectPropertyValue -InputObject $Result -Name 'GroupMembership')
+    $roleAssignments = @(Get-NetIPObjectPropertyValue -InputObject $Result -Name 'RoleAssignments')
     $resultWarnings = @(Get-NetIPObjectPropertyValue -InputObject $Result -Name 'Warnings')
     $changedTable = Rows $changed
     $alreadyTable = Rows $already
     $failedTable = Rows $failed
     $membershipTable = Rows $memberships
+    $roleAssignmentTable = Rows $roleAssignments
     $warnings = if ($resultWarnings.Count -gt 0) { '<ul>' + (($resultWarnings | ForEach-Object { '<li>{0}</li>' -f (ConvertTo-NetIPHtmlValue $_) }) -join '') + '</ul>' } else { '<p>Ingen.</p>' }
     $html = @"
 <!doctype html>
@@ -82,6 +84,9 @@ function New-NetIPHandoffHtml {
   </table>
   <h2>Gruppemedlemskab</h2>
   $membershipTable
+  <h2>Administratorrolle</h2>
+  <p>Begge break-glass konti tildeles direkte Global Administrator på tenant scope (/).</p>
+  $roleAssignmentTable
   <h2>Conditional Access</h2>
   <table>
     <tr><th>CA exclusions valgt</th><td>$(ConvertTo-NetIPHtmlValue (Get-NetIPObjectPropertyValue -InputObject $Result -Name 'CAExclusionsEnabled'))</td></tr>
@@ -100,7 +105,7 @@ function New-NetIPHandoffHtml {
   <ol>
     <li>Gem de genererede adgangskoder sikkert efter intern/kundeprocedure.</li>
     <li>Konfigurer MFA/FIDO2/passkey manuelt, hvis det indgår i kundens standard.</li>
-    <li>Tildel relevante administratorroller manuelt, hvis det indgår i kundens break-glass procedure.</li>
+    <li>Verificér at begge break-glass konti har direkte Global Administrator rolle.</li>
     <li>Verificér at begge break-glass konti kan logge ind.</li>
     <li>Verificér at kontiene er medlem af CA-BreakGlass-Exclude.</li>
     <li>Verificér at gruppen er ekskluderet fra de ønskede Conditional Access-politikker, hvis funktionen blev valgt.</li>

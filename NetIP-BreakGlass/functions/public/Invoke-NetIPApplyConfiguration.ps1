@@ -18,6 +18,7 @@ Brugere:
 Eksisterende passwords ændres ikke.
 Gruppe: $($plan.GroupName) / $($plan.GroupStatus)
 Medlemskab opdateres: $($plan.AddAccountsToGroup)
+Global Administrator tildeles direkte til begge konti: Ja
 Conditional Access policies patches: $($plan.PatchConditionalAccess)
 Antal policies der patches: $(@($plan.CAPoliciesToChange).Count)
 
@@ -76,6 +77,12 @@ Vil du fortsætte?
             $membership += [pscustomobject]@{ Status='Skipped'; Detail='Gruppemedlemskab er fravalgt.' }
         }
 
+        $roleDefinition = Get-NetIPGlobalAdministratorRoleDefinition
+        $roleAssignments = @()
+        foreach ($user in $users | Where-Object { Get-NetIPObjectPropertyValue -InputObject $_ -Name 'id' }) {
+            $roleAssignments += Ensure-NetIPGlobalAdministratorAssignment -User $user -RoleDefinition $roleDefinition -Apply $true
+        }
+
         $policies = @(Get-NetIPConditionalAccessPolicies)
         $backupPath = ''
         $caResults = @()
@@ -114,6 +121,7 @@ Vil du fortsætte?
             Account2 = [pscustomobject]@{ DisplayName=$config.DisplayName2; UserPrincipalName=$upn2; Status=$account2Status }
             Group = [pscustomobject]@{ DisplayName=$groupDisplayName; Id=$groupId; Status=$groupStatus }
             GroupMembership = $membership
+            RoleAssignments = $roleAssignments
             CAExclusionsEnabled = [bool]$config.PatchCAPolicies
             CAPoliciesChangedCount = $changed.Count
             CAPoliciesChanged = $changed

@@ -169,6 +169,76 @@ function ConvertTo-NetIPRedactedError {
     return $text
 }
 
+function Ensure-NetIPGlobalAdministratorAssignment {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] $User,
+        [Parameter(Mandatory)] $RoleDefinition,
+        [Parameter(Mandatory)][bool] $Apply
+    )
+
+    $userId = [string](Get-NetIPObjectPropertyValue -InputObject $User -Name 'id')
+    $upn = [string](Get-NetIPObjectPropertyValue -InputObject $User -Name 'userPrincipalName')
+    $roleDefinitionId = [string](Get-NetIPObjectPropertyValue -InputObject $RoleDefinition -Name 'id')
+    $roleName = [string](Get-NetIPObjectPropertyValue -InputObject $RoleDefinition -Name 'displayName')
+
+    if ([string]::IsNullOrWhiteSpace($userId) -or [string]::IsNullOrWhiteSpace($roleDefinitionId)) {
+        return [pscustomobject]@{
+            UserPrincipalName = $upn
+            Role = $roleName
+            Scope = '/'
+            Status = 'Skipped'
+            Detail = 'User or role definition missing.'
+        }
+    }
+
+    if ($sync.App.Mock -or $userId -like 'mock-*') {
+        return [pscustomobject]@{
+            UserPrincipalName = $upn
+            Role = $roleName
+            Scope = '/'
+            Status = if ($Apply) { 'Assigned' } else { 'Planned' }
+            Detail = ''
+        }
+    }
+
+    $filter = [uri]::EscapeDataString("principalId eq '$userId' and roleDefinitionId eq '$roleDefinitionId' and directoryScopeId eq '/'")
+    $existing = @(Get-NetIPGraphCollection -Uri "https://graph.microsoft.com/v1.0/roleManagement/directory/roleAssignments?`$filter=$filter&`$select=id,principalId,roleDefinitionId,directoryScopeId")
+    if ($existing.Count -gt 0) {
+        return [pscustomobject]@{
+            UserPrincipalName = $upn
+            Role = $roleName
+            Scope = '/'
+            Status = 'AlreadyAssigned'
+            Detail = ''
+        }
+    }
+
+    if (-not $Apply) {
+        return [pscustomobject]@{
+            UserPrincipalName = $upn
+            Role = $roleName
+            Scope = '/'
+            Status = 'Planned'
+            Detail = ''
+        }
+    }
+
+    $body = @{
+        principalId = $userId
+        roleDefinitionId = $roleDefinitionId
+        directoryScopeId = '/'
+    }
+    Invoke-NetIPGraphRequest -Method POST -Uri 'https://graph.microsoft.com/v1.0/roleManagement/directory/roleAssignments' -Body $body | Out-Null
+    return [pscustomobject]@{
+        UserPrincipalName = $upn
+        Role = $roleName
+        Scope = '/'
+        Status = 'Assigned'
+        Detail = ''
+    }
+}
+
 function Ensure-NetIPGroupMember {
     [CmdletBinding()]
     param(
@@ -280,6 +350,26 @@ function Get-NetIPConfigFromUI {
             PatchCAPolicies  = [bool]$sync.WPFPatchCAPolicies.IsChecked
         }
     })
+}
+
+function Get-NetIPGlobalAdministratorRoleDefinition {
+    [CmdletBinding()]
+    param()
+
+    if ($sync.App.Mock) {
+        return [pscustomobject]@{
+            id = 'mock-global-admin-role-definition'
+            displayName = 'Global Administrator'
+        }
+    }
+
+    $filter = [uri]::EscapeDataString("displayName eq 'Global Administrator'")
+    $roles = @(Get-NetIPGraphCollection -Uri "https://graph.microsoft.com/v1.0/roleManagement/directory/roleDefinitions?`$filter=$filter&`$select=id,displayName")
+    $role = $roles | Select-Object -First 1
+    if (-not $role) {
+        throw 'Kunne ikke finde role definition for Global Administrator via Microsoft Graph.'
+    }
+    return $role
 }
 
 function Get-NetIPGraphCollection {
@@ -537,11 +627,13 @@ function New-NetIPHandoffHtml {
     $already = @(Get-NetIPObjectPropertyValue -InputObject $Result -Name 'CAPoliciesAlreadyExcluded')
     $failed = @(Get-NetIPObjectPropertyValue -InputObject $Result -Name 'CAPoliciesFailed')
     $memberships = @(Get-NetIPObjectPropertyValue -InputObject $Result -Name 'GroupMembership')
+    $roleAssignments = @(Get-NetIPObjectPropertyValue -InputObject $Result -Name 'RoleAssignments')
     $resultWarnings = @(Get-NetIPObjectPropertyValue -InputObject $Result -Name 'Warnings')
     $changedTable = Rows $changed
     $alreadyTable = Rows $already
     $failedTable = Rows $failed
     $membershipTable = Rows $memberships
+    $roleAssignmentTable = Rows $roleAssignments
     $warnings = if ($resultWarnings.Count -gt 0) { '<ul>' + (($resultWarnings | ForEach-Object { '<li>{0}</li>' -f (ConvertTo-NetIPHtmlValue $_) }) -join '') + '</ul>' } else { '<p>Ingen.</p>' }
     $html = @"
 <!doctype html>
@@ -587,6 +679,9 @@ function New-NetIPHandoffHtml {
   </table>
   <h2>Gruppemedlemskab</h2>
   $membershipTable
+  <h2>Administratorrolle</h2>
+  <p>Begge break-glass konti tildeles direkte Global Administrator på tenant scope (/).</p>
+  $roleAssignmentTable
   <h2>Conditional Access</h2>
   <table>
     <tr><th>CA exclusions valgt</th><td>$(ConvertTo-NetIPHtmlValue (Get-NetIPObjectPropertyValue -InputObject $Result -Name 'CAExclusionsEnabled'))</td></tr>
@@ -605,7 +700,7 @@ function New-NetIPHandoffHtml {
   <ol>
     <li>Gem de genererede adgangskoder sikkert efter intern/kundeprocedure.</li>
     <li>Konfigurer MFA/FIDO2/passkey manuelt, hvis det indgår i kundens standard.</li>
-    <li>Tildel relevante administratorroller manuelt, hvis det indgår i kundens break-glass procedure.</li>
+    <li>Verificér at begge break-glass konti har direkte Global Administrator rolle.</li>
     <li>Verificér at begge break-glass konti kan logge ind.</li>
     <li>Verificér at kontiene er medlem af CA-BreakGlass-Exclude.</li>
     <li>Verificér at gruppen er ekskluderet fra de ønskede Conditional Access-politikker, hvis funktionen blev valgt.</li>
@@ -662,6 +757,7 @@ function New-NetIPPlanObject {
     $warnings = @()
     if ($user1) { $warnings += 'Konto 1 findes allerede. Password bliver ikke ændret automatisk.' }
     if ($user2) { $warnings += 'Konto 2 findes allerede. Password bliver ikke ændret automatisk.' }
+    $warnings += 'Begge break-glass konti får direkte Global Administrator rolle på tenant scope (/).'
     if ($Config.PatchCAPolicies) { $warnings += 'Eksisterende Conditional Access-politikker ændres. Backup oprettes før ændringer.' }
 
     $outputFolder = if ($sync.State.OutputFolder) { $sync.State.OutputFolder } else { Join-Path $sync.App.OutputRoot ('BreakGlass-{0}-<timestamp>' -f $tenant.TenantId) }
@@ -678,6 +774,8 @@ function New-NetIPPlanObject {
         GroupName                 = $Config.GroupName
         GroupStatus               = if ($group) { 'Eksisterer allerede' } elseif ($Config.CreateGroup) { 'Oprettes' } else { 'Springes over' }
         AddAccountsToGroup        = [bool]$Config.AddUsersToGroup
+        AssignGlobalAdministrator = $true
+        RoleAssignmentScope       = '/'
         ConditionalAccessCount    = @($policies).Count
         PatchConditionalAccess    = [bool]$Config.PatchCAPolicies
         CAPoliciesToChange        = @($toPatch | Select-Object id,displayName,state)
@@ -966,6 +1064,7 @@ Brugere:
 Eksisterende passwords ændres ikke.
 Gruppe: $($plan.GroupName) / $($plan.GroupStatus)
 Medlemskab opdateres: $($plan.AddAccountsToGroup)
+Global Administrator tildeles direkte til begge konti: Ja
 Conditional Access policies patches: $($plan.PatchConditionalAccess)
 Antal policies der patches: $(@($plan.CAPoliciesToChange).Count)
 
@@ -1024,6 +1123,12 @@ Vil du fortsætte?
             $membership += [pscustomobject]@{ Status='Skipped'; Detail='Gruppemedlemskab er fravalgt.' }
         }
 
+        $roleDefinition = Get-NetIPGlobalAdministratorRoleDefinition
+        $roleAssignments = @()
+        foreach ($user in $users | Where-Object { Get-NetIPObjectPropertyValue -InputObject $_ -Name 'id' }) {
+            $roleAssignments += Ensure-NetIPGlobalAdministratorAssignment -User $user -RoleDefinition $roleDefinition -Apply $true
+        }
+
         $policies = @(Get-NetIPConditionalAccessPolicies)
         $backupPath = ''
         $caResults = @()
@@ -1062,6 +1167,7 @@ Vil du fortsætte?
             Account2 = [pscustomobject]@{ DisplayName=$config.DisplayName2; UserPrincipalName=$upn2; Status=$account2Status }
             Group = [pscustomobject]@{ DisplayName=$groupDisplayName; Id=$groupId; Status=$groupStatus }
             GroupMembership = $membership
+            RoleAssignments = $roleAssignments
             CAExclusionsEnabled = [bool]$config.PatchCAPolicies
             CAPoliciesChangedCount = $changed.Count
             CAPoliciesChanged = $changed
@@ -1115,6 +1221,7 @@ Konto 2: $($plan.Account2DisplayName) / $($plan.Account2UPN) / $($plan.Account2S
 
 Gruppe: $($plan.GroupName) / $($plan.GroupStatus)
 Tilføj konti til gruppe: $($plan.AddAccountsToGroup)
+Tildel Global Administrator: $($plan.AssignGlobalAdministrator) / scope $($plan.RoleAssignmentScope)
 
 Conditional Access policies fundet: $($plan.ConditionalAccessCount)
 Patch CA policies: $($plan.PatchConditionalAccess)
@@ -1354,7 +1461,7 @@ function Set-NetIPWPFStep {
 $sync.configs.appsettings = @'
 {
   "name": "NetIP Entra Break Glass Configurator",
-  "version": "2.0.1",
+  "version": "2.0.2",
   "outputRoot": ".\\Output",
   "groupName": "CA-BreakGlass-Exclude",
   "groupDescription": "Security group used to exclude dedicated break-glass accounts from existing Conditional Access policies."
@@ -1380,6 +1487,7 @@ $sync.configs.graphScopes = @'
   "Group.ReadWrite.All",
   "Directory.Read.All",
   "Organization.Read.All",
+  "RoleManagement.ReadWrite.Directory",
   "Policy.Read.All",
   "Policy.ReadWrite.ConditionalAccess"
 ]

@@ -26,6 +26,7 @@ Konto 2: $($plan.Account2DisplayName) / $($plan.Account2UPN) / $($plan.Account2S
 
 Gruppe: $($plan.GroupName) / $($plan.GroupStatus)
 Tilføj konti til gruppe: $($plan.AddAccountsToGroup)
+Tildel Global Administrator: $($plan.AssignGlobalAdministrator) / scope $($plan.RoleAssignmentScope)
 
 Conditional Access policies fundet: $($plan.ConditionalAccessCount)
 Patch CA policies: $($plan.PatchConditionalAccess)

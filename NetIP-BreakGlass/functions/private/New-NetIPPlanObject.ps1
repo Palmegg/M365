@@ -29,6 +29,7 @@ function New-NetIPPlanObject {
     $warnings = @()
     if ($user1) { $warnings += 'Konto 1 findes allerede. Password bliver ikke ændret automatisk.' }
     if ($user2) { $warnings += 'Konto 2 findes allerede. Password bliver ikke ændret automatisk.' }
+    $warnings += 'Begge break-glass konti får direkte Global Administrator rolle på tenant scope (/).'
     if ($Config.PatchCAPolicies) { $warnings += 'Eksisterende Conditional Access-politikker ændres. Backup oprettes før ændringer.' }
 
     $outputFolder = if ($sync.State.OutputFolder) { $sync.State.OutputFolder } else { Join-Path $sync.App.OutputRoot ('BreakGlass-{0}-<timestamp>' -f $tenant.TenantId) }
@@ -45,6 +46,8 @@ function New-NetIPPlanObject {
         GroupName                 = $Config.GroupName
         GroupStatus               = if ($group) { 'Eksisterer allerede' } elseif ($Config.CreateGroup) { 'Oprettes' } else { 'Springes over' }
         AddAccountsToGroup        = [bool]$Config.AddUsersToGroup
+        AssignGlobalAdministrator = $true
+        RoleAssignmentScope       = '/'
         ConditionalAccessCount    = @($policies).Count
         PatchConditionalAccess    = [bool]$Config.PatchCAPolicies
         CAPoliciesToChange        = @($toPatch | Select-Object id,displayName,state)
