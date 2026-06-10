@@ -11,8 +11,8 @@ function Invoke-NetIPDiscovery {
         param($config)
         Write-NetIPStatus -Busy -Message 'Kører discovery...'
         $tenant = Get-NetIPTenantInfo
-        $upn1 = ConvertTo-NetIPBreakGlassUpn -Prefix $config.UserPrefix1 -OnMicrosoftDomain $tenant.OnMicrosoftDomain
-        $upn2 = ConvertTo-NetIPBreakGlassUpn -Prefix $config.UserPrefix2 -OnMicrosoftDomain $tenant.OnMicrosoftDomain
+        $upn1 = ConvertTo-BreakGlassUpn -Prefix $config.UserPrefix1 -OnMicrosoftDomain $tenant.OnMicrosoftDomain
+        $upn2 = ConvertTo-BreakGlassUpn -Prefix $config.UserPrefix2 -OnMicrosoftDomain $tenant.OnMicrosoftDomain
         $user1 = Get-NetIPUserByUpn -UserPrincipalName $upn1
         $user2 = Get-NetIPUserByUpn -UserPrincipalName $upn2
         $group = Get-NetIPGroupByDisplayName -DisplayName $config.GroupName

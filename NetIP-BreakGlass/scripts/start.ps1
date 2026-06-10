@@ -16,7 +16,7 @@ $sync = [Hashtable]::Synchronized(@{})
 $sync.configs = @{}
 
 $sync.App = @{
-    Name       = 'NetIP Entra Break Glass Configurator'
+    Name       = 'Entra Break Glass Configurator'
     Version    = '2.0.0'
     Mock       = [bool] $Mock
     OutputRoot = '.\Output'
@@ -37,6 +37,7 @@ $sync.State = [Hashtable]::Synchronized(@{
     CreatedPasswords   = @()
     Warnings           = @()
     Errors             = @()
+    Language           = 'da-DK'
 })
 
 $sync.UI = [Hashtable]::Synchronized(@{
@@ -53,7 +54,7 @@ $sync.App.OutputRoot = Join-Path -Path $sync.Paths.Root -ChildPath 'Output'
 New-Item -ItemType Directory -Force -Path $sync.App.OutputRoot | Out-Null
 
 $timestamp = Get-Date -Format 'yyyyMMdd-HHmmss'
-$sync.Paths.LogFile = Join-Path -Path $sync.App.OutputRoot -ChildPath "NetIPBreakGlass_$timestamp.log"
+$sync.Paths.LogFile = Join-Path -Path $sync.App.OutputRoot -ChildPath "BreakGlassConfigurator_$timestamp.log"
 
 if ($DebugMode) {
     $DebugPreference = 'Continue'

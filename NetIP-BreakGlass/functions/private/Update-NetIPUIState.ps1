@@ -12,7 +12,14 @@ function Update-NetIPUIState {
     if ($sync.WPFDomain) { $sync.WPFDomain.Text = $domain }
     if ($sync.WPFUpnPreview1 -and $domain) { $sync.WPFUpnPreview1.Text = "$(if($sync.WPFUserPrefix1){$sync.WPFUserPrefix1.Text})@$domain" }
     if ($sync.WPFUpnPreview2 -and $domain) { $sync.WPFUpnPreview2.Text = "$(if($sync.WPFUserPrefix2){$sync.WPFUserPrefix2.Text})@$domain" }
-    if ($sync.WPFGraphStatus) { $sync.WPFGraphStatus.Text = if ($sync.State.GraphConnected) { 'Ja' } else { 'Nej' } }
+    if ($sync.WPFGraphStatus) {
+        $sync.WPFGraphStatus.Text = if ($sync.State.GraphConnected) {
+            if ($sync.State.Language -eq 'en-US') { 'Yes' } else { 'Ja' }
+        }
+        else {
+            if ($sync.State.Language -eq 'en-US') { 'No' } else { 'Nej' }
+        }
+    }
     if ($sync.WPFGraphAccount) { $sync.WPFGraphAccount.Text = [string]$sync.State.GraphAccount }
     if ($sync.WPFTenantId) { $sync.WPFTenantId.Text = [string]$sync.State.TenantId }
     if ($sync.WPFTenantName) { $sync.WPFTenantName.Text = [string]$sync.State.TenantDisplayName }

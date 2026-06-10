@@ -3,7 +3,7 @@ $initialSessionState = [System.Management.Automation.Runspaces.InitialSessionSta
 $initialSessionState.Variables.Add((New-Object System.Management.Automation.Runspaces.SessionStateVariableEntry -ArgumentList 'sync', $sync, $null))
 $initialSessionState.Variables.Add((New-Object System.Management.Automation.Runspaces.SessionStateVariableEntry -ArgumentList 'DebugPreference', $DebugPreference, $null))
 
-Get-ChildItem function:\ | Where-Object { $_.Name -like '*-NetIP*' } | ForEach-Object {
+Get-ChildItem function:\ | Where-Object { $_.Name -like '*-NetIP*' -or $_.Name -like '*-BreakGlass*' } | ForEach-Object {
     $definition = Get-Content function:\$($_.Name)
     $initialSessionState.Commands.Add((New-Object System.Management.Automation.Runspaces.SessionStateFunctionEntry -ArgumentList $_.Name, $definition))
 }
@@ -42,6 +42,14 @@ foreach ($box in @('WPFDisplayName1','WPFUserPrefix1','WPFDisplayName2','WPFUser
 
 $sync.WPFWelcomeRiskAccepted.Add_Checked({ Update-NetIPUIState })
 $sync.WPFWelcomeRiskAccepted.Add_Unchecked({ Update-NetIPUIState })
+if ($sync.WPFLanguageSelector) {
+    $sync.WPFLanguageSelector.Add_SelectionChanged({
+        $selected = $sync.WPFLanguageSelector.SelectedItem
+        $language = if ($selected -and $selected.Tag) { [string]$selected.Tag } else { 'da-DK' }
+        Set-NetIPLanguage -Language $language
+        Update-NetIPUIState
+    })
+}
 
 $sync.Form.Add_Closing({
     if ($sync.Runspace) {

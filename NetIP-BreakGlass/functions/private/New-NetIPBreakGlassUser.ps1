@@ -1,4 +1,4 @@
-function New-NetIPBreakGlassUser {
+function New-BreakGlassUser {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][string] $DisplayName,

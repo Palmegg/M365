@@ -45,7 +45,7 @@ function New-NetIPHandoffHtml {
 <html lang="da">
 <head>
   <meta charset="utf-8">
-  <title>CONFIDENTIAL - NetIP Break Glass Handoff</title>
+  <title>CONFIDENTIAL - Break Glass Handoff</title>
   <style>
     body { font-family: Segoe UI, Arial, sans-serif; margin: 32px; color: #111827; line-height: 1.45; }
     .banner { background:#7f1d1d; color:white; padding:14px 18px; font-weight:700; font-size:22px; }
@@ -57,7 +57,7 @@ function New-NetIPHandoffHtml {
 </head>
 <body>
   <div class="banner">CONFIDENTIAL - HANDOFF</div>
-  <h1>NetIP Entra Break Glass handoff</h1>
+  <h1>Entra Break Glass handoff</h1>
   <p>Dette dokument indeholder ikke adgangskoder, tokens eller secrets.</p>
   <h2>Tenant</h2>
   <table>

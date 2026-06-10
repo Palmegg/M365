@@ -37,8 +37,8 @@ Vil du fortsætte?
         $output = if ($sync.State.OutputFolder) { $sync.State.OutputFolder } else { New-NetIPOutputFolder -TenantId $tenant.TenantId }
         New-Item -ItemType Directory -Force -Path $output | Out-Null
 
-        $upn1 = ConvertTo-NetIPBreakGlassUpn -Prefix $config.UserPrefix1 -OnMicrosoftDomain $tenant.OnMicrosoftDomain
-        $upn2 = ConvertTo-NetIPBreakGlassUpn -Prefix $config.UserPrefix2 -OnMicrosoftDomain $tenant.OnMicrosoftDomain
+        $upn1 = ConvertTo-BreakGlassUpn -Prefix $config.UserPrefix1 -OnMicrosoftDomain $tenant.OnMicrosoftDomain
+        $upn2 = ConvertTo-BreakGlassUpn -Prefix $config.UserPrefix2 -OnMicrosoftDomain $tenant.OnMicrosoftDomain
         $group = Ensure-NetIPSecurityGroup -DisplayName $config.GroupName -Description $config.GroupDescription -CreateIfMissing ([bool]$config.CreateGroup) -Apply $true
         Write-NetIPLog -Level PASS -Message "Gruppe håndteret: $($config.GroupName)"
 
@@ -61,7 +61,7 @@ Vil du fortsætte?
                 continue
             }
             $password = New-NetIPRandomPassword
-            $user = New-NetIPBreakGlassUser -DisplayName $item.DisplayName -UserPrincipalName $item.Upn -Password $password
+            $user = New-BreakGlassUser -DisplayName $item.DisplayName -UserPrincipalName $item.Upn -Password $password
             $users.Add($user)
             $createdPasswords += [pscustomobject]@{ UserPrincipalName = $item.Upn; Password = $password }
             Write-NetIPLog -Level PASS -Message "Bruger oprettet: $($item.Upn)"

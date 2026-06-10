@@ -12,7 +12,7 @@ Describe 'NetIP-BreakGlass basic functions' {
     }
 
     It 'builds UPN from prefix' {
-        $actual = ConvertTo-NetIPBreakGlassUpn -Prefix 'BreakGlass01' -OnMicrosoftDomain 'contoso.onmicrosoft.com'
+        $actual = ConvertTo-BreakGlassUpn -Prefix 'BreakGlass01' -OnMicrosoftDomain 'contoso.onmicrosoft.com'
         if ($actual -ne 'BreakGlass01@contoso.onmicrosoft.com') { throw "Unexpected UPN: $actual" }
     }
 

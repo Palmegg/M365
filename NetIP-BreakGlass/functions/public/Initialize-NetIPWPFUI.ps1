@@ -22,6 +22,8 @@ function Initialize-NetIPWPFUI {
     $sync.WPFCreateGroup.IsChecked = [bool]$defaults.createGroup
     $sync.WPFAddUsersToGroup.IsChecked = [bool]$defaults.addUsersToGroup
     $sync.WPFPatchCAPolicies.IsChecked = [bool]$defaults.patchCAPolicies
+    if ($sync.WPFLanguageSelector) { $sync.WPFLanguageSelector.SelectedIndex = 0 }
+    Set-NetIPLanguage -Language $sync.State.Language
 
     if ($sync.App.Mock) {
         $sync.State.GraphConnected = $true

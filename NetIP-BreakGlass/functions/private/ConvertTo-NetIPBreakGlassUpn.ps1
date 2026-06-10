@@ -1,4 +1,4 @@
-function ConvertTo-NetIPBreakGlassUpn {
+function ConvertTo-BreakGlassUpn {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][string] $Prefix,

@@ -1,4 +1,4 @@
-# NetIP Entra Break Glass Configurator
+﻿# Entra Break Glass Configurator
 
 PowerShell 7/WPF værktøj til en simpel Microsoft Graph-baseret v1 opsætning af break-glass konti.
 
@@ -37,7 +37,7 @@ Set-Location "C:\Users\jop\OneDrive - netIP\Dokumenter\GitHub\M365\NetIP-BreakGl
 Kør compiled version:
 
 ```powershell
-.\NetIPBreakGlass.ps1
+.\BreakGlassConfigurator.ps1
 ```
 
 Kompilér og kør direkte:
@@ -49,7 +49,7 @@ Kompilér og kør direkte:
 Mock mode uden Graph:
 
 ```powershell
-.\NetIPBreakGlass.ps1 -Mock
+.\BreakGlassConfigurator.ps1 -Mock
 ```
 
 ## Graph permissions
@@ -102,6 +102,6 @@ Projektet er modulært:
 - `xaml/inputXML.xaml`
 - `Compile.ps1`
 
-`NetIPBreakGlass.ps1` er genereret output og må ikke redigeres direkte.
+`BreakGlassConfigurator.ps1` er genereret output og må ikke redigeres direkte.
 
 Arkitekturen er inspireret af ChrisTitusTech/winutil, som er MIT-licenseret. Se `docs/NOTICE.md`.

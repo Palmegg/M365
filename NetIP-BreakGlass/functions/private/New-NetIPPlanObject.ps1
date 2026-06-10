@@ -6,8 +6,8 @@ function New-NetIPPlanObject {
     )
 
     $tenant = Get-NetIPTenantInfo
-    $upn1 = ConvertTo-NetIPBreakGlassUpn -Prefix $Config.UserPrefix1 -OnMicrosoftDomain $tenant.OnMicrosoftDomain
-    $upn2 = ConvertTo-NetIPBreakGlassUpn -Prefix $Config.UserPrefix2 -OnMicrosoftDomain $tenant.OnMicrosoftDomain
+    $upn1 = ConvertTo-BreakGlassUpn -Prefix $Config.UserPrefix1 -OnMicrosoftDomain $tenant.OnMicrosoftDomain
+    $upn2 = ConvertTo-BreakGlassUpn -Prefix $Config.UserPrefix2 -OnMicrosoftDomain $tenant.OnMicrosoftDomain
     $user1 = if ($Discovery) { $Discovery.User1 } else { Get-NetIPUserByUpn -UserPrincipalName $upn1 }
     $user2 = if ($Discovery) { $Discovery.User2 } else { Get-NetIPUserByUpn -UserPrincipalName $upn2 }
     $group = if ($Discovery) { $Discovery.Group } else { Get-NetIPGroupByDisplayName -DisplayName $Config.GroupName }
