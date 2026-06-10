@@ -46,4 +46,36 @@ Describe 'NetIP-BreakGlass basic functions' {
         if ($result.Status -ne 'Added') { throw "Unexpected membership status: $($result.Status)" }
         if ($result.UserPrincipalName -ne 'svc_ea_02@contoso.onmicrosoft.com') { throw "Unexpected membership user: $($result.UserPrincipalName)" }
     }
+
+    It 'reads properties case-insensitively without numeric index binding' {
+        $user = @{ id = 'mock-user-3'; userPrincipalName = 'svc_ea_03@contoso.onmicrosoft.com' }
+        $upn = Get-NetIPObjectPropertyValue -InputObject $user -Name 'UserPrincipalName'
+        if ($upn -ne 'svc_ea_03@contoso.onmicrosoft.com') { throw "Unexpected UPN lookup: $upn" }
+    }
+
+    It 'generates handoff from nested hashtables' {
+        $output = Join-Path $root 'Output\pester-handoff'
+        $result = [pscustomobject]@{
+            TenantDisplayName = 'Contoso'
+            TenantId = 'tenant-id'
+            Timestamp = (Get-Date).ToString('o')
+            Operator = 'operator@contoso.onmicrosoft.com'
+            OnMicrosoftDomain = 'contoso.onmicrosoft.com'
+            Account1 = @{ DisplayName = 'BreakGlass 01'; UserPrincipalName = 'svc_ea_01@contoso.onmicrosoft.com'; Status = 'Created' }
+            Account2 = @{ DisplayName = 'BreakGlass 02'; UserPrincipalName = 'svc_ea_02@contoso.onmicrosoft.com'; Status = 'Created' }
+            Group = @{ DisplayName = 'CA-BreakGlass-Exclude'; Id = 'group-id'; Status = 'Created' }
+            GroupMembership = @(@{ UserPrincipalName = 'svc_ea_01@contoso.onmicrosoft.com'; Group = 'CA-BreakGlass-Exclude'; Status = 'Added' })
+            CAExclusionsEnabled = $false
+            CAPoliciesChangedCount = 0
+            CABackupPath = ''
+            CAPoliciesChanged = @()
+            CAPoliciesAlreadyExcluded = @()
+            CAPoliciesFailed = @()
+            Warnings = @()
+        }
+        $path = New-NetIPHandoffHtml -Result $result -OutputFolder $output
+        if (-not (Test-Path -LiteralPath $path)) { throw 'Handoff file was not created.' }
+        $html = Get-Content -LiteralPath $path -Raw
+        if ($html -notmatch 'svc_ea_01@contoso.onmicrosoft.com') { throw 'Handoff missing account UPN.' }
+    }
 }

@@ -319,10 +319,18 @@ function Get-NetIPObjectPropertyValue {
     )
 
     if ($null -eq $InputObject) { return $null }
-    if ($InputObject -is [System.Collections.IDictionary] -and $InputObject.Contains($Name)) {
-        return $InputObject[$Name]
+    if ($InputObject -is [System.Collections.IDictionary]) {
+        if ($InputObject.Contains($Name)) {
+            return $InputObject[$Name]
+        }
+        foreach ($key in $InputObject.Keys) {
+            if ([string]::Equals([string]$key, $Name, [System.StringComparison]::OrdinalIgnoreCase)) {
+                return $InputObject[$key]
+            }
+        }
+        return $null
     }
-    $property = $InputObject.PSObject.Properties[$Name]
+    $property = $InputObject.PSObject.Properties | Where-Object { [string]::Equals($_.Name, $Name, [System.StringComparison]::OrdinalIgnoreCase) } | Select-Object -First 1
     if ($property) { return $property.Value }
     return $null
 }
@@ -502,23 +510,39 @@ function New-NetIPHandoffHtml {
         [Parameter(Mandatory)][string] $OutputFolder
     )
 
-    function H([AllowNull()]$value) { [System.Net.WebUtility]::HtmlEncode([string]$value) }
+    function ConvertTo-NetIPHtmlValue([AllowNull()]$value) { [System.Net.WebUtility]::HtmlEncode([string]$value) }
+    function Get-NetIPTablePropertyNames([AllowNull()]$item) {
+        if ($null -eq $item) { return @() }
+        if ($item -is [System.Collections.IDictionary]) {
+            return @($item.Keys | ForEach-Object { [string]$_ })
+        }
+        return @($item.PSObject.Properties.Name)
+    }
     function Rows($items) {
         if (-not $items -or @($items).Count -eq 0) { return '<p>Ingen.</p>' }
-        $props = @($items | ForEach-Object { $_.PSObject.Properties.Name } | Select-Object -Unique)
-        $head = '<tr>' + (($props | ForEach-Object { '<th>{0}</th>' -f (H $_) }) -join '') + '</tr>'
+        $props = @($items | ForEach-Object { Get-NetIPTablePropertyNames $_ } | Select-Object -Unique)
+        $head = '<tr>' + (($props | ForEach-Object { '<th>{0}</th>' -f (ConvertTo-NetIPHtmlValue $_) }) -join '') + '</tr>'
         $body = foreach ($item in $items) {
-            '<tr>' + (($props | ForEach-Object { '<td>{0}</td>' -f (H (Get-NetIPObjectPropertyValue -InputObject $item -Name $_)) }) -join '') + '</tr>'
+            '<tr>' + (($props | ForEach-Object { '<td>{0}</td>' -f (ConvertTo-NetIPHtmlValue (Get-NetIPObjectPropertyValue -InputObject $item -Name $_)) }) -join '') + '</tr>'
         }
         return '<table>' + $head + ($body -join "`n") + '</table>'
     }
 
     $path = Join-Path $OutputFolder 'handoff.html'
-    $changedTable = Rows @($Result.CAPoliciesChanged)
-    $alreadyTable = Rows @($Result.CAPoliciesAlreadyExcluded)
-    $failedTable = Rows @($Result.CAPoliciesFailed)
-    $membershipTable = Rows @($Result.GroupMembership)
-    $warnings = if (@($Result.Warnings).Count -gt 0) { '<ul>' + (($Result.Warnings | ForEach-Object { '<li>{0}</li>' -f (H $_) }) -join '') + '</ul>' } else { '<p>Ingen.</p>' }
+    New-Item -ItemType Directory -Force -Path $OutputFolder | Out-Null
+    $account1 = Get-NetIPObjectPropertyValue -InputObject $Result -Name 'Account1'
+    $account2 = Get-NetIPObjectPropertyValue -InputObject $Result -Name 'Account2'
+    $group = Get-NetIPObjectPropertyValue -InputObject $Result -Name 'Group'
+    $changed = @(Get-NetIPObjectPropertyValue -InputObject $Result -Name 'CAPoliciesChanged')
+    $already = @(Get-NetIPObjectPropertyValue -InputObject $Result -Name 'CAPoliciesAlreadyExcluded')
+    $failed = @(Get-NetIPObjectPropertyValue -InputObject $Result -Name 'CAPoliciesFailed')
+    $memberships = @(Get-NetIPObjectPropertyValue -InputObject $Result -Name 'GroupMembership')
+    $resultWarnings = @(Get-NetIPObjectPropertyValue -InputObject $Result -Name 'Warnings')
+    $changedTable = Rows $changed
+    $alreadyTable = Rows $already
+    $failedTable = Rows $failed
+    $membershipTable = Rows $memberships
+    $warnings = if ($resultWarnings.Count -gt 0) { '<ul>' + (($resultWarnings | ForEach-Object { '<li>{0}</li>' -f (ConvertTo-NetIPHtmlValue $_) }) -join '') + '</ul>' } else { '<p>Ingen.</p>' }
     $html = @"
 <!doctype html>
 <html lang="da">
@@ -540,34 +564,34 @@ function New-NetIPHandoffHtml {
   <p>Dette dokument indeholder ikke adgangskoder, tokens eller secrets.</p>
   <h2>Tenant</h2>
   <table>
-    <tr><th>Tenant navn</th><td>$(H $Result.TenantDisplayName)</td></tr>
-    <tr><th>Tenant ID</th><td>$(H $Result.TenantId)</td></tr>
-    <tr><th>Dato/tid</th><td>$(H $Result.Timestamp)</td></tr>
-    <tr><th>Konsulent / Graph konto</th><td>$(H $Result.Operator)</td></tr>
-    <tr><th>.onmicrosoft.com domæne</th><td>$(H $Result.OnMicrosoftDomain)</td></tr>
+    <tr><th>Tenant navn</th><td>$(ConvertTo-NetIPHtmlValue (Get-NetIPObjectPropertyValue -InputObject $Result -Name 'TenantDisplayName'))</td></tr>
+    <tr><th>Tenant ID</th><td>$(ConvertTo-NetIPHtmlValue (Get-NetIPObjectPropertyValue -InputObject $Result -Name 'TenantId'))</td></tr>
+    <tr><th>Dato/tid</th><td>$(ConvertTo-NetIPHtmlValue (Get-NetIPObjectPropertyValue -InputObject $Result -Name 'Timestamp'))</td></tr>
+    <tr><th>Konsulent / Graph konto</th><td>$(ConvertTo-NetIPHtmlValue (Get-NetIPObjectPropertyValue -InputObject $Result -Name 'Operator'))</td></tr>
+    <tr><th>.onmicrosoft.com domæne</th><td>$(ConvertTo-NetIPHtmlValue (Get-NetIPObjectPropertyValue -InputObject $Result -Name 'OnMicrosoftDomain'))</td></tr>
   </table>
   <h2>Break-glass konti</h2>
   <table>
-    <tr><th>Konto 1 display name</th><td>$(H $Result.Account1.DisplayName)</td></tr>
-    <tr><th>Konto 1 UPN</th><td>$(H $Result.Account1.UserPrincipalName)</td></tr>
-    <tr><th>Konto 1 status</th><td>$(H $Result.Account1.Status)</td></tr>
-    <tr><th>Konto 2 display name</th><td>$(H $Result.Account2.DisplayName)</td></tr>
-    <tr><th>Konto 2 UPN</th><td>$(H $Result.Account2.UserPrincipalName)</td></tr>
-    <tr><th>Konto 2 status</th><td>$(H $Result.Account2.Status)</td></tr>
+    <tr><th>Konto 1 display name</th><td>$(ConvertTo-NetIPHtmlValue (Get-NetIPObjectPropertyValue -InputObject $account1 -Name 'DisplayName'))</td></tr>
+    <tr><th>Konto 1 UPN</th><td>$(ConvertTo-NetIPHtmlValue (Get-NetIPObjectPropertyValue -InputObject $account1 -Name 'UserPrincipalName'))</td></tr>
+    <tr><th>Konto 1 status</th><td>$(ConvertTo-NetIPHtmlValue (Get-NetIPObjectPropertyValue -InputObject $account1 -Name 'Status'))</td></tr>
+    <tr><th>Konto 2 display name</th><td>$(ConvertTo-NetIPHtmlValue (Get-NetIPObjectPropertyValue -InputObject $account2 -Name 'DisplayName'))</td></tr>
+    <tr><th>Konto 2 UPN</th><td>$(ConvertTo-NetIPHtmlValue (Get-NetIPObjectPropertyValue -InputObject $account2 -Name 'UserPrincipalName'))</td></tr>
+    <tr><th>Konto 2 status</th><td>$(ConvertTo-NetIPHtmlValue (Get-NetIPObjectPropertyValue -InputObject $account2 -Name 'Status'))</td></tr>
   </table>
   <h2>Security group</h2>
   <table>
-    <tr><th>Navn</th><td>$(H $Result.Group.DisplayName)</td></tr>
-    <tr><th>Object ID</th><td>$(H $Result.Group.Id)</td></tr>
-    <tr><th>Status</th><td>$(H $Result.Group.Status)</td></tr>
+    <tr><th>Navn</th><td>$(ConvertTo-NetIPHtmlValue (Get-NetIPObjectPropertyValue -InputObject $group -Name 'DisplayName'))</td></tr>
+    <tr><th>Object ID</th><td>$(ConvertTo-NetIPHtmlValue (Get-NetIPObjectPropertyValue -InputObject $group -Name 'Id'))</td></tr>
+    <tr><th>Status</th><td>$(ConvertTo-NetIPHtmlValue (Get-NetIPObjectPropertyValue -InputObject $group -Name 'Status'))</td></tr>
   </table>
   <h2>Gruppemedlemskab</h2>
   $membershipTable
   <h2>Conditional Access</h2>
   <table>
-    <tr><th>CA exclusions valgt</th><td>$(H $Result.CAExclusionsEnabled)</td></tr>
-    <tr><th>Antal policies ændret</th><td>$(H $Result.CAPoliciesChangedCount)</td></tr>
-    <tr><th>Backup path</th><td>$(H $Result.CABackupPath)</td></tr>
+    <tr><th>CA exclusions valgt</th><td>$(ConvertTo-NetIPHtmlValue (Get-NetIPObjectPropertyValue -InputObject $Result -Name 'CAExclusionsEnabled'))</td></tr>
+    <tr><th>Antal policies ændret</th><td>$(ConvertTo-NetIPHtmlValue (Get-NetIPObjectPropertyValue -InputObject $Result -Name 'CAPoliciesChangedCount'))</td></tr>
+    <tr><th>Backup path</th><td>$(ConvertTo-NetIPHtmlValue (Get-NetIPObjectPropertyValue -InputObject $Result -Name 'CABackupPath'))</td></tr>
   </table>
   <h3>Policies ændret</h3>
   $changedTable
@@ -752,7 +776,9 @@ function Show-NetIPCreatedPasswordsOnce {
         $text.AcceptsReturn = $true
         $text.VerticalScrollBarVisibility = 'Auto'
         $text.FontFamily = 'Consolas'
-        $text.Text = (($CreatedPasswords | ForEach-Object { "$($_.UserPrincipalName): $($_.Password)" }) -join [Environment]::NewLine)
+        $text.Text = (($CreatedPasswords | ForEach-Object {
+            '{0}: {1}' -f (Get-NetIPObjectPropertyValue -InputObject $_ -Name 'UserPrincipalName'), (Get-NetIPObjectPropertyValue -InputObject $_ -Name 'Password')
+        }) -join [Environment]::NewLine)
         $panel.Children.Add($text) | Out-Null
         $buttons = New-Object System.Windows.Controls.StackPanel
         $buttons.Orientation = 'Horizontal'

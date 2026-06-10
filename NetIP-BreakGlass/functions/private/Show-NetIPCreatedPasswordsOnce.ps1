@@ -24,7 +24,9 @@ function Show-NetIPCreatedPasswordsOnce {
         $text.AcceptsReturn = $true
         $text.VerticalScrollBarVisibility = 'Auto'
         $text.FontFamily = 'Consolas'
-        $text.Text = (($CreatedPasswords | ForEach-Object { "$($_.UserPrincipalName): $($_.Password)" }) -join [Environment]::NewLine)
+        $text.Text = (($CreatedPasswords | ForEach-Object {
+            '{0}: {1}' -f (Get-NetIPObjectPropertyValue -InputObject $_ -Name 'UserPrincipalName'), (Get-NetIPObjectPropertyValue -InputObject $_ -Name 'Password')
+        }) -join [Environment]::NewLine)
         $panel.Children.Add($text) | Out-Null
         $buttons = New-Object System.Windows.Controls.StackPanel
         $buttons.Orientation = 'Horizontal'
