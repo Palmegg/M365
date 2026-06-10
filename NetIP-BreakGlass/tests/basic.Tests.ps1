@@ -38,4 +38,12 @@ Describe 'NetIP-BreakGlass basic functions' {
         $count = @($result | Where-Object Status -eq 'PlannedPatch').Count
         if ($count -ne 3) { throw "Expected 3 planned patches, got $count" }
     }
+
+    It 'handles group membership with Graph hashtable objects' {
+        $group = @{ id = 'mock-ca-exclude-group'; displayName = 'CA-BreakGlass-Exclude' }
+        $user = @{ id = 'mock-user-2'; userPrincipalName = 'svc_ea_02@contoso.onmicrosoft.com' }
+        $result = Ensure-NetIPGroupMember -Group $group -User $user -Apply $true
+        if ($result.Status -ne 'Added') { throw "Unexpected membership status: $($result.Status)" }
+        if ($result.UserPrincipalName -ne 'svc_ea_02@contoso.onmicrosoft.com') { throw "Unexpected membership user: $($result.UserPrincipalName)" }
+    }
 }

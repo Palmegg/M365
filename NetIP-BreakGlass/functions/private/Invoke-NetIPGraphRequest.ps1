@@ -3,7 +3,8 @@ function Invoke-NetIPGraphRequest {
     param(
         [Parameter(Mandatory)][ValidateSet('GET','POST','PATCH','DELETE')][string] $Method,
         [Parameter(Mandatory)][string] $Uri,
-        [AllowNull()] $Body = $null
+        [AllowNull()] $Body = $null,
+        [switch] $SuppressNotFoundLog
     )
 
     if ($sync.App.Mock) {
@@ -22,7 +23,11 @@ function Invoke-NetIPGraphRequest {
         return Invoke-MgGraphRequest @params
     }
     catch {
-        Write-NetIPLog -Level ERROR -Message (ConvertTo-NetIPRedactedError -ErrorRecord $_)
+        $message = [string]$_
+        $isNotFound = $message -match '404|Request_ResourceNotFound|Resource .* does not exist'
+        if (-not ($SuppressNotFoundLog -and $isNotFound)) {
+            Write-NetIPLog -Level ERROR -Message (ConvertTo-NetIPRedactedError -ErrorRecord $_)
+        }
         throw
     }
 }

@@ -179,21 +179,22 @@ function Ensure-NetIPGroupMember {
     $groupId = [string](Get-NetIPObjectPropertyValue -InputObject $Group -Name 'id')
     $userId = [string](Get-NetIPObjectPropertyValue -InputObject $User -Name 'id')
     $upn = [string](Get-NetIPObjectPropertyValue -InputObject $User -Name 'userPrincipalName')
+    $groupName = [string](Get-NetIPObjectPropertyValue -InputObject $Group -Name 'displayName')
     if ([string]::IsNullOrWhiteSpace($groupId) -or [string]::IsNullOrWhiteSpace($userId)) {
-        return [pscustomobject]@{ UserPrincipalName = $upn; Group = $Group.displayName; Status = 'Skipped'; Detail = 'Group or user missing.' }
+        return [pscustomobject]@{ UserPrincipalName = $upn; Group = $groupName; Status = 'Skipped'; Detail = 'Group or user missing.' }
     }
     if ($sync.App.Mock -or $groupId -like 'planned-*' -or $userId -like 'mock-*') {
-        return [pscustomobject]@{ UserPrincipalName = $upn; Group = $Group.displayName; Status = if ($Apply) { 'Added' } else { 'Planned' } }
+        return [pscustomobject]@{ UserPrincipalName = $upn; Group = $groupName; Status = if ($Apply) { 'Added' } else { 'Planned' } }
     }
     $members = Get-NetIPGraphCollection -Uri "https://graph.microsoft.com/v1.0/groups/$groupId/members?`$select=id"
-    if (@($members | Where-Object { $_.id -eq $userId }).Count -gt 0) {
-        return [pscustomobject]@{ UserPrincipalName = $upn; Group = $Group.displayName; Status = 'AlreadyMember' }
+    if (@($members | Where-Object { [string](Get-NetIPObjectPropertyValue -InputObject $_ -Name 'id') -eq $userId }).Count -gt 0) {
+        return [pscustomobject]@{ UserPrincipalName = $upn; Group = $groupName; Status = 'AlreadyMember' }
     }
     if (-not $Apply) {
-        return [pscustomobject]@{ UserPrincipalName = $upn; Group = $Group.displayName; Status = 'Planned' }
+        return [pscustomobject]@{ UserPrincipalName = $upn; Group = $groupName; Status = 'Planned' }
     }
     Invoke-NetIPGraphRequest -Method POST -Uri "https://graph.microsoft.com/v1.0/groups/$groupId/members/`$ref" -Body @{ '@odata.id' = "https://graph.microsoft.com/v1.0/directoryObjects/$userId" } | Out-Null
-    return [pscustomobject]@{ UserPrincipalName = $upn; Group = $Group.displayName; Status = 'Added' }
+    return [pscustomobject]@{ UserPrincipalName = $upn; Group = $groupName; Status = 'Added' }
 }
 
 function Ensure-NetIPSecurityGroup {
@@ -377,7 +378,7 @@ function Get-NetIPUserByUpn {
         return $null
     }
     try {
-        return Invoke-NetIPGraphRequest -Method GET -Uri ("https://graph.microsoft.com/v1.0/users/{0}?`$select=id,displayName,userPrincipalName,accountEnabled" -f [uri]::EscapeDataString($UserPrincipalName))
+        return Invoke-NetIPGraphRequest -Method GET -Uri ("https://graph.microsoft.com/v1.0/users/{0}?`$select=id,displayName,userPrincipalName,accountEnabled" -f [uri]::EscapeDataString($UserPrincipalName)) -SuppressNotFoundLog
     }
     catch {
         if ([string]$_ -match '404|Request_ResourceNotFound|Resource .* does not exist') { return $null }
@@ -390,7 +391,8 @@ function Invoke-NetIPGraphRequest {
     param(
         [Parameter(Mandatory)][ValidateSet('GET','POST','PATCH','DELETE')][string] $Method,
         [Parameter(Mandatory)][string] $Uri,
-        [AllowNull()] $Body = $null
+        [AllowNull()] $Body = $null,
+        [switch] $SuppressNotFoundLog
     )
 
     if ($sync.App.Mock) {
@@ -409,7 +411,11 @@ function Invoke-NetIPGraphRequest {
         return Invoke-MgGraphRequest @params
     }
     catch {
-        Write-NetIPLog -Level ERROR -Message (ConvertTo-NetIPRedactedError -ErrorRecord $_)
+        $message = [string]$_
+        $isNotFound = $message -match '404|Request_ResourceNotFound|Resource .* does not exist'
+        if (-not ($SuppressNotFoundLog -and $isNotFound)) {
+            Write-NetIPLog -Level ERROR -Message (ConvertTo-NetIPRedactedError -ErrorRecord $_)
+        }
         throw
     }
 }
@@ -950,7 +956,7 @@ Vil du fortsætte?
         Write-NetIPLog -Level PASS -Message "Gruppe håndteret: $($config.GroupName)"
 
         $createdPasswords = @()
-        $users = @()
+        $users = [System.Collections.Generic.List[object]]::new()
         foreach ($item in @(
             @{ DisplayName = $config.DisplayName1; Upn = $upn1 },
             @{ DisplayName = $config.DisplayName2; Upn = $upn2 }
@@ -958,25 +964,25 @@ Vil du fortsætte?
             $existing = Get-NetIPUserByUpn -UserPrincipalName $item.Upn
             if ($existing) {
                 $existing | Add-Member -MemberType NoteProperty -Name EnsureStatus -Value 'AlreadyExists' -Force
-                $users += $existing
+                $users.Add($existing)
                 Write-NetIPLog -Level PASS -Message "Bruger findes og genbruges: $($item.Upn)"
                 continue
             }
             if (-not $config.CreateUsers) {
-                $users += [pscustomobject]@{ id=''; displayName=$item.DisplayName; userPrincipalName=$item.Upn; EnsureStatus='SkippedMissing' }
+                $users.Add([pscustomobject]@{ id=''; displayName=$item.DisplayName; userPrincipalName=$item.Upn; EnsureStatus='SkippedMissing' })
                 Write-NetIPLog -Level WARN -Message "Bruger mangler og oprettes ikke: $($item.Upn)"
                 continue
             }
             $password = New-NetIPRandomPassword
             $user = New-NetIPBreakGlassUser -DisplayName $item.DisplayName -UserPrincipalName $item.Upn -Password $password
-            $users += $user
+            $users.Add($user)
             $createdPasswords += [pscustomobject]@{ UserPrincipalName = $item.Upn; Password = $password }
             Write-NetIPLog -Level PASS -Message "Bruger oprettet: $($item.Upn)"
         }
 
         $membership = @()
         if ($config.AddUsersToGroup) {
-            foreach ($user in $users | Where-Object { $_.id }) {
+            foreach ($user in $users | Where-Object { Get-NetIPObjectPropertyValue -InputObject $_ -Name 'id' }) {
                 $membership += Ensure-NetIPGroupMember -Group $group -User $user -Apply $true
             }
         }
@@ -988,28 +994,39 @@ Vil du fortsætte?
         $backupPath = ''
         $caResults = @()
         $alreadyExcluded = @()
-        if ($group -and $group.id) {
+        $groupId = [string](Get-NetIPObjectPropertyValue -InputObject $group -Name 'id')
+        $groupDisplayName = [string](Get-NetIPObjectPropertyValue -InputObject $group -Name 'displayName')
+        $groupStatus = [string](Get-NetIPObjectPropertyValue -InputObject $group -Name 'EnsureStatus')
+        if ($group -and $groupId) {
             foreach ($policy in $policies) {
                 $excludeGroups = @(Get-NetIPObjectPropertyValue -InputObject (Get-NetIPObjectPropertyValue -InputObject (Get-NetIPObjectPropertyValue -InputObject $policy -Name 'conditions') -Name 'users') -Name 'excludeGroups')
-                if ($excludeGroups -contains $group.id) { $alreadyExcluded += [pscustomobject]@{ Policy=$policy.displayName; PolicyId=$policy.id; Status='AlreadyExcluded' } }
+                if ($excludeGroups -contains $groupId) {
+                    $alreadyExcluded += [pscustomobject]@{
+                        Policy = [string](Get-NetIPObjectPropertyValue -InputObject $policy -Name 'displayName')
+                        PolicyId = [string](Get-NetIPObjectPropertyValue -InputObject $policy -Name 'id')
+                        Status = 'AlreadyExcluded'
+                    }
+                }
             }
         }
-        if ($config.PatchCAPolicies -and $group -and $group.id) {
+        if ($config.PatchCAPolicies -and $group -and $groupId) {
             $backupPath = Backup-NetIPConditionalAccessPolicies -Policies $policies -OutputFolder $output
-            $caResults = Add-NetIPGroupExclusionToCAPolicies -Policies $policies -GroupId $group.id -Apply $true
+            $caResults = Add-NetIPGroupExclusionToCAPolicies -Policies $policies -GroupId $groupId -Apply $true
         }
 
         $changed = @($caResults | Where-Object Status -eq 'Patched')
         $failed = @($caResults | Where-Object Status -eq 'Failed')
+        $account1Status = [string](Get-NetIPObjectPropertyValue -InputObject $users[0] -Name 'EnsureStatus')
+        $account2Status = [string](Get-NetIPObjectPropertyValue -InputObject $users[1] -Name 'EnsureStatus')
         $result = [pscustomobject]@{
             TenantDisplayName = $tenant.TenantDisplayName
             TenantId = $tenant.TenantId
             Timestamp = (Get-Date).ToString('o')
             Operator = $sync.State.GraphAccount
             OnMicrosoftDomain = $tenant.OnMicrosoftDomain
-            Account1 = [pscustomobject]@{ DisplayName=$config.DisplayName1; UserPrincipalName=$upn1; Status=($users[0].EnsureStatus) }
-            Account2 = [pscustomobject]@{ DisplayName=$config.DisplayName2; UserPrincipalName=$upn2; Status=($users[1].EnsureStatus) }
-            Group = [pscustomobject]@{ DisplayName=$group.displayName; Id=$group.id; Status=$group.EnsureStatus }
+            Account1 = [pscustomobject]@{ DisplayName=$config.DisplayName1; UserPrincipalName=$upn1; Status=$account1Status }
+            Account2 = [pscustomobject]@{ DisplayName=$config.DisplayName2; UserPrincipalName=$upn2; Status=$account2Status }
+            Group = [pscustomobject]@{ DisplayName=$groupDisplayName; Id=$groupId; Status=$groupStatus }
             GroupMembership = $membership
             CAExclusionsEnabled = [bool]$config.PatchCAPolicies
             CAPoliciesChangedCount = $changed.Count

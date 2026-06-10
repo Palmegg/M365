@@ -9,7 +9,7 @@ function Get-NetIPUserByUpn {
         return $null
     }
     try {
-        return Invoke-NetIPGraphRequest -Method GET -Uri ("https://graph.microsoft.com/v1.0/users/{0}?`$select=id,displayName,userPrincipalName,accountEnabled" -f [uri]::EscapeDataString($UserPrincipalName))
+        return Invoke-NetIPGraphRequest -Method GET -Uri ("https://graph.microsoft.com/v1.0/users/{0}?`$select=id,displayName,userPrincipalName,accountEnabled" -f [uri]::EscapeDataString($UserPrincipalName)) -SuppressNotFoundLog
     }
     catch {
         if ([string]$_ -match '404|Request_ResourceNotFound|Resource .* does not exist') { return $null }
