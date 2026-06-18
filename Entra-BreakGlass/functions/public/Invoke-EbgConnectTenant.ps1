@@ -51,6 +51,15 @@ function Invoke-EbgConnectTenant {
         Write-EbgStatus -Busy -Message 'Åbner frisk Microsoft Graph-login. Vælg tenant-konto i Microsoft loginvinduet...'
         [System.Windows.Forms.Application]::DoEvents()
 
+        if ($sync.Form) {
+            $sync.UI.PreGraphLoginWindowState = [string]$sync.Form.WindowState
+            $sync.UI.GraphLoginMinimizedWindow = $true
+            $sync.Form.Topmost = $false
+            $sync.Form.WindowState = 'Minimized'
+            [System.Windows.Forms.Application]::DoEvents()
+            Start-Sleep -Milliseconds 300
+        }
+
         Connect-MgGraph -Scopes $scopes -NoWelcome -ErrorAction Stop | Out-Null
 
         $context = Get-MgContext -ErrorAction Stop
@@ -77,6 +86,6 @@ function Invoke-EbgConnectTenant {
         if ($sync.WPFProgressBar) { $sync.WPFProgressBar.IsIndeterminate = $false }
         if ($sync.WPFConnectTenant) { $sync.WPFConnectTenant.IsEnabled = $true }
         Update-EbgUIState | Out-Null
-        if ($sync.State.GraphConnected) { Set-EbgMainWindowForeground }
+        if ($sync.State.GraphConnected -or $sync.UI.GraphLoginMinimizedWindow) { Set-EbgMainWindowForeground }
     }
 }

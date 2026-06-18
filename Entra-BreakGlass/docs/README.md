@@ -8,6 +8,7 @@ PowerShell 7/WPF værktøj til en simpel Microsoft Graph-baseret v1 opsætning a
 - Login køres direkte på WPF-værktøjets egen PowerShell/UI-runspace med `Connect-MgGraph -Scopes ... -NoWelcome`, så Microsofts eget loginvindue/account picker styrer konto- og tenantvalg.
 - Før login kaldes `Disconnect-MgGraph`, Graph PowerShell cache under `$HOME\.mg` flyttes til backup under `Output`, og Graph MSAL cachefiler `mg.msal.cache*` flyttes til backup. Derefter forsøger værktøjet at deaktivere WAM-login med `Set-MgGraphOption -DisableLoginByWAM $true`, så login ikke bare genbruger den seneste Windows/WAM session.
 - Efter succesfuldt Graph-login forsøger værktøjet at flytte fokus tilbage til WPF-vinduet.
+- WPF-vinduet minimeres kort mens Microsoft Graph-login åbnes, så Microsofts loginvindue ikke skjules bag konfiguratoren. Efter login restore'r værktøjet WPF-vinduet.
 - Finder tenantens `*.onmicrosoft.com` domæne.
 - Kontrollerer de eksakte target UPNs for to break-glass konti.
 - Phase 1a opretter manglende cloud-only brugere, hvis valgt.

@@ -7,7 +7,13 @@ function Set-EbgMainWindowForeground {
     $activateWindow = {
         try {
             if ($sync.Form.WindowState -eq 'Minimized') {
-                $sync.Form.WindowState = 'Normal'
+                $previousWindowState = [string]$sync.UI.PreGraphLoginWindowState
+                if ([string]::IsNullOrWhiteSpace($previousWindowState)) {
+                    $previousWindowState = 'Normal'
+                }
+                $sync.Form.WindowState = $previousWindowState
+                $sync.UI.PreGraphLoginWindowState = ''
+                $sync.UI.GraphLoginMinimizedWindow = $false
             }
 
             if (-not ('EbgNativeWindow' -as [type])) {
