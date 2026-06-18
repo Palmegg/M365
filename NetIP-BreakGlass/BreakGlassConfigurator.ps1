@@ -1471,6 +1471,44 @@ function Update-NetIPUIState {
             $button.BorderBrush = [System.Windows.Media.BrushConverter]::new().ConvertFromString('#E5E7EB')
         }
     }
+
+    $steps = @('Welcome','Connect','Discovery','Config','Plan','Apply','Handoff')
+    $titles = @{
+        Welcome = 'Velkommen'
+        Connect = 'Forbind'
+        Discovery = 'Discovery'
+        Config = 'Konfiguration'
+        Plan = 'Plan'
+        Apply = 'Udfør'
+        Handoff = 'Handoff'
+    }
+    $current = [string]$sync.UI.CurrentStep
+    $index = [array]::IndexOf($steps, $current)
+    if ($index -lt 0) { $index = 0; $current = 'Welcome' }
+
+    if ($sync.WPFCurrentStepText) {
+        $sync.WPFCurrentStepText.Text = "Step $($index + 1) af $($steps.Count): $($titles[$current])"
+    }
+
+    if ($sync.WPFBackStep) {
+        $sync.WPFBackStep.Visibility = if ($index -eq 0) { 'Hidden' } else { 'Visible' }
+        $sync.WPFBackStep.Content = if ($index -gt 0) { "Tilbage til $($titles[$steps[$index - 1]])" } else { 'Tilbage' }
+    }
+
+    if ($sync.WPFNextStep) {
+        if ($index -ge ($steps.Count - 1)) {
+            $sync.WPFNextStep.Visibility = 'Hidden'
+            $sync.WPFNextStep.IsEnabled = $false
+            $sync.WPFNextStep.Content = 'Videre'
+        }
+        else {
+            $nextStep = $steps[$index + 1]
+            $nextButtonName = $stepMap[$nextStep]
+            $sync.WPFNextStep.Visibility = 'Visible'
+            $sync.WPFNextStep.IsEnabled = if ($sync[$nextButtonName]) { [bool]$sync[$nextButtonName].IsEnabled } else { $false }
+            $sync.WPFNextStep.Content = "Videre til $($titles[$nextStep])"
+        }
+    }
 }
 
 function Write-NetIPLog {
@@ -2075,6 +2113,8 @@ function Invoke-NetIPWPFButton {
         'WPFStepPlan' { Set-NetIPWPFStep -Step 'Plan' }
         'WPFStepApply' { Set-NetIPWPFStep -Step 'Apply' }
         'WPFStepHandoff' { Set-NetIPWPFStep -Step 'Handoff' }
+        'WPFBackStep' { Move-NetIPWPFStep -Direction -1 }
+        'WPFNextStep' { Move-NetIPWPFStep -Direction 1 }
         'WPFConnectTenant' { Invoke-NetIPConnectTenant }
         'WPFRunDiscovery' { Invoke-NetIPDiscovery }
         'WPFBuildPlan' { Invoke-NetIPBuildPlan }
@@ -2112,10 +2152,41 @@ function Set-NetIPWPFStep {
     Update-NetIPUIState
 }
 
+function Move-NetIPWPFStep {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][ValidateSet(-1,1)][int] $Direction)
+
+    $steps = @('Welcome','Connect','Discovery','Config','Plan','Apply','Handoff')
+    $current = [string]$sync.UI.CurrentStep
+    $index = [array]::IndexOf($steps, $current)
+    if ($index -lt 0) { $index = 0 }
+
+    $targetIndex = $index + $Direction
+    if ($targetIndex -lt 0 -or $targetIndex -ge $steps.Count) { return }
+
+    $targetStep = $steps[$targetIndex]
+    $targetButtonName = @{
+        Welcome = 'WPFStepWelcome'
+        Connect = 'WPFStepConnect'
+        Discovery = 'WPFStepDiscovery'
+        Config = 'WPFStepConfig'
+        Plan = 'WPFStepPlan'
+        Apply = 'WPFStepApply'
+        Handoff = 'WPFStepHandoff'
+    }[$targetStep]
+
+    if ($Direction -gt 0 -and $sync[$targetButtonName] -and -not [bool]$sync[$targetButtonName].IsEnabled) {
+        [System.Windows.MessageBox]::Show('Dette trin er ikke klar endnu. Udfør først handlingen på den nuværende side.', $sync.App.Name, 'OK', 'Information') | Out-Null
+        return
+    }
+
+    Set-NetIPWPFStep -Step $targetStep
+}
+
 $sync.configs.appsettings = @'
 {
   "name": "Entra Break Glass Configurator",
-  "version": "2.2.1",
+  "version": "2.2.2",
   "outputRoot": ".\\Output",
   "groupName": "CA-BreakGlass-Exclude",
   "groupDescription": "Security group used to exclude dedicated break-glass accounts from existing Conditional Access policies.",
@@ -2327,9 +2398,10 @@ $inputXML = @'
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="*"/>
+                <RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
-            <Border Grid.Row="0" BorderBrush="{StaticResource BorderSoft}" BorderThickness="1" Background="#111316" Padding="12" Margin="0,0,0,14">
-                <UniformGrid Columns="7">
+            <Border Grid.Row="0" Visibility="Collapsed">
+                <StackPanel>
                     <Button x:Name="WPFStepWelcome" Content="1. Velkommen" Margin="0,0,8,0"/>
                     <Button x:Name="WPFStepConnect" Content="2. Forbind" IsEnabled="False" Margin="0,0,8,0"/>
                     <Button x:Name="WPFStepDiscovery" Content="3. Discovery" IsEnabled="False" Margin="0,0,8,0"/>
@@ -2337,7 +2409,7 @@ $inputXML = @'
                     <Button x:Name="WPFStepPlan" Content="5. Plan" IsEnabled="False" Margin="0,0,8,0"/>
                     <Button x:Name="WPFStepApply" Content="6. Udfør" IsEnabled="False" Margin="0,0,8,0"/>
                     <Button x:Name="WPFStepHandoff" Content="7. Handoff" IsEnabled="False" Margin="0"/>
-                </UniformGrid>
+                </StackPanel>
             </Border>
 
             <Border Grid.Row="1" BorderBrush="{StaticResource BorderStrong}" BorderThickness="1.2" Background="{StaticResource PanelBackground}" Padding="24">
@@ -2511,6 +2583,19 @@ $inputXML = @'
                     </StackPanel>
                 </Grid>
             </Grid>
+            </Border>
+
+            <Border Grid.Row="2" Background="#0F1115" BorderBrush="{StaticResource BorderStrong}" BorderThickness="1" Padding="22,16" Margin="0,16,0,0">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="180"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="180"/>
+                    </Grid.ColumnDefinitions>
+                    <Button x:Name="WPFBackStep" Grid.Column="0" Content="Tilbage" Width="150" HorizontalAlignment="Left"/>
+                    <TextBlock x:Name="WPFCurrentStepText" Grid.Column="1" HorizontalAlignment="Center" VerticalAlignment="Center" FontWeight="SemiBold" Foreground="{StaticResource TextSecondary}"/>
+                    <Button x:Name="WPFNextStep" Grid.Column="2" Content="Videre" Width="150" HorizontalAlignment="Right"/>
+                </Grid>
             </Border>
         </Grid>
 

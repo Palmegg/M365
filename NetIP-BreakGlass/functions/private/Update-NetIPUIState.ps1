@@ -62,4 +62,42 @@ function Update-NetIPUIState {
             $button.BorderBrush = [System.Windows.Media.BrushConverter]::new().ConvertFromString('#E5E7EB')
         }
     }
+
+    $steps = @('Welcome','Connect','Discovery','Config','Plan','Apply','Handoff')
+    $titles = @{
+        Welcome = 'Velkommen'
+        Connect = 'Forbind'
+        Discovery = 'Discovery'
+        Config = 'Konfiguration'
+        Plan = 'Plan'
+        Apply = 'Udfør'
+        Handoff = 'Handoff'
+    }
+    $current = [string]$sync.UI.CurrentStep
+    $index = [array]::IndexOf($steps, $current)
+    if ($index -lt 0) { $index = 0; $current = 'Welcome' }
+
+    if ($sync.WPFCurrentStepText) {
+        $sync.WPFCurrentStepText.Text = "Step $($index + 1) af $($steps.Count): $($titles[$current])"
+    }
+
+    if ($sync.WPFBackStep) {
+        $sync.WPFBackStep.Visibility = if ($index -eq 0) { 'Hidden' } else { 'Visible' }
+        $sync.WPFBackStep.Content = if ($index -gt 0) { "Tilbage til $($titles[$steps[$index - 1]])" } else { 'Tilbage' }
+    }
+
+    if ($sync.WPFNextStep) {
+        if ($index -ge ($steps.Count - 1)) {
+            $sync.WPFNextStep.Visibility = 'Hidden'
+            $sync.WPFNextStep.IsEnabled = $false
+            $sync.WPFNextStep.Content = 'Videre'
+        }
+        else {
+            $nextStep = $steps[$index + 1]
+            $nextButtonName = $stepMap[$nextStep]
+            $sync.WPFNextStep.Visibility = 'Visible'
+            $sync.WPFNextStep.IsEnabled = if ($sync[$nextButtonName]) { [bool]$sync[$nextButtonName].IsEnabled } else { $false }
+            $sync.WPFNextStep.Content = "Videre til $($titles[$nextStep])"
+        }
+    }
 }

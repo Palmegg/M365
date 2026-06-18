@@ -140,9 +140,10 @@
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="*"/>
+                <RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
-            <Border Grid.Row="0" BorderBrush="{StaticResource BorderSoft}" BorderThickness="1" Background="#111316" Padding="12" Margin="0,0,0,14">
-                <UniformGrid Columns="7">
+            <Border Grid.Row="0" Visibility="Collapsed">
+                <StackPanel>
                     <Button x:Name="WPFStepWelcome" Content="1. Velkommen" Margin="0,0,8,0"/>
                     <Button x:Name="WPFStepConnect" Content="2. Forbind" IsEnabled="False" Margin="0,0,8,0"/>
                     <Button x:Name="WPFStepDiscovery" Content="3. Discovery" IsEnabled="False" Margin="0,0,8,0"/>
@@ -150,7 +151,7 @@
                     <Button x:Name="WPFStepPlan" Content="5. Plan" IsEnabled="False" Margin="0,0,8,0"/>
                     <Button x:Name="WPFStepApply" Content="6. Udfør" IsEnabled="False" Margin="0,0,8,0"/>
                     <Button x:Name="WPFStepHandoff" Content="7. Handoff" IsEnabled="False" Margin="0"/>
-                </UniformGrid>
+                </StackPanel>
             </Border>
 
             <Border Grid.Row="1" BorderBrush="{StaticResource BorderStrong}" BorderThickness="1.2" Background="{StaticResource PanelBackground}" Padding="24">
@@ -324,6 +325,19 @@
                     </StackPanel>
                 </Grid>
             </Grid>
+            </Border>
+
+            <Border Grid.Row="2" Background="#0F1115" BorderBrush="{StaticResource BorderStrong}" BorderThickness="1" Padding="22,16" Margin="0,16,0,0">
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="180"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="180"/>
+                    </Grid.ColumnDefinitions>
+                    <Button x:Name="WPFBackStep" Grid.Column="0" Content="Tilbage" Width="150" HorizontalAlignment="Left"/>
+                    <TextBlock x:Name="WPFCurrentStepText" Grid.Column="1" HorizontalAlignment="Center" VerticalAlignment="Center" FontWeight="SemiBold" Foreground="{StaticResource TextSecondary}"/>
+                    <Button x:Name="WPFNextStep" Grid.Column="2" Content="Videre" Width="150" HorizontalAlignment="Right"/>
+                </Grid>
             </Border>
         </Grid>
 
