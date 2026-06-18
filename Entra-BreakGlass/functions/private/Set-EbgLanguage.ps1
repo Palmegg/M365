@@ -64,6 +64,8 @@ function Set-EbgLanguage {
         @{ Da = 'Allowed key AAGUIDs'; En = 'Allowed key AAGUIDs' }
         @{ Da = 'Auth strength navn'; En = 'Auth strength name' }
         @{ Da = 'BG CA policy navn'; En = 'BG CA policy name' }
+        @{ Da = 'Phase 2 target accounts'; En = 'Phase 2 target accounts' }
+        @{ Da = 'Target UPN preview'; En = 'Target UPN preview' }
         @{ Da = 'Opret/opdater BreakGlass-FIDO2 authentication strength med AAGUID-restriction'; En = 'Create/update BreakGlass-FIDO2 authentication strength with AAGUID restriction' }
         @{ Da = 'Opret dedikeret CA-policy der kræver BreakGlass-FIDO2 for CA-BreakGlass-Exclude'; En = 'Create dedicated CA policy requiring BreakGlass-FIDO2 for CA-BreakGlass-Exclude' }
         @{ Da = 'Opret CA-policy som enabled i stedet for report-only'; En = 'Create CA policy as enabled instead of report-only' }

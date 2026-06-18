@@ -46,6 +46,11 @@ foreach ($box in @('WPFDisplayName1','WPFUserPrefix1','WPFDisplayName2','WPFUser
         $sync[$box].Add_TextChanged({ Update-EbgUIState })
     }
 }
+foreach ($box in @('WPFPhase2UserPrefix1','WPFPhase2UserPrefix2')) {
+    if ($sync[$box]) {
+        $sync[$box].Add_TextChanged({ Update-EbgUIState })
+    }
+}
 
 $sync.WPFWelcomeRiskAccepted.Add_Checked({ Update-EbgUIState | Out-Null })
 $sync.WPFWelcomeRiskAccepted.Add_Unchecked({ Update-EbgUIState | Out-Null })

@@ -12,6 +12,12 @@ function Update-EbgUIState {
     if ($sync.WPFDomain) { $sync.WPFDomain.Text = $domain }
     if ($sync.WPFUpnPreview1 -and $domain) { $sync.WPFUpnPreview1.Text = "$(if($sync.WPFUserPrefix1){$sync.WPFUserPrefix1.Text})@$domain" }
     if ($sync.WPFUpnPreview2 -and $domain) { $sync.WPFUpnPreview2.Text = "$(if($sync.WPFUserPrefix2){$sync.WPFUserPrefix2.Text})@$domain" }
+    if ($sync.WPFPhase2Domain) { $sync.WPFPhase2Domain.Text = $domain }
+    if ($sync.WPFPhase2UpnPreview -and $domain) {
+        $prefix1 = if ($sync.WPFPhase2UserPrefix1 -and -not [string]::IsNullOrWhiteSpace($sync.WPFPhase2UserPrefix1.Text)) { $sync.WPFPhase2UserPrefix1.Text.Trim() } elseif ($sync.WPFUserPrefix1) { $sync.WPFUserPrefix1.Text.Trim() } else { '' }
+        $prefix2 = if ($sync.WPFPhase2UserPrefix2 -and -not [string]::IsNullOrWhiteSpace($sync.WPFPhase2UserPrefix2.Text)) { $sync.WPFPhase2UserPrefix2.Text.Trim() } elseif ($sync.WPFUserPrefix2) { $sync.WPFUserPrefix2.Text.Trim() } else { '' }
+        $sync.WPFPhase2UpnPreview.Text = "$prefix1@$domain$([Environment]::NewLine)$prefix2@$domain"
+    }
     Update-EbgAAGUIDSourceOptions
     if ($sync.WPFGraphStatus) {
         $sync.WPFGraphStatus.Text = if ($sync.State.GraphConnected) {
@@ -36,7 +42,7 @@ function Update-EbgUIState {
     $hasHandoff = -not [string]::IsNullOrWhiteSpace([string]$sync.State.HandoffPath)
     $resumePhase2 = [string]$sync.State.StartMode -eq 'Phase2'
     $canPhase2 = if ($resumePhase2) {
-        $risk -and $hasGraph -and $hasVisitedConfig
+        $risk -and $hasGraph
     }
     else {
         $risk -and $hasGraph -and $hasPhase1
@@ -45,7 +51,7 @@ function Update-EbgUIState {
     $sync.WPFStepWelcome.IsEnabled = $true
     $sync.WPFStepConnect.IsEnabled = $risk
     $sync.WPFStepDiscovery.IsEnabled = (-not $resumePhase2) -and $risk -and $hasGraph
-    $sync.WPFStepConfig.IsEnabled = $risk -and $hasGraph -and ($resumePhase2 -or $hasDiscovery)
+    $sync.WPFStepConfig.IsEnabled = (-not $resumePhase2) -and $risk -and $hasGraph -and $hasDiscovery
     $sync.WPFStepPlan.IsEnabled = (-not $resumePhase2) -and $risk -and $hasGraph -and $hasDiscovery -and $hasVisitedConfig
     $sync.WPFStepApply.IsEnabled = (-not $resumePhase2) -and $risk -and $hasGraph -and $hasPlan
     $sync.WPFStepManualFido.IsEnabled = (-not $resumePhase2) -and $risk -and $hasPhase1
@@ -85,7 +91,7 @@ function Update-EbgUIState {
         Welcome = 'Start'
         Connect = 'Forbind'
         Discovery = 'Discovery'
-        Config = $(if ($resumePhase2) { 'Phase 2 konfiguration' } else { 'Phase 1 konfiguration' })
+        Config = 'Phase 1 konfiguration'
         Plan = 'Phase 1 plan'
         Apply = 'Phase 1a'
         ManualFido = 'Phase 1b manuel FIDO2'
@@ -117,7 +123,7 @@ function Update-EbgUIState {
             IsActive=($current -in @('Welcome','Connect','Discovery','Config','Plan'))
             IsDone=($current -in @('Apply','ManualFido','Phase2','Handoff'))
             IsAvailable=$true
-            ActiveText=$(if ($resumePhase2) { 'Aktiv: start, connect og Phase 2 config' } else { 'Aktiv: start, connect, discovery og plan' })
+            ActiveText=$(if ($resumePhase2) { 'Aktiv: start og connect' } else { 'Aktiv: start, connect, discovery og plan' })
             DoneText='Færdig'
             LockedText=''
             ReadyText='Klar'

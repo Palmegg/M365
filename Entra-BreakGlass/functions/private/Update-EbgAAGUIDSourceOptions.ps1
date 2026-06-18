@@ -7,8 +7,26 @@ function Update-EbgAAGUIDSourceOptions {
     $domain = [string]$sync.State.OnMicrosoftDomain
     if ([string]::IsNullOrWhiteSpace($domain)) { return }
 
-    $upn1 = "$(if($sync.WPFUserPrefix1){$sync.WPFUserPrefix1.Text.Trim()})@$domain"
-    $upn2 = "$(if($sync.WPFUserPrefix2){$sync.WPFUserPrefix2.Text.Trim()})@$domain"
+    $prefix1 = if ([string]$sync.State.StartMode -eq 'Phase2' -and $sync.WPFPhase2UserPrefix1 -and -not [string]::IsNullOrWhiteSpace($sync.WPFPhase2UserPrefix1.Text)) {
+        $sync.WPFPhase2UserPrefix1.Text.Trim()
+    }
+    elseif ($sync.WPFUserPrefix1) {
+        $sync.WPFUserPrefix1.Text.Trim()
+    }
+    else {
+        ''
+    }
+    $prefix2 = if ([string]$sync.State.StartMode -eq 'Phase2' -and $sync.WPFPhase2UserPrefix2 -and -not [string]::IsNullOrWhiteSpace($sync.WPFPhase2UserPrefix2.Text)) {
+        $sync.WPFPhase2UserPrefix2.Text.Trim()
+    }
+    elseif ($sync.WPFUserPrefix2) {
+        $sync.WPFUserPrefix2.Text.Trim()
+    }
+    else {
+        ''
+    }
+    $upn1 = "$prefix1@$domain"
+    $upn2 = "$prefix2@$domain"
 
     if ($sync.WPFAAGUIDSourceUser.Items.Count -ge 3) {
         $sync.WPFAAGUIDSourceUser.Items[0].Content = "Account 1 - $upn1"

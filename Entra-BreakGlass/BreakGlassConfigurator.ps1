@@ -1038,11 +1038,14 @@ function Get-EbgConfigFromUI {
     param()
 
     return $sync.Form.Dispatcher.Invoke([func[hashtable]]{
+        $resumePhase2 = [string]$sync.State.StartMode -eq 'Phase2'
+        $userPrefix1 = if ($resumePhase2 -and $sync.WPFPhase2UserPrefix1 -and -not [string]::IsNullOrWhiteSpace($sync.WPFPhase2UserPrefix1.Text)) { $sync.WPFPhase2UserPrefix1.Text.Trim() } else { $sync.WPFUserPrefix1.Text.Trim() }
+        $userPrefix2 = if ($resumePhase2 -and $sync.WPFPhase2UserPrefix2 -and -not [string]::IsNullOrWhiteSpace($sync.WPFPhase2UserPrefix2.Text)) { $sync.WPFPhase2UserPrefix2.Text.Trim() } else { $sync.WPFUserPrefix2.Text.Trim() }
         @{
             DisplayName1     = $sync.WPFDisplayName1.Text.Trim()
-            UserPrefix1      = $sync.WPFUserPrefix1.Text.Trim()
+            UserPrefix1      = $userPrefix1
             DisplayName2     = $sync.WPFDisplayName2.Text.Trim()
-            UserPrefix2      = $sync.WPFUserPrefix2.Text.Trim()
+            UserPrefix2      = $userPrefix2
             GroupName        = $sync.WPFGroupName.Text.Trim()
             GroupDescription = $sync.WPFGroupDescription.Text.Trim()
             AuthenticationStrengthName = $sync.WPFAuthenticationStrengthName.Text.Trim()
@@ -1060,6 +1063,7 @@ function Get-EbgConfigFromUI {
         }
     })
 }
+
 function Get-EbgFido2AuthenticationMethodPolicy {
     [CmdletBinding()]
     param()
@@ -1265,7 +1269,7 @@ function Get-EbgWorkflowSteps {
     param()
 
     if ([string]$sync.State.StartMode -eq 'Phase2') {
-        return @('Welcome','Connect','Config','Phase2','Handoff')
+        return @('Welcome','Connect','Phase2','Handoff')
     }
 
     return @('Welcome','Connect','Discovery','Config','Plan','Apply','ManualFido','Phase2','Handoff')
@@ -1970,6 +1974,8 @@ function Set-EbgLanguage {
         @{ Da = 'Allowed key AAGUIDs'; En = 'Allowed key AAGUIDs' }
         @{ Da = 'Auth strength navn'; En = 'Auth strength name' }
         @{ Da = 'BG CA policy navn'; En = 'BG CA policy name' }
+        @{ Da = 'Phase 2 target accounts'; En = 'Phase 2 target accounts' }
+        @{ Da = 'Target UPN preview'; En = 'Target UPN preview' }
         @{ Da = 'Opret/opdater BreakGlass-FIDO2 authentication strength med AAGUID-restriction'; En = 'Create/update BreakGlass-FIDO2 authentication strength with AAGUID restriction' }
         @{ Da = 'Opret dedikeret CA-policy der kræver BreakGlass-FIDO2 for CA-BreakGlass-Exclude'; En = 'Create dedicated CA policy requiring BreakGlass-FIDO2 for CA-BreakGlass-Exclude' }
         @{ Da = 'Opret CA-policy som enabled i stedet for report-only'; En = 'Create CA policy as enabled instead of report-only' }
@@ -2111,11 +2117,14 @@ function Set-EbgNeutralAccountNamePair {
     $sync.WPFDisplayName2.Text = $account2
     $sync.WPFUserPrefix1.Text = ConvertTo-EbgNeutralUserPrefix -DisplayName $account1
     $sync.WPFUserPrefix2.Text = ConvertTo-EbgNeutralUserPrefix -DisplayName $account2
+    if ($sync.WPFPhase2UserPrefix1) { $sync.WPFPhase2UserPrefix1.Text = $sync.WPFUserPrefix1.Text }
+    if ($sync.WPFPhase2UserPrefix2) { $sync.WPFPhase2UserPrefix2.Text = $sync.WPFUserPrefix2.Text }
 
     $action = if ($Random) { 'Valgte tilfældige neutrale kontonavne' } else { 'Skiftede neutrale kontonavne' }
     Write-EbgLog -Message "${action} til: $account1 / $account2"
     Update-EbgUIState
 }
+
 function Show-EbgCreatedPasswordsOnce {
     [CmdletBinding()]
     param([object[]] $CreatedPasswords)
@@ -2291,6 +2300,12 @@ function Update-EbgUIState {
     if ($sync.WPFDomain) { $sync.WPFDomain.Text = $domain }
     if ($sync.WPFUpnPreview1 -and $domain) { $sync.WPFUpnPreview1.Text = "$(if($sync.WPFUserPrefix1){$sync.WPFUserPrefix1.Text})@$domain" }
     if ($sync.WPFUpnPreview2 -and $domain) { $sync.WPFUpnPreview2.Text = "$(if($sync.WPFUserPrefix2){$sync.WPFUserPrefix2.Text})@$domain" }
+    if ($sync.WPFPhase2Domain) { $sync.WPFPhase2Domain.Text = $domain }
+    if ($sync.WPFPhase2UpnPreview -and $domain) {
+        $prefix1 = if ($sync.WPFPhase2UserPrefix1 -and -not [string]::IsNullOrWhiteSpace($sync.WPFPhase2UserPrefix1.Text)) { $sync.WPFPhase2UserPrefix1.Text.Trim() } elseif ($sync.WPFUserPrefix1) { $sync.WPFUserPrefix1.Text.Trim() } else { '' }
+        $prefix2 = if ($sync.WPFPhase2UserPrefix2 -and -not [string]::IsNullOrWhiteSpace($sync.WPFPhase2UserPrefix2.Text)) { $sync.WPFPhase2UserPrefix2.Text.Trim() } elseif ($sync.WPFUserPrefix2) { $sync.WPFUserPrefix2.Text.Trim() } else { '' }
+        $sync.WPFPhase2UpnPreview.Text = "$prefix1@$domain$([Environment]::NewLine)$prefix2@$domain"
+    }
     Update-EbgAAGUIDSourceOptions
     if ($sync.WPFGraphStatus) {
         $sync.WPFGraphStatus.Text = if ($sync.State.GraphConnected) {
@@ -2315,7 +2330,7 @@ function Update-EbgUIState {
     $hasHandoff = -not [string]::IsNullOrWhiteSpace([string]$sync.State.HandoffPath)
     $resumePhase2 = [string]$sync.State.StartMode -eq 'Phase2'
     $canPhase2 = if ($resumePhase2) {
-        $risk -and $hasGraph -and $hasVisitedConfig
+        $risk -and $hasGraph
     }
     else {
         $risk -and $hasGraph -and $hasPhase1
@@ -2324,7 +2339,7 @@ function Update-EbgUIState {
     $sync.WPFStepWelcome.IsEnabled = $true
     $sync.WPFStepConnect.IsEnabled = $risk
     $sync.WPFStepDiscovery.IsEnabled = (-not $resumePhase2) -and $risk -and $hasGraph
-    $sync.WPFStepConfig.IsEnabled = $risk -and $hasGraph -and ($resumePhase2 -or $hasDiscovery)
+    $sync.WPFStepConfig.IsEnabled = (-not $resumePhase2) -and $risk -and $hasGraph -and $hasDiscovery
     $sync.WPFStepPlan.IsEnabled = (-not $resumePhase2) -and $risk -and $hasGraph -and $hasDiscovery -and $hasVisitedConfig
     $sync.WPFStepApply.IsEnabled = (-not $resumePhase2) -and $risk -and $hasGraph -and $hasPlan
     $sync.WPFStepManualFido.IsEnabled = (-not $resumePhase2) -and $risk -and $hasPhase1
@@ -2364,7 +2379,7 @@ function Update-EbgUIState {
         Welcome = 'Start'
         Connect = 'Forbind'
         Discovery = 'Discovery'
-        Config = $(if ($resumePhase2) { 'Phase 2 konfiguration' } else { 'Phase 1 konfiguration' })
+        Config = 'Phase 1 konfiguration'
         Plan = 'Phase 1 plan'
         Apply = 'Phase 1a'
         ManualFido = 'Phase 1b manuel FIDO2'
@@ -2396,7 +2411,7 @@ function Update-EbgUIState {
             IsActive=($current -in @('Welcome','Connect','Discovery','Config','Plan'))
             IsDone=($current -in @('Apply','ManualFido','Phase2','Handoff'))
             IsAvailable=$true
-            ActiveText=$(if ($resumePhase2) { 'Aktiv: start, connect og Phase 2 config' } else { 'Aktiv: start, connect, discovery og plan' })
+            ActiveText=$(if ($resumePhase2) { 'Aktiv: start og connect' } else { 'Aktiv: start, connect, discovery og plan' })
             DoneText='Færdig'
             LockedText=''
             ReadyText='Klar'
@@ -2534,8 +2549,26 @@ function Update-EbgAAGUIDSourceOptions {
     $domain = [string]$sync.State.OnMicrosoftDomain
     if ([string]::IsNullOrWhiteSpace($domain)) { return }
 
-    $upn1 = "$(if($sync.WPFUserPrefix1){$sync.WPFUserPrefix1.Text.Trim()})@$domain"
-    $upn2 = "$(if($sync.WPFUserPrefix2){$sync.WPFUserPrefix2.Text.Trim()})@$domain"
+    $prefix1 = if ([string]$sync.State.StartMode -eq 'Phase2' -and $sync.WPFPhase2UserPrefix1 -and -not [string]::IsNullOrWhiteSpace($sync.WPFPhase2UserPrefix1.Text)) {
+        $sync.WPFPhase2UserPrefix1.Text.Trim()
+    }
+    elseif ($sync.WPFUserPrefix1) {
+        $sync.WPFUserPrefix1.Text.Trim()
+    }
+    else {
+        ''
+    }
+    $prefix2 = if ([string]$sync.State.StartMode -eq 'Phase2' -and $sync.WPFPhase2UserPrefix2 -and -not [string]::IsNullOrWhiteSpace($sync.WPFPhase2UserPrefix2.Text)) {
+        $sync.WPFPhase2UserPrefix2.Text.Trim()
+    }
+    elseif ($sync.WPFUserPrefix2) {
+        $sync.WPFUserPrefix2.Text.Trim()
+    }
+    else {
+        ''
+    }
+    $upn1 = "$prefix1@$domain"
+    $upn2 = "$prefix2@$domain"
 
     if ($sync.WPFAAGUIDSourceUser.Items.Count -ge 3) {
         $sync.WPFAAGUIDSourceUser.Items[0].Content = "Account 1 - $upn1"
@@ -3163,6 +3196,9 @@ function Invoke-EbgConnectTenant {
             Get-EbgTenantInfo | Out-Null
             Write-EbgStatus -Message 'Mock tenant er forbundet.'
             Update-EbgUIState | Out-Null
+            if ([string]$sync.State.StartMode -eq 'Phase2') {
+                Invoke-EbgWPFButton -Name 'WPFStepPhase2'
+            }
             return
         }
 
@@ -3221,6 +3257,9 @@ function Invoke-EbgConnectTenant {
         Write-EbgStatus -Message 'Microsoft Graph er forbundet.'
         Write-Host 'Login OK. BreakGlassConfigurator fokuseres nu automatisk.' -ForegroundColor Green
         Update-EbgUIState | Out-Null
+        if ([string]$sync.State.StartMode -eq 'Phase2') {
+            Invoke-EbgWPFButton -Name 'WPFStepPhase2'
+        }
         Set-EbgMainWindowForeground
     }
     catch {
@@ -3652,7 +3691,7 @@ function Stop-EbgCurrentTask {
 $sync.configs.appsettings = @'
 {
   "name": "Entra Break Glass Configurator",
-  "version": "2.4.22",
+  "version": "2.4.23",
   "outputRoot": ".\\Output",
   "groupName": "CA-BreakGlass-Exclude",
   "groupDescription": "Security group used to exclude dedicated break-glass accounts from existing Conditional Access policies.",
@@ -3660,6 +3699,7 @@ $sync.configs.appsettings = @'
   "authenticationStrengthDescription": "Requires passkeys (FIDO2) from approved attested security key AAGUIDs for break-glass accounts.",
   "breakGlassCAPolicyName": "[CA999] IdentityProtection-AnyApp-AnyPlatform-BreakGlass-FIDO2"
 }
+
 
 
 
@@ -4292,6 +4332,32 @@ $inputXML = @'
                         <StackPanel DockPanel.Dock="Top">
                             <TextBlock Text="Phase 2 - FIDO2 og dedikeret CA-policy" FontSize="22" FontWeight="SemiBold" Margin="0,0,0,12"/>
                             <TextBlock Text="Dette trin refresher de to konti, læser de registrerede FIDO2/passkey security keys, udtrækker deres AAGUIDs, kan slette TAP, opretter/opdaterer BreakGlass-FIDO2 authentication strength og opretter den dedikerede CA-policy som disabled." TextWrapping="Wrap"/>
+                            <Border Margin="0,18,0,8" Padding="16" Background="{StaticResource PanelRaised}" BorderBrush="{StaticResource BorderSoft}" BorderThickness="1" CornerRadius="10">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="160"/>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="24"/>
+                                        <ColumnDefinition Width="160"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="Auto"/>
+                                    </Grid.RowDefinitions>
+                                    <TextBlock Grid.Row="0" Grid.Column="0" Grid.ColumnSpan="5" Text="Phase 2 target accounts" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,10"/>
+                                    <TextBlock Grid.Row="1" Grid.Column="0" Text="Account 1 UPN prefix"/>
+                                    <TextBox x:Name="WPFPhase2UserPrefix1" Grid.Row="1" Grid.Column="1"/>
+                                    <TextBlock Grid.Row="1" Grid.Column="3" Text="Account 2 UPN prefix"/>
+                                    <TextBox x:Name="WPFPhase2UserPrefix2" Grid.Row="1" Grid.Column="4"/>
+                                    <TextBlock Grid.Row="2" Grid.Column="0" Text="Domain"/>
+                                    <TextBox x:Name="WPFPhase2Domain" Grid.Row="2" Grid.Column="1" Grid.ColumnSpan="4" IsReadOnly="True"/>
+                                    <TextBlock Grid.Row="3" Grid.Column="0" Text="Target UPN preview"/>
+                                    <TextBox x:Name="WPFPhase2UpnPreview" Grid.Row="3" Grid.Column="1" Grid.ColumnSpan="4" IsReadOnly="True" AcceptsReturn="True" Height="52" FontFamily="Consolas"/>
+                                </Grid>
+                            </Border>
                             <Grid Margin="0,18,0,8">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="190"/>
@@ -4423,6 +4489,11 @@ $sync.Keys | ForEach-Object {
 }
 
 foreach ($box in @('WPFDisplayName1','WPFUserPrefix1','WPFDisplayName2','WPFUserPrefix2')) {
+    if ($sync[$box]) {
+        $sync[$box].Add_TextChanged({ Update-EbgUIState })
+    }
+}
+foreach ($box in @('WPFPhase2UserPrefix1','WPFPhase2UserPrefix2')) {
     if ($sync[$box]) {
         $sync[$box].Add_TextChanged({ Update-EbgUIState })
     }

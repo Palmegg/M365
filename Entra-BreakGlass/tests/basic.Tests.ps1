@@ -37,10 +37,11 @@ Describe 'Ebg-BreakGlass basic functions' {
         $sync.State.StartMode = 'Phase2'
         $steps = @(Get-EbgWorkflowSteps)
         if ($steps -contains 'Discovery') { throw 'Resume flow should not include Discovery.' }
+        if ($steps -contains 'Config') { throw 'Resume flow should not include Config.' }
         if ($steps -contains 'Plan') { throw 'Resume flow should not include Plan.' }
         if ($steps -contains 'Apply') { throw 'Resume flow should not include Phase 1a Apply.' }
         if ($steps -contains 'ManualFido') { throw 'Resume flow should not include ManualFido.' }
-        if (($steps -join ',') -ne 'Welcome,Connect,Config,Phase2,Handoff') { throw "Unexpected resume steps: $($steps -join ',')" }
+        if (($steps -join ',') -ne 'Welcome,Connect,Phase2,Handoff') { throw "Unexpected resume steps: $($steps -join ',')" }
         $sync.State.StartMode = 'Phase1'
     }
 

@@ -26,6 +26,8 @@ function Set-EbgNeutralAccountNamePair {
     $sync.WPFDisplayName2.Text = $account2
     $sync.WPFUserPrefix1.Text = ConvertTo-EbgNeutralUserPrefix -DisplayName $account1
     $sync.WPFUserPrefix2.Text = ConvertTo-EbgNeutralUserPrefix -DisplayName $account2
+    if ($sync.WPFPhase2UserPrefix1) { $sync.WPFPhase2UserPrefix1.Text = $sync.WPFUserPrefix1.Text }
+    if ($sync.WPFPhase2UserPrefix2) { $sync.WPFPhase2UserPrefix2.Text = $sync.WPFUserPrefix2.Text }
 
     $action = if ($Random) { 'Valgte tilfældige neutrale kontonavne' } else { 'Skiftede neutrale kontonavne' }
     Write-EbgLog -Message "${action} til: $account1 / $account2"

@@ -17,6 +17,9 @@ function Invoke-EbgConnectTenant {
             Get-EbgTenantInfo | Out-Null
             Write-EbgStatus -Message 'Mock tenant er forbundet.'
             Update-EbgUIState | Out-Null
+            if ([string]$sync.State.StartMode -eq 'Phase2') {
+                Invoke-EbgWPFButton -Name 'WPFStepPhase2'
+            }
             return
         }
 
@@ -75,6 +78,9 @@ function Invoke-EbgConnectTenant {
         Write-EbgStatus -Message 'Microsoft Graph er forbundet.'
         Write-Host 'Login OK. BreakGlassConfigurator fokuseres nu automatisk.' -ForegroundColor Green
         Update-EbgUIState | Out-Null
+        if ([string]$sync.State.StartMode -eq 'Phase2') {
+            Invoke-EbgWPFButton -Name 'WPFStepPhase2'
+        }
         Set-EbgMainWindowForeground
     }
     catch {

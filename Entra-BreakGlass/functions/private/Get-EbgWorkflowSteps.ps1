@@ -3,7 +3,7 @@ function Get-EbgWorkflowSteps {
     param()
 
     if ([string]$sync.State.StartMode -eq 'Phase2') {
-        return @('Welcome','Connect','Config','Phase2','Handoff')
+        return @('Welcome','Connect','Phase2','Handoff')
     }
 
     return @('Welcome','Connect','Discovery','Config','Plan','Apply','ManualFido','Phase2','Handoff')

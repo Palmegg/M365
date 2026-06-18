@@ -565,6 +565,32 @@
                         <StackPanel DockPanel.Dock="Top">
                             <TextBlock Text="Phase 2 - FIDO2 og dedikeret CA-policy" FontSize="22" FontWeight="SemiBold" Margin="0,0,0,12"/>
                             <TextBlock Text="Dette trin refresher de to konti, læser de registrerede FIDO2/passkey security keys, udtrækker deres AAGUIDs, kan slette TAP, opretter/opdaterer BreakGlass-FIDO2 authentication strength og opretter den dedikerede CA-policy som disabled." TextWrapping="Wrap"/>
+                            <Border Margin="0,18,0,8" Padding="16" Background="{StaticResource PanelRaised}" BorderBrush="{StaticResource BorderSoft}" BorderThickness="1" CornerRadius="10">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="160"/>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="24"/>
+                                        <ColumnDefinition Width="160"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="Auto"/>
+                                        <RowDefinition Height="Auto"/>
+                                    </Grid.RowDefinitions>
+                                    <TextBlock Grid.Row="0" Grid.Column="0" Grid.ColumnSpan="5" Text="Phase 2 target accounts" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,10"/>
+                                    <TextBlock Grid.Row="1" Grid.Column="0" Text="Account 1 UPN prefix"/>
+                                    <TextBox x:Name="WPFPhase2UserPrefix1" Grid.Row="1" Grid.Column="1"/>
+                                    <TextBlock Grid.Row="1" Grid.Column="3" Text="Account 2 UPN prefix"/>
+                                    <TextBox x:Name="WPFPhase2UserPrefix2" Grid.Row="1" Grid.Column="4"/>
+                                    <TextBlock Grid.Row="2" Grid.Column="0" Text="Domain"/>
+                                    <TextBox x:Name="WPFPhase2Domain" Grid.Row="2" Grid.Column="1" Grid.ColumnSpan="4" IsReadOnly="True"/>
+                                    <TextBlock Grid.Row="3" Grid.Column="0" Text="Target UPN preview"/>
+                                    <TextBox x:Name="WPFPhase2UpnPreview" Grid.Row="3" Grid.Column="1" Grid.ColumnSpan="4" IsReadOnly="True" AcceptsReturn="True" Height="52" FontFamily="Consolas"/>
+                                </Grid>
+                            </Border>
                             <Grid Margin="0,18,0,8">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="190"/>
