@@ -1454,20 +1454,18 @@ function Get-EbgAAGUIDSourceUserPrincipalName {
     [CmdletBinding()]
     param([Parameter(Mandatory)][hashtable] $Config)
 
-    $tenant = Get-EbgTenantInfo
     return $sync.Form.Dispatcher.Invoke([func[string]]{
-        $selectedIndex = if ($sync.WPFAAGUIDSourceUser) { [int]$sync.WPFAAGUIDSourceUser.SelectedIndex } else { 0 }
-        switch ($selectedIndex) {
-            0 { ConvertTo-BreakGlassUpn -Prefix $Config.UserPrefix1 -OnMicrosoftDomain $tenant.OnMicrosoftDomain }
-            1 { ConvertTo-BreakGlassUpn -Prefix $Config.UserPrefix2 -OnMicrosoftDomain $tenant.OnMicrosoftDomain }
-            default {
-                $custom = if ($sync.WPFAAGUIDCustomUser) { $sync.WPFAAGUIDCustomUser.Text.Trim() } else { '' }
-                if ([string]::IsNullOrWhiteSpace($custom)) { throw 'Angiv en custom UPN, eller vælg Account 1/2 som AAGUID kildebruger.' }
-                $custom
-            }
+        $custom = if ($sync.WPFAAGUIDCustomUser) { $sync.WPFAAGUIDCustomUser.Text.Trim() } else { '' }
+        if ([string]::IsNullOrWhiteSpace($custom)) {
+            throw 'Angiv UPN på den bruger der har den registrerede FIDO2/passkey, som AAGUID skal hentes fra.'
         }
+        if ($custom -notmatch '^[^@\s]+@[^@\s]+\.[^@\s]+$') {
+            throw "AAGUID kildebrugeren skal angives som fuldt UPN, fx user@tenant.onmicrosoft.com. Værdi: $custom"
+        }
+        $custom
     })
 }
+
 function Invoke-EbgGraphRequest {
     [CmdletBinding()]
     param(
@@ -2843,7 +2841,7 @@ function Update-EbgUIState {
             "AAGUID er klar. Tryk 'Kør Phase 2'. Først derefter kan du gå videre til Handoff."
         }
         else {
-            "Hent AAGUID fra en konto med registreret FIDO2/passkey, og tryk derefter 'Kør Phase 2'."
+            "Indtast UPN på pre-provision/kildebrugeren med registreret FIDO2/passkey, hent AAGUID, og tryk derefter 'Kør Phase 2'."
         }
         $sync.WPFPhase2ActionHint.Foreground = if ($hasAAGUIDs) { [System.Windows.Media.Brushes]::LightGreen } else { $sync.Form.Resources['TextSecondary'] }
     }
@@ -2853,36 +2851,8 @@ function Update-EbgAAGUIDSourceOptions {
     [CmdletBinding()]
     param()
 
-    if (-not $sync.WPFAAGUIDSourceUser) { return }
-
-    $domain = [string]$sync.State.OnMicrosoftDomain
-    if ([string]::IsNullOrWhiteSpace($domain)) { return }
-
-    $prefix1 = if ([string]$sync.State.StartMode -eq 'Phase2' -and $sync.WPFPhase2UserPrefix1 -and -not [string]::IsNullOrWhiteSpace($sync.WPFPhase2UserPrefix1.Text)) {
-        $sync.WPFPhase2UserPrefix1.Text.Trim()
-    }
-    elseif ($sync.WPFUserPrefix1) {
-        $sync.WPFUserPrefix1.Text.Trim()
-    }
-    else {
-        ''
-    }
-    $prefix2 = if ([string]$sync.State.StartMode -eq 'Phase2' -and $sync.WPFPhase2UserPrefix2 -and -not [string]::IsNullOrWhiteSpace($sync.WPFPhase2UserPrefix2.Text)) {
-        $sync.WPFPhase2UserPrefix2.Text.Trim()
-    }
-    elseif ($sync.WPFUserPrefix2) {
-        $sync.WPFUserPrefix2.Text.Trim()
-    }
-    else {
-        ''
-    }
-    $upn1 = "$prefix1@$domain"
-    $upn2 = "$prefix2@$domain"
-
-    if ($sync.WPFAAGUIDSourceUser.Items.Count -ge 3) {
-        $sync.WPFAAGUIDSourceUser.Items[0].Content = "Account 1 - $upn1"
-        $sync.WPFAAGUIDSourceUser.Items[1].Content = "Account 2 - $upn2"
-        $sync.WPFAAGUIDSourceUser.Items[2].Content = 'Other user UPN'
+    if ($sync.WPFAAGUIDCustomUser -and [string]::IsNullOrWhiteSpace($sync.WPFAAGUIDCustomUser.Text) -and $sync.State.GraphAccount) {
+        $sync.WPFAAGUIDCustomUser.Text = [string]$sync.State.GraphAccount
     }
 }
 
@@ -3451,11 +3421,17 @@ function Invoke-EbgApplyPhase2 {
         ) | Where-Object { $_ }
         if ($users.Count -ne 2) { throw 'Phase 2 kræver at begge break-glass konti findes i tenant.' }
 
-        Write-EbgLog -Message 'Phase 2 step 2/6: Henter FIDO2 methods og AAGUIDs fra begge konti...'
+        Write-EbgLog -Message 'Phase 2 step 2/6: Henter FIDO2 methods fra break-glass konti og bruger eventuelle pre-provision AAGUIDs fra feltet...'
         $fidoMethods = @()
         foreach ($user in $users) {
             $upn = [string](Get-EbgObjectPropertyValue -InputObject $user -Name 'userPrincipalName')
-            $methods = @(Get-EbgFido2MethodsForUser -UserPrincipalName $upn)
+            try {
+                $methods = @(Get-EbgFido2MethodsForUser -UserPrincipalName $upn)
+            }
+            catch {
+                Write-EbgLog -Level WARN -Message "Kunne ikke læse FIDO2 methods for $upn. Fortsætter hvis AAGUID allerede er angivet i feltet."
+                $methods = @()
+            }
             foreach ($method in $methods) {
                 $method | Add-Member -MemberType NoteProperty -Name UserPrincipalName -Value $upn -Force
                 $fidoMethods += $method
@@ -3465,7 +3441,7 @@ function Invoke-EbgApplyPhase2 {
             [string](Get-EbgObjectPropertyValue -InputObject $_ -Name 'aaGuid')
         } | Where-Object { $_ -match '^[0-9a-fA-F-]{36}$' } | ForEach-Object { $_.ToLowerInvariant() } | Select-Object -Unique)
         $mergedAAGUIDs = @(@($config.AAGUIDs) + $extractedAAGUIDs | Where-Object { $_ } | Select-Object -Unique)
-        if ($mergedAAGUIDs.Count -lt 1) { throw 'Der blev ikke fundet nogen FIDO2 AAGUIDs på de to break-glass konti. Registrer FIDO2 keys først.' }
+        if ($mergedAAGUIDs.Count -lt 1) { throw 'Der er ingen AAGUIDs klar. Hent AAGUID fra en pre-provision/kildebruger med registreret FIDO2/passkey, eller registrer FIDO2 keys på break-glass kontiene først.' }
         foreach ($guid in $mergedAAGUIDs) { Write-EbgLog -Level PASS -Message "AAGUID klar til authentication strength: $guid" }
 
         Write-EbgLog -Message 'Phase 2 step 3/6: Håndterer TAP cleanup...'
@@ -4180,7 +4156,7 @@ function Stop-EbgCurrentTask {
 $sync.configs.appsettings = @'
 {
   "name": "Entra Break Glass Configurator",
-  "version": "2.4.27",
+  "version": "2.4.28",
   "outputRoot": ".\\Output",
   "groupName": "CA-BreakGlass-Exclude",
   "groupDescription": "Security group used to exclude dedicated break-glass accounts from existing Conditional Access policies.",
@@ -4912,19 +4888,14 @@ $inputXML = @'
                                 <TextBox x:Name="WPFAuthenticationStrengthName" Grid.Row="0" Grid.Column="1" IsReadOnly="True" Margin="0,2,16,8"/>
                                 <TextBlock Grid.Row="0" Grid.Column="2" Text="BG CA policy navn"/>
                                 <TextBox x:Name="WPFBreakGlassCAPolicyName" Grid.Row="0" Grid.Column="3" IsReadOnly="True"/>
-                                <TextBlock Grid.Row="1" Grid.Column="0" Text="Read FIDO2 keys from"/>
+                                <TextBlock Grid.Row="1" Grid.Column="0" Text="AAGUID source UPN"/>
                                 <StackPanel Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="3" Orientation="Horizontal">
-                                    <ComboBox x:Name="WPFAAGUIDSourceUser" Width="360" SelectedIndex="0" Margin="0,2,8,8">
-                                        <ComboBoxItem Content="Account 1"/>
-                                        <ComboBoxItem Content="Account 2"/>
-                                        <ComboBoxItem Content="Other user UPN"/>
-                                    </ComboBox>
-                                    <TextBox x:Name="WPFAAGUIDCustomUser" Width="300" Margin="0,2,8,8" ToolTip="Only used when 'Other user UPN' is selected."/>
+                                    <TextBox x:Name="WPFAAGUIDCustomUser" Width="520" Margin="0,2,8,8" ToolTip="Enter the UPN for the pre-provision/source user that already has the FIDO2/passkey registered."/>
                                     <Button x:Name="WPFFetchAAGUIDs" Content="Fetch FIDO2 AAGUIDs" Width="170" Margin="0,0,0,8"/>
                                 </StackPanel>
                                 <TextBlock Grid.Row="2" Grid.Column="0" Text="Allowed key AAGUIDs"/>
                                 <StackPanel Grid.Row="2" Grid.Column="1" Grid.ColumnSpan="3">
-                                    <TextBlock Text="One AAGUID per line. Click Fetch FIDO2 AAGUIDs after FIDO2 keys are registered on the selected account." Foreground="{StaticResource TextMuted}" Margin="0,0,0,4"/>
+                                    <TextBlock Text="One AAGUID per line. Use a pre-provision/source user that already has the correct FIDO2/passkey registered, then fetch its AAGUID here." Foreground="{StaticResource TextMuted}" Margin="0,0,0,4" TextWrapping="Wrap"/>
                                     <TextBox x:Name="WPFAAGUIDs" AcceptsReturn="True" TextWrapping="NoWrap" Height="72" FontFamily="Consolas" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"/>
                                 </StackPanel>
                                 <TextBlock x:Name="WPFPhase2ActionHint" Grid.Row="3" Grid.Column="0" Grid.ColumnSpan="3" Foreground="#FBBF24" Text="Hent AAGUID fra en konto med registreret FIDO2/passkey, og tryk derefter 'Kør Phase 2'." TextWrapping="Wrap" Margin="0,12,12,0"/>

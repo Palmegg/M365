@@ -452,11 +452,17 @@ function Invoke-EbgApplyPhase2 {
         ) | Where-Object { $_ }
         if ($users.Count -ne 2) { throw 'Phase 2 kræver at begge break-glass konti findes i tenant.' }
 
-        Write-EbgLog -Message 'Phase 2 step 2/6: Henter FIDO2 methods og AAGUIDs fra begge konti...'
+        Write-EbgLog -Message 'Phase 2 step 2/6: Henter FIDO2 methods fra break-glass konti og bruger eventuelle pre-provision AAGUIDs fra feltet...'
         $fidoMethods = @()
         foreach ($user in $users) {
             $upn = [string](Get-EbgObjectPropertyValue -InputObject $user -Name 'userPrincipalName')
-            $methods = @(Get-EbgFido2MethodsForUser -UserPrincipalName $upn)
+            try {
+                $methods = @(Get-EbgFido2MethodsForUser -UserPrincipalName $upn)
+            }
+            catch {
+                Write-EbgLog -Level WARN -Message "Kunne ikke læse FIDO2 methods for $upn. Fortsætter hvis AAGUID allerede er angivet i feltet."
+                $methods = @()
+            }
             foreach ($method in $methods) {
                 $method | Add-Member -MemberType NoteProperty -Name UserPrincipalName -Value $upn -Force
                 $fidoMethods += $method
@@ -466,7 +472,7 @@ function Invoke-EbgApplyPhase2 {
             [string](Get-EbgObjectPropertyValue -InputObject $_ -Name 'aaGuid')
         } | Where-Object { $_ -match '^[0-9a-fA-F-]{36}$' } | ForEach-Object { $_.ToLowerInvariant() } | Select-Object -Unique)
         $mergedAAGUIDs = @(@($config.AAGUIDs) + $extractedAAGUIDs | Where-Object { $_ } | Select-Object -Unique)
-        if ($mergedAAGUIDs.Count -lt 1) { throw 'Der blev ikke fundet nogen FIDO2 AAGUIDs på de to break-glass konti. Registrer FIDO2 keys først.' }
+        if ($mergedAAGUIDs.Count -lt 1) { throw 'Der er ingen AAGUIDs klar. Hent AAGUID fra en pre-provision/kildebruger med registreret FIDO2/passkey, eller registrer FIDO2 keys på break-glass kontiene først.' }
         foreach ($guid in $mergedAAGUIDs) { Write-EbgLog -Level PASS -Message "AAGUID klar til authentication strength: $guid" }
 
         Write-EbgLog -Message 'Phase 2 step 3/6: Håndterer TAP cleanup...'

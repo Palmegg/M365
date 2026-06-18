@@ -302,7 +302,7 @@ function Update-EbgUIState {
             "AAGUID er klar. Tryk 'Kør Phase 2'. Først derefter kan du gå videre til Handoff."
         }
         else {
-            "Hent AAGUID fra en konto med registreret FIDO2/passkey, og tryk derefter 'Kør Phase 2'."
+            "Indtast UPN på pre-provision/kildebrugeren med registreret FIDO2/passkey, hent AAGUID, og tryk derefter 'Kør Phase 2'."
         }
         $sync.WPFPhase2ActionHint.Foreground = if ($hasAAGUIDs) { [System.Windows.Media.Brushes]::LightGreen } else { $sync.Form.Resources['TextSecondary'] }
     }

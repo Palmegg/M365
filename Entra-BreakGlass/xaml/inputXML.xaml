@@ -651,19 +651,14 @@
                                 <TextBox x:Name="WPFAuthenticationStrengthName" Grid.Row="0" Grid.Column="1" IsReadOnly="True" Margin="0,2,16,8"/>
                                 <TextBlock Grid.Row="0" Grid.Column="2" Text="BG CA policy navn"/>
                                 <TextBox x:Name="WPFBreakGlassCAPolicyName" Grid.Row="0" Grid.Column="3" IsReadOnly="True"/>
-                                <TextBlock Grid.Row="1" Grid.Column="0" Text="Read FIDO2 keys from"/>
+                                <TextBlock Grid.Row="1" Grid.Column="0" Text="AAGUID source UPN"/>
                                 <StackPanel Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="3" Orientation="Horizontal">
-                                    <ComboBox x:Name="WPFAAGUIDSourceUser" Width="360" SelectedIndex="0" Margin="0,2,8,8">
-                                        <ComboBoxItem Content="Account 1"/>
-                                        <ComboBoxItem Content="Account 2"/>
-                                        <ComboBoxItem Content="Other user UPN"/>
-                                    </ComboBox>
-                                    <TextBox x:Name="WPFAAGUIDCustomUser" Width="300" Margin="0,2,8,8" ToolTip="Only used when 'Other user UPN' is selected."/>
+                                    <TextBox x:Name="WPFAAGUIDCustomUser" Width="520" Margin="0,2,8,8" ToolTip="Enter the UPN for the pre-provision/source user that already has the FIDO2/passkey registered."/>
                                     <Button x:Name="WPFFetchAAGUIDs" Content="Fetch FIDO2 AAGUIDs" Width="170" Margin="0,0,0,8"/>
                                 </StackPanel>
                                 <TextBlock Grid.Row="2" Grid.Column="0" Text="Allowed key AAGUIDs"/>
                                 <StackPanel Grid.Row="2" Grid.Column="1" Grid.ColumnSpan="3">
-                                    <TextBlock Text="One AAGUID per line. Click Fetch FIDO2 AAGUIDs after FIDO2 keys are registered on the selected account." Foreground="{StaticResource TextMuted}" Margin="0,0,0,4"/>
+                                    <TextBlock Text="One AAGUID per line. Use a pre-provision/source user that already has the correct FIDO2/passkey registered, then fetch its AAGUID here." Foreground="{StaticResource TextMuted}" Margin="0,0,0,4" TextWrapping="Wrap"/>
                                     <TextBox x:Name="WPFAAGUIDs" AcceptsReturn="True" TextWrapping="NoWrap" Height="72" FontFamily="Consolas" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"/>
                                 </StackPanel>
                                 <TextBlock x:Name="WPFPhase2ActionHint" Grid.Row="3" Grid.Column="0" Grid.ColumnSpan="3" Foreground="#FBBF24" Text="Hent AAGUID fra en konto med registreret FIDO2/passkey, og tryk derefter 'Kør Phase 2'." TextWrapping="Wrap" Margin="0,12,12,0"/>
