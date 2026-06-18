@@ -10,9 +10,11 @@ function Invoke-EbgGraphRequest {
     if ($sync.App.Mock) {
         throw 'Mock mode should not call Microsoft Graph.'
     }
+    $accessToken = Get-EbgGraphAccessToken
     $params = @{
         Method      = $Method
         Uri         = $Uri
+        Headers     = @{ Authorization = "Bearer $accessToken" }
         ErrorAction = 'Stop'
     }
     if ($null -ne $Body) {
@@ -20,7 +22,7 @@ function Invoke-EbgGraphRequest {
         $params.ContentType = 'application/json'
     }
     try {
-        return Invoke-MgGraphRequest @params
+        return Invoke-RestMethod @params
     }
     catch {
         $message = [string]$_

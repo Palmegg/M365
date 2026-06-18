@@ -4,8 +4,7 @@ function Test-EbgGraphConnection {
 
     if ($sync.App.Mock) { return $true }
     try {
-        $context = Get-MgContext -ErrorAction Stop
-        return ($null -ne $context -and -not [string]::IsNullOrWhiteSpace([string]$context.Account))
+        return -not [string]::IsNullOrWhiteSpace([string](Get-EbgGraphAccessToken))
     }
     catch {
         return $false

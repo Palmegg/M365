@@ -18,35 +18,28 @@ function Invoke-EbgConnectTenant {
         }
 
         Write-EbgStatus -Busy -Message 'Forbinder til Microsoft Graph...'
-        $module = Get-Module -ListAvailable -Name Microsoft.Graph.Authentication | Select-Object -First 1
-        if (-not $module) {
-            $install = $sync.Form.Dispatcher.Invoke([func[object]]{
-                [System.Windows.MessageBox]::Show('Microsoft.Graph.Authentication mangler. Vil du installere modulet for CurrentUser fra PSGallery?', $sync.App.Name, 'YesNo', 'Question')
-            })
-            if ($install -ne 'Yes') {
-                throw 'Microsoft Graph modulet mangler, og installation blev ikke godkendt.'
-            }
-            Install-Module -Name Microsoft.Graph.Authentication -Scope CurrentUser -Repository PSGallery -Force -AllowClobber -ErrorAction Stop
-        }
-        Import-Module Microsoft.Graph.Authentication -ErrorAction Stop
         $scopes = @($sync.configs.graphScopes)
-        try { Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null } catch {}
         $sync.State.GraphConnected = $false
         $sync.State.GraphAccount = ''
         $sync.State.TenantId = ''
         $sync.State.TenantDisplayName = ''
         $sync.State.OnMicrosoftDomain = ''
         $sync.State.GraphScopes = @()
+        $sync.State.GraphAccessToken = ''
+        $sync.State.GraphRefreshToken = ''
+        $sync.State.GraphTokenExpires = $null
+        $sync.State.GraphClientId = ''
         [void]$sync.Form.Dispatcher.Invoke([System.Action]{ Update-EbgUIState | Out-Null })
-        Write-EbgStatus -Busy -Message 'Åbner Microsoft Graph-login. Vælg den tenant-konto der skal bruges...'
-        Connect-MgGraph -Scopes $scopes -ContextScope Process -NoWelcome -ErrorAction Stop | Out-Null
-        $context = Get-MgContext
-        if (-not $context -or [string]::IsNullOrWhiteSpace([string]$context.Account)) {
-            throw 'Microsoft Graph login returnerede ingen aktiv konto.'
-        }
+        Write-EbgStatus -Busy -Message 'Åbner browser-login. Log ind med tenant-kontoen...'
+        $context = Connect-EbgGraphBrowser -Scopes $scopes
         $sync.State.GraphConnected = $true
         $sync.State.GraphAccount = [string]$context.Account
+        $sync.State.TenantId = [string]$context.TenantId
         $sync.State.GraphScopes = @($context.Scopes)
+        $sync.State.GraphAccessToken = [string]$context.AccessToken
+        $sync.State.GraphRefreshToken = [string]$context.RefreshToken
+        $sync.State.GraphTokenExpires = $context.ExpiresOn
+        $sync.State.GraphClientId = [string]$context.ClientId
         Get-EbgTenantInfo | Out-Null
         Write-EbgStatus -Message 'Microsoft Graph er forbundet.'
         $isEnglish = ([string]$sync.State.Language -eq 'en-US')
