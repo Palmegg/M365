@@ -28,16 +28,43 @@ function New-EbgTemporaryAccessPass {
         lifetimeInMinutes = $LifetimeInMinutes
         isUsableOnce = $IsUsableOnce
     }
-    try {
-        $created = Invoke-EbgGraphRequest -Method POST -Uri "https://graph.microsoft.com/v1.0/users/$userId/authentication/temporaryAccessPassMethods" -Body $body
-    }
-    catch {
-        $message = ConvertTo-EbgRedactedError -ErrorRecord $_
-        if ($message -match '403 Forbidden|accessDenied|Request Authorization failed') {
-            throw "Kunne ikke oprette Temporary Access Pass for $upn. Microsoft Graph afviste requesten med 403/accessDenied. TAP kræver delegated Graph scope UserAuthMethod-TAP.ReadWrite.All med admin consent samt Entra rollen Authentication Administrator eller Privileged Authentication Administrator. Hvis target-kontoen allerede har en privilegeret administratorrolle, brug Privileged Authentication Administrator."
+
+    $maxAttempts = 10
+    $delaySeconds = 12
+    $lastError = $null
+    for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
+        try {
+            Write-EbgStatus -Busy -Message "Phase 1a step 5/10: opretter TAP for $upn (forsøg $attempt/$maxAttempts)..."
+            [System.Windows.Forms.Application]::DoEvents()
+            $created = Invoke-EbgGraphRequest -Method POST -Uri "https://graph.microsoft.com/v1.0/users/$userId/authentication/temporaryAccessPassMethods" -Body $body -SuppressErrorLog:($attempt -lt $maxAttempts)
+            break
         }
-        throw
+        catch {
+            $lastError = $_
+            $message = ConvertTo-EbgRedactedError -ErrorRecord $_
+            $isAuthorizationDelay = $message -match '403 Forbidden|accessDenied|Request Authorization failed'
+            if (-not $isAuthorizationDelay -or $attempt -ge $maxAttempts) {
+                if ($isAuthorizationDelay) {
+                    throw "Kunne ikke oprette Temporary Access Pass for $upn efter $maxAttempts forsøg over ca. $([int](($maxAttempts - 1) * $delaySeconds / 60)) minutter. Microsoft Graph afviste requesten med 403/accessDenied. Kontroller at tokenet har UserAuthMethod-TAP.ReadWrite.All med admin consent, at operatoren har Authentication Administrator eller Privileged Authentication Administrator, og at TAP authentication method policy er enabled."
+                }
+                throw
+            }
+
+            Write-EbgLog -Level WARN -Message "TAP for $upn blev afvist med 403/accessDenied på forsøg $attempt/$maxAttempts. Venter $delaySeconds sekunder og prøver igen; nye brugere kan være forsinket i authentication methods backend."
+            Write-EbgStatus -Busy -Message "Phase 1a step 5/10: venter på TAP backend for $upn ($attempt/$maxAttempts)..."
+            $until = (Get-Date).AddSeconds($delaySeconds)
+            while ((Get-Date) -lt $until) {
+                Start-Sleep -Milliseconds 250
+                [System.Windows.Forms.Application]::DoEvents()
+            }
+        }
     }
+
+    if (-not $created) {
+        if ($lastError) { throw $lastError }
+        throw "Kunne ikke oprette Temporary Access Pass for $upn. Ukendt fejl."
+    }
+
     $created | Add-Member -MemberType NoteProperty -Name UserPrincipalName -Value $upn -Force
     $created | Add-Member -MemberType NoteProperty -Name lifetimeInMinutes -Value $LifetimeInMinutes -Force
     $created | Add-Member -MemberType NoteProperty -Name isUsableOnce -Value $IsUsableOnce -Force

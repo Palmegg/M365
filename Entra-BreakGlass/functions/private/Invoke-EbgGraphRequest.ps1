@@ -4,7 +4,8 @@ function Invoke-EbgGraphRequest {
         [Parameter(Mandatory)][ValidateSet('GET','POST','PATCH','DELETE')][string] $Method,
         [Parameter(Mandatory)][string] $Uri,
         [AllowNull()] $Body = $null,
-        [switch] $SuppressNotFoundLog
+        [switch] $SuppressNotFoundLog,
+        [switch] $SuppressErrorLog
     )
 
     if ($sync.App.Mock) {
@@ -29,7 +30,7 @@ function Invoke-EbgGraphRequest {
     catch {
         $message = [string]$_
         $isNotFound = $message -match '404|Request_ResourceNotFound|Resource .* does not exist'
-        if (-not ($SuppressNotFoundLog -and $isNotFound)) {
+        if (-not $SuppressErrorLog -and -not ($SuppressNotFoundLog -and $isNotFound)) {
             Write-EbgLog -Level ERROR -Message (ConvertTo-EbgRedactedError -ErrorRecord $_)
         }
         throw
