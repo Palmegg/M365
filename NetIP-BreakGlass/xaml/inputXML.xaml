@@ -312,8 +312,10 @@
                     <Button x:Name="WPFStepDiscovery" Content="3. Discovery" IsEnabled="False" Margin="0,0,8,0"/>
                     <Button x:Name="WPFStepConfig" Content="4. Konfiguration" IsEnabled="False" Margin="0,0,8,0"/>
                     <Button x:Name="WPFStepPlan" Content="5. Plan" IsEnabled="False" Margin="0,0,8,0"/>
-                    <Button x:Name="WPFStepApply" Content="6. Udfør" IsEnabled="False" Margin="0,0,8,0"/>
-                    <Button x:Name="WPFStepHandoff" Content="7. Handoff" IsEnabled="False" Margin="0"/>
+                    <Button x:Name="WPFStepApply" Content="6. Phase 1" IsEnabled="False" Margin="0,0,8,0"/>
+                    <Button x:Name="WPFStepManualFido" Content="7. Manuel FIDO2" IsEnabled="False" Margin="0,0,8,0"/>
+                    <Button x:Name="WPFStepPhase2" Content="8. Phase 2" IsEnabled="False" Margin="0,0,8,0"/>
+                    <Button x:Name="WPFStepHandoff" Content="9. Handoff" IsEnabled="False" Margin="0"/>
                 </StackPanel>
             </Border>
 
@@ -329,10 +331,11 @@
                                 </ComboBox>
                             </StackPanel>
                             <TextBlock Text="Velkommen" FontSize="22" FontWeight="SemiBold" Margin="0,0,0,12"/>
-                            <TextBlock Text="Dette værktøj opretter to break-glass konti på tenantens .onmicrosoft.com domæne, opretter gruppen CA-BreakGlass-Exclude og kan valgfrit ekskludere gruppen fra eksisterende Conditional Access-politikker."/>
-                            <TextBlock Margin="0,12,0,0" Text="Værktøjet forbinder kun til Microsoft Graph. Det bruger ikke Azure, PIM, RMAU, FIDO2, Log Analytics eller Sentinel."/>
-                            <TextBlock Margin="0,12,0,0" Text="Discovery og Plan foretager ingen ændringer. Ændringer udføres først i trinnet Udfør."/>
-                            <TextBlock Margin="0,12,0,0" Text="Midlertidige adgangskoder vises kun én gang og gemmes ikke i log, JSON eller handoff dokument."/>
+                            <TextBlock Text="Værktøjet kører i to faser: Phase 1 opretter break-glass konti, Global Administrator rolle, TAP, CA-exclude gruppe og CA-exclusions. Derefter logger konsulenten manuelt på kontiene og registrerer FIDO2 keys."/>
+                            <TextBlock Margin="0,12,0,0" Text="Phase 2 refresher kontiene, læser FIDO2 AAGUIDs, kan slette TAP, opretter BreakGlass-FIDO2 authentication strength og opretter en dedikeret CA-policy som disabled."/>
+                            <TextBlock Margin="0,12,0,0" Text="Værktøjet forbinder kun til Microsoft Graph. Det bruger ikke Azure, PIM, RMAU, Log Analytics eller Sentinel."/>
+                            <TextBlock Margin="0,12,0,0" Text="Discovery og Plan foretager ingen ændringer. Ændringer udføres først i Phase 1 og Phase 2."/>
+                            <TextBlock Margin="0,12,0,0" Text="Initiale passwords og TAP-koder skrives ikke til almindelig log. TAP-koder er one-time use og gyldige i 2 timer."/>
                             <CheckBox x:Name="WPFWelcomeRiskAccepted" Margin="0,24,0,0" Content="Jeg forstår at dette script ændrer sikkerhedskritisk tenant-konfiguration."/>
                         </StackPanel>
                     </ScrollViewer>
@@ -415,7 +418,7 @@
                             <TextBox x:Name="WPFGroupName" Grid.Row="6" Grid.Column="1" Grid.ColumnSpan="3" IsReadOnly="True"/>
                             <TextBlock Grid.Row="7" Grid.Column="0" Text="Security group description"/>
                             <TextBox x:Name="WPFGroupDescription" Grid.Row="7" Grid.Column="1" Grid.ColumnSpan="3" IsReadOnly="True" TextWrapping="Wrap" Height="58"/>
-                            <TextBlock Grid.Row="8" Grid.ColumnSpan="4" Text="FIDO2 authentication strength" FontSize="16" FontWeight="SemiBold" Margin="0,14,0,8"/>
+                            <TextBlock Grid.Row="8" Grid.ColumnSpan="4" Text="Phase 2 - FIDO2 authentication strength" FontSize="16" FontWeight="SemiBold" Margin="0,14,0,8"/>
                             <TextBlock Grid.Row="9" Grid.Column="0" Text="AAGUID kildebruger"/>
                             <StackPanel Grid.Row="9" Grid.Column="1" Grid.ColumnSpan="3" Orientation="Horizontal">
                                 <ComboBox x:Name="WPFAAGUIDSourceUser" Width="170" SelectedIndex="0" Margin="0,2,8,8">
@@ -433,10 +436,7 @@
                             <TextBlock Grid.Row="11" Grid.Column="2" Text="BG CA policy navn"/>
                             <TextBox x:Name="WPFBreakGlassCAPolicyName" Grid.Row="11" Grid.Column="3" IsReadOnly="True"/>
                             <StackPanel Grid.Row="12" Grid.Column="0" Grid.ColumnSpan="4">
-                                <CheckBox x:Name="WPFCreateAuthenticationStrength" Content="Opret/opdater BreakGlass-FIDO2 authentication strength med AAGUID-restriction"/>
-                                <CheckBox x:Name="WPFCreateBreakGlassCAPolicy" Content="Opret dedikeret CA-policy der kræver BreakGlass-FIDO2 for CA-BreakGlass-Exclude"/>
-                                <CheckBox x:Name="WPFEnableBreakGlassCAPolicy" Content="Opret CA-policy som enabled i stedet for report-only"/>
-                                <TextBlock Foreground="#FBBF24" Text="Anbefaling: lad CA-politikken være report-only indtil begge konti har to registrerede og testede FIDO2 keys."/>
+                                <TextBlock Foreground="#FBBF24" Text="Phase 2 opretter/opdaterer altid BreakGlass-FIDO2 authentication strength og opretter den dedikerede CA-policy som disabled. AAGUIDs kan udfyldes manuelt her eller hentes automatisk i Phase 2 efter FIDO2 keys er registreret."/>
                             </StackPanel>
                             <StackPanel Grid.Row="13" Grid.Column="0" Grid.ColumnSpan="4" Margin="0,10,0,0">
                                 <CheckBox x:Name="WPFCreateUsers" Content="Opret brugere hvis de ikke findes"/>
@@ -444,7 +444,7 @@
                                 <CheckBox x:Name="WPFAddUsersToGroup" Content="Tilføj break-glass konti til CA-BreakGlass-Exclude"/>
                                 <CheckBox x:Name="WPFDisableAdminSSPR" Content="Deaktivér administrator-SSPR tenant-wide"/>
                                 <TextBlock Foreground="#FBBF24" Text="Admin SSPR kan ikke slås fra kun for de to konti. Hvis valgt, deaktiveres administrator-SSPR for alle administratorroller i tenant'en."/>
-                                <CheckBox x:Name="WPFPatchCAPolicies" Content="Ekskludér CA-BreakGlass-Exclude fra alle eksisterende Conditional Access-politikker"/>
+                                <CheckBox x:Name="WPFPatchCAPolicies" Content="Phase 1: Ekskludér CA-BreakGlass-Exclude fra alle eksisterende Conditional Access-politikker"/>
                                 <TextBlock Foreground="#FBBF24" Text="Dette ændrer eksisterende Conditional Access-politikker. Der oprettes backup før ændringerne udføres."/>
                             </StackPanel>
                         </Grid>
@@ -464,18 +464,40 @@
                 <Grid x:Name="WPFPageApply" Visibility="Collapsed">
                     <DockPanel>
                         <StackPanel DockPanel.Dock="Top">
-                            <TextBlock Text="Udfør" FontSize="22" FontWeight="SemiBold" Margin="0,0,0,12"/>
-                            <TextBlock Text="Dette er det eneste trin der ændrer tenant-konfiguration."/>
-                            <Button x:Name="WPFApplyConfiguration" Content="Anvend konfiguration" Width="180" HorizontalAlignment="Left" Margin="0,14,0,8"/>
+                            <TextBlock Text="Phase 1a - Grundopsætning" FontSize="22" FontWeight="SemiBold" Margin="0,0,0,12"/>
+                            <TextBlock Text="Dette trin opretter/genbruger CA-BreakGlass-Exclude, de to konti, Global Administrator assignments, Admin SSPR, TAP, gruppemedlemskab og CA exclusions."/>
+                            <TextBlock Foreground="#FBBF24" Margin="0,8,0,0" Text="Admin SSPR kan tage op til 60 minutter før ændringen slår igennem. TAP oprettes som one-time use med 2 timers varighed."/>
+                            <Button x:Name="WPFApplyConfiguration" Content="Kør Phase 1a" Width="180" HorizontalAlignment="Left" Margin="0,14,0,8"/>
                         </StackPanel>
                         <TextBox x:Name="WPFExecutionLog" IsReadOnly="True" AcceptsReturn="True" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" FontFamily="Consolas"/>
+                    </DockPanel>
+                </Grid>
+
+                <Grid x:Name="WPFPageManualFido" Visibility="Collapsed">
+                    <StackPanel MaxWidth="940" HorizontalAlignment="Center">
+                        <TextBlock Text="Phase 1b - Manuel FIDO2 opsætning" FontSize="22" FontWeight="SemiBold" Margin="0,0,0,12"/>
+                        <TextBlock Text="Log ind på begge break-glass konti med de Temporary Access Pass-koder fra handoff/credential-vinduet."/>
+                        <TextBlock Margin="0,12,0,0" Text="Registrer to separate FIDO2 security keys pr. konto. Opbevar keys fysisk adskilt og sikkert."/>
+                        <TextBlock Margin="0,12,0,0" Text="Når FIDO2 keys er registreret på begge konti, fortsæt til Phase 2. Configuratoren refresher derefter kontiene og henter AAGUIDs fra de registrerede FIDO2 methods."/>
+                        <TextBlock Foreground="#FBBF24" Margin="0,20,0,0" Text="Spring ikke dette trin over. Phase 2 fejler, hvis der ikke findes FIDO2 methods på kontiene."/>
+                    </StackPanel>
+                </Grid>
+
+                <Grid x:Name="WPFPagePhase2" Visibility="Collapsed">
+                    <DockPanel>
+                        <StackPanel DockPanel.Dock="Top">
+                            <TextBlock Text="Phase 2 - FIDO2 og dedikeret CA-policy" FontSize="22" FontWeight="SemiBold" Margin="0,0,0,12"/>
+                            <TextBlock Text="Dette trin refresher de to konti, henter AAGUIDs fra registrerede FIDO2 methods, kan slette TAP, opretter/opdaterer BreakGlass-FIDO2 authentication strength og opretter den dedikerede CA-policy som disabled."/>
+                            <Button x:Name="WPFApplyPhase2" Content="Kør Phase 2" Width="160" HorizontalAlignment="Left" Margin="0,14,0,8"/>
+                        </StackPanel>
+                        <TextBox x:Name="WPFPhase2Log" IsReadOnly="True" AcceptsReturn="True" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" FontFamily="Consolas"/>
                     </DockPanel>
                 </Grid>
 
                 <Grid x:Name="WPFPageHandoff" Visibility="Collapsed">
                     <StackPanel MaxWidth="940" HorizontalAlignment="Center">
                         <TextBlock Text="Handoff" FontSize="22" FontWeight="SemiBold" Margin="0,0,0,12"/>
-                        <TextBlock Text="Handoff-dokumentet genereres efter udførsel. Det indeholder ikke passwords."/>
+                        <TextBlock Text="Handoff-dokumentet genereres efter Phase 1 og opdateres efter Phase 2. Det markeres CONFIDENTIAL og kan indeholde TAP-koder fra Phase 1."/>
                         <TextBlock Text="Output folder" FontWeight="SemiBold" Margin="0,18,0,4"/>
                         <TextBox x:Name="WPFOutputFolder" IsReadOnly="True"/>
                         <TextBlock Text="Handoff dokument" FontWeight="SemiBold" Margin="0,10,0,4"/>

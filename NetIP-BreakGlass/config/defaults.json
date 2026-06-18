@@ -7,7 +7,7 @@
   "createGroup": true,
   "addUsersToGroup": true,
   "disableAdminSSPR": true,
-  "patchCAPolicies": false,
+  "patchCAPolicies": true,
   "createAuthenticationStrength": false,
   "createBreakGlassCAPolicy": false,
   "enableBreakGlassCAPolicy": false,

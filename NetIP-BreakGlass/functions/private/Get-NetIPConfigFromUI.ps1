@@ -19,9 +19,9 @@ function Get-NetIPConfigFromUI {
             AddUsersToGroup  = [bool]$sync.WPFAddUsersToGroup.IsChecked
             DisableAdminSSPR = [bool]$sync.WPFDisableAdminSSPR.IsChecked
             PatchCAPolicies  = [bool]$sync.WPFPatchCAPolicies.IsChecked
-            CreateAuthenticationStrength = [bool]$sync.WPFCreateAuthenticationStrength.IsChecked
-            CreateBreakGlassCAPolicy = [bool]$sync.WPFCreateBreakGlassCAPolicy.IsChecked
-            EnableBreakGlassCAPolicy = [bool]$sync.WPFEnableBreakGlassCAPolicy.IsChecked
+            CreateAuthenticationStrength = $true
+            CreateBreakGlassCAPolicy = $true
+            EnableBreakGlassCAPolicy = $false
         }
     })
 }

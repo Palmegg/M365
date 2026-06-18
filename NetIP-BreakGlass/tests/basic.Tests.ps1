@@ -51,8 +51,9 @@ Describe 'NetIP-BreakGlass basic functions' {
         $plan = New-NetIPPlanObject -Config $config
         if ($plan.Account1UPN -ne 'horse.unit@contoso.onmicrosoft.com') { throw "Unexpected planned UPN: $($plan.Account1UPN)" }
         if ($plan.PlannedAdminSSPRStatus -ne 'Deaktiveres') { throw "Unexpected Admin SSPR plan: $($plan.PlannedAdminSSPRStatus)" }
-        if ($plan.AuthenticationStrengthStatus -ne 'Oprettes/opdateres') { throw "Unexpected auth strength plan: $($plan.AuthenticationStrengthStatus)" }
-        if ($plan.BreakGlassCAPolicyStatus -ne 'Oprettes report-only') { throw "Unexpected BG CA plan: $($plan.BreakGlassCAPolicyStatus)" }
+        if ($plan.TemporaryAccessPassStatus -ne 'Phase 1: oprettes for begge konti, one-time use, 2 timer') { throw "Unexpected TAP plan: $($plan.TemporaryAccessPassStatus)" }
+        if ($plan.AuthenticationStrengthStatus -ne 'Phase 2: oprettes/opdateres med angivne + fundne AAGUIDs') { throw "Unexpected auth strength plan: $($plan.AuthenticationStrengthStatus)" }
+        if ($plan.BreakGlassCAPolicyStatus -ne 'Phase 2: oprettes disabled og tildeles direkte til de 2 konti') { throw "Unexpected BG CA plan: $($plan.BreakGlassCAPolicyStatus)" }
     }
 
     It 'preserves existing CA exclusions in mock patch plan' {
@@ -102,8 +103,16 @@ Describe 'NetIP-BreakGlass basic functions' {
     It 'handles authentication strength and dedicated CA policy in mock mode' {
         $strength = Ensure-NetIPAuthenticationStrength -DisplayName 'BreakGlass-FIDO2' -Description 'Test' -AllowedAAGUIDs @('a4e9fc6d-4cbe-4758-b8ba-37598bb5bbaa') -Apply $true
         if ($strength.Status -ne 'Created') { throw "Unexpected auth strength status: $($strength.Status)" }
-        $policy = Ensure-NetIPBreakGlassCAPolicy -DisplayName '[CA999] IdentityProtection-AnyApp-AnyPlatform-BreakGlass-FIDO2' -GroupId 'mock-ca-exclude-group' -AuthenticationStrengthId $strength.id -Enabled $false -Apply $true
-        if ($policy.state -ne 'enabledForReportingButNotEnforced') { throw "Unexpected CA policy state: $($policy.state)" }
+        $policy = Ensure-NetIPBreakGlassCAPolicy -DisplayName '[CA999] IdentityProtection-AnyApp-AnyPlatform-BreakGlass-FIDO2' -UserIds @('mock-user-1','mock-user-2') -AuthenticationStrengthId $strength.id -Enabled $false -Apply $true
+        if ($policy.state -ne 'disabled') { throw "Unexpected CA policy state: $($policy.state)" }
+    }
+
+    It 'creates Temporary Access Pass in mock mode' {
+        $user = @{ id = 'mock-user-2'; userPrincipalName = 'svc_ea_02@contoso.onmicrosoft.com' }
+        $tap = New-NetIPTemporaryAccessPass -User $user -LifetimeInMinutes 120 -IsUsableOnce $true -Apply $true
+        if ($tap.Status -ne 'Created') { throw "Unexpected TAP status: $($tap.Status)" }
+        if ($tap.isUsableOnce -ne $true) { throw "Unexpected TAP one-time setting: $($tap.isUsableOnce)" }
+        if ($tap.lifetimeInMinutes -ne 120) { throw "Unexpected TAP lifetime: $($tap.lifetimeInMinutes)" }
     }
 
     It 'reads properties case-insensitively without numeric index binding' {

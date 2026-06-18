@@ -7,17 +7,19 @@ PowerShell 7/WPF værktøj til en simpel Microsoft Graph-baseret v1 opsætning a
 - Forbinder til Microsoft Graph med delegated interactive sign-in.
 - Finder tenantens `*.onmicrosoft.com` domæne.
 - Kontrollerer de eksakte target UPNs for to break-glass konti.
-- Opretter manglende cloud-only brugere, hvis valgt.
+- Phase 1a opretter manglende cloud-only brugere, hvis valgt.
 - Genererer stærke midlertidige passwords for nyoprettede konti.
 - Viser passwords én gang i GUI'en.
 - Opretter eller genbruger security group `CA-BreakGlass-Exclude`.
 - Tilføjer kontiene til gruppen, hvis valgt.
 - Tildeler begge break-glass konti direkte `Global Administrator` på tenant scope (`/`).
-- Kan deaktivere administrator-SSPR tenant-wide, hvis valgt. Dette kan ikke begrænses til kun de to break-glass konti.
-- Kan hente AAGUID fra en allerede registreret FIDO2/passkey på en valgt bruger.
-- Kan oprette/opdatere custom authentication strength `BreakGlass-FIDO2` med FIDO2 og tilladte AAGUIDs.
-- Kan oprette en dedikeret Conditional Access-politik, der kræver `BreakGlass-FIDO2` for `CA-BreakGlass-Exclude`.
-- Kan valgfrit ekskludere gruppen fra eksisterende Conditional Access-politikker.
+- Kan deaktivere administrator-SSPR tenant-wide, hvis valgt. Ændringen kan tage op til 60 minutter.
+- Phase 1a opretter Temporary Access Pass for begge konti med `one-time use = Yes` og `duration = 2 hours`.
+- Phase 1a kan ekskludere gruppen fra eksisterende Conditional Access-politikker.
+- Phase 1b er manuel: konsulenten logger ind med TAP og registrerer to FIDO2 security keys pr. konto.
+- Phase 2 refresher kontiene, henter AAGUIDs fra de registrerede FIDO2/passkey methods og kan slette TAP.
+- Phase 2 opretter/opdaterer custom authentication strength `BreakGlass-FIDO2` med FIDO2 og tilladte AAGUIDs.
+- Phase 2 opretter en dedikeret Conditional Access-politik, der kræver `BreakGlass-FIDO2` for de to break-glass konti. Politikken oprettes som `disabled`.
 - Backupper CA policies før valgfri patching.
 - Genererer `plan.json`, `result.json`, `handoff.html` og `app.log`.
 
@@ -65,6 +67,7 @@ Default scopes ligger i `config/graphScopes.json`:
 - `Directory.Read.All`
 - `Organization.Read.All`
 - `UserAuthenticationMethod.Read.All`
+- `UserAuthenticationMethod.ReadWrite.All`
 - `RoleManagement.ReadWrite.Directory`
 - `Policy.Read.All`
 - `Policy.ReadWrite.AuthenticationMethod`
@@ -77,27 +80,27 @@ Admin consent kan være nødvendig i kundens tenant.
 
 Den indloggede konto skal have rettigheder til at oprette brugere/grupper, tildele directory roles, læse FIDO2 authentication methods, læse/opdatere authentication strengths, læse/opdatere authorization policy hvis Admin SSPR deaktiveres og, hvis CA vælges, læse og opdatere Conditional Access-politikker. Typisk kræves Global Administrator eller en kombination med Privileged Role Administrator, Authentication Administrator, Security Administrator, User Administrator, Groups Administrator og Conditional Access Administrator.
 
-## Password-håndtering
+## Password og TAP-håndtering
 
 Passwords genereres kun for nyoprettede konti. Eksisterende konti genbruges uden password reset.
 
-Passwords:
+Passwords og TAP-koder:
 
 - vises én gang i GUI'en
 - skrives ikke til log
 - skrives ikke til `plan.json`
 - skrives ikke til `result.json`
-- skrives ikke til `handoff.html`
+- TAP-koder kan skrives til `handoff.html`, som markeres `CONFIDENTIAL`, så konsulenten kan gennemføre Phase 1b
 
 ## Conditional Access advarsel
 
-Den dedikerede BreakGlass FIDO2 CA-policy oprettes som report-only som standard. Sæt den først til enabled, når begge break-glass konti har registreret og testet de ønskede FIDO2 keys.
+Den dedikerede BreakGlass FIDO2 CA-policy oprettes som `disabled`. Sæt den først til enabled, når begge break-glass konti har registreret og testet de ønskede FIDO2 keys.
 
-CA exclusion patching er valgfri og slået fra som standard. Hvis funktionen vælges, backuppes policies til `ca-policies-before.json`, og værktøjet tilføjer kun gruppens object ID til `conditions.users.excludeGroups`. Eksisterende exclusions og øvrige policy-indstillinger bevares.
+CA exclusion patching er valgfri og slået til som standard i Phase 1. Hvis funktionen vælges, backuppes policies til `ca-policies-before.json`, og værktøjet tilføjer kun gruppens object ID til `conditions.users.excludeGroups`. Eksisterende exclusions og øvrige policy-indstillinger bevares.
 
 ## Handoff dokument
 
-`handoff.html` indeholder tenant, konti, Global Administrator rolle assignments, Admin SSPR status, gruppemedlemskab, CA exclusion status, policy backup path, warnings/errors og manuelle næste steps. Det indeholder ikke passwords eller tokens.
+`handoff.html` indeholder tenant, konti, Global Administrator rolle assignments, Admin SSPR status, TAP-status, gruppemedlemskab, CA exclusion status, policy backup path, authentication strength, dedikeret CA-policy, warnings/errors og manuelle næste steps. Det kan indeholde TAP-koder fra Phase 1 og skal behandles som confidential.
 
 ## Arkitektur
 

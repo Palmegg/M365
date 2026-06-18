@@ -5,7 +5,7 @@ function Show-NetIPCreatedPasswordsOnce {
     if (-not $CreatedPasswords -or $CreatedPasswords.Count -eq 0) { return }
     $sync.Form.Dispatcher.Invoke([System.Action]{
         $window = New-Object System.Windows.Window
-        $window.Title = 'Midlertidige adgangskoder - vises kun én gang'
+        $window.Title = 'Midlertidige adgangskoder/TAP - vises kun én gang'
         $window.Width = 720
         $window.Height = 430
         $window.WindowStartupLocation = 'CenterOwner'
@@ -14,7 +14,7 @@ function Show-NetIPCreatedPasswordsOnce {
         $panel = New-Object System.Windows.Controls.DockPanel
         $panel.Margin = '16'
         $warning = New-Object System.Windows.Controls.TextBlock
-        $warning.Text = 'Adgangskoderne vises kun her. De skrives ikke til log, JSON eller handoff. Gem dem straks sikkert efter intern/kundeprocedure.'
+        $warning.Text = 'Adgangskoder og Temporary Access Pass-koder vises kun her og i confidential handoff, hvis handoff genereres. De skrives ikke til almindelig log. Gem dem straks sikkert efter intern/kundeprocedure.'
         $warning.TextWrapping = 'Wrap'
         $warning.Margin = '0,0,0,10'
         [System.Windows.Controls.DockPanel]::SetDock($warning, 'Top')
@@ -25,7 +25,14 @@ function Show-NetIPCreatedPasswordsOnce {
         $text.VerticalScrollBarVisibility = 'Auto'
         $text.FontFamily = 'Consolas'
         $text.Text = (($CreatedPasswords | ForEach-Object {
-            '{0}: {1}' -f (Get-NetIPObjectPropertyValue -InputObject $_ -Name 'UserPrincipalName'), (Get-NetIPObjectPropertyValue -InputObject $_ -Name 'Password')
+            $upn = Get-NetIPObjectPropertyValue -InputObject $_ -Name 'UserPrincipalName'
+            $secret = Get-NetIPObjectPropertyValue -InputObject $_ -Name 'Password'
+            $label = 'Initial password'
+            if ([string]::IsNullOrWhiteSpace([string]$secret)) {
+                $secret = Get-NetIPObjectPropertyValue -InputObject $_ -Name 'temporaryAccessPass'
+                $label = 'Temporary Access Pass'
+            }
+            '{0} ({1}): {2}' -f $upn, $label, $secret
         }) -join [Environment]::NewLine)
         $panel.Children.Add($text) | Out-Null
         $buttons = New-Object System.Windows.Controls.StackPanel

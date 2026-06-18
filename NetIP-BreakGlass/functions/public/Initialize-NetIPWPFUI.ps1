@@ -25,9 +25,9 @@ function Initialize-NetIPWPFUI {
     $sync.WPFAddUsersToGroup.IsChecked = [bool]$defaults.addUsersToGroup
     $sync.WPFDisableAdminSSPR.IsChecked = [bool]$defaults.disableAdminSSPR
     $sync.WPFPatchCAPolicies.IsChecked = [bool]$defaults.patchCAPolicies
-    $sync.WPFCreateAuthenticationStrength.IsChecked = [bool]$defaults.createAuthenticationStrength
-    $sync.WPFCreateBreakGlassCAPolicy.IsChecked = [bool]$defaults.createBreakGlassCAPolicy
-    $sync.WPFEnableBreakGlassCAPolicy.IsChecked = [bool]$defaults.enableBreakGlassCAPolicy
+    if ($sync.WPFCreateAuthenticationStrength) { $sync.WPFCreateAuthenticationStrength.IsChecked = [bool]$defaults.createAuthenticationStrength }
+    if ($sync.WPFCreateBreakGlassCAPolicy) { $sync.WPFCreateBreakGlassCAPolicy.IsChecked = [bool]$defaults.createBreakGlassCAPolicy }
+    if ($sync.WPFEnableBreakGlassCAPolicy) { $sync.WPFEnableBreakGlassCAPolicy.IsChecked = [bool]$defaults.enableBreakGlassCAPolicy }
     if ($sync.WPFLanguageSelector) { $sync.WPFLanguageSelector.SelectedIndex = 0 }
     Set-NetIPNeutralAccountNamePair -Random
     Set-NetIPLanguage -Language $sync.State.Language

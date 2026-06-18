@@ -4,6 +4,7 @@
   "Directory.Read.All",
   "Organization.Read.All",
   "UserAuthenticationMethod.Read.All",
+  "UserAuthenticationMethod.ReadWrite.All",
   "RoleManagement.ReadWrite.Directory",
   "Policy.Read.All",
   "Policy.ReadWrite.AuthenticationMethod",

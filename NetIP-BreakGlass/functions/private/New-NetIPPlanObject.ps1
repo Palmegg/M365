@@ -33,10 +33,11 @@ function New-NetIPPlanObject {
     if ($user2) { $warnings += 'Konto 2 findes allerede. Password bliver ikke ændret automatisk.' }
     $warnings += 'Begge break-glass konti får direkte Global Administrator rolle på tenant scope (/).'
     if ($Config.DisableAdminSSPR) { $warnings += 'Administrator-SSPR deaktiveres tenant-wide og kan tage op til 60 minutter at slå igennem.' }
+    $warnings += 'Phase 1 opretter Temporary Access Pass for begge konti: one-time use = Yes, duration = 2 hours.'
+    $warnings += 'Phase 1b kræver manuel registrering af to FIDO2 security keys pr. konto.'
+    $warnings += 'Phase 2 opretter/opdaterer BreakGlass-FIDO2 authentication strength og en dedikeret CA-policy som disabled.'
     if ($Config.PatchCAPolicies) { $warnings += 'Eksisterende Conditional Access-politikker ændres. Backup oprettes før ændringer.' }
-    if ($Config.CreateAuthenticationStrength -and @($Config.AAGUIDs).Count -lt 1) { $warnings += 'Authentication strength er valgt, men der er ikke angivet AAGUIDs endnu.' }
-    if ($Config.CreateBreakGlassCAPolicy -and -not $Config.CreateAuthenticationStrength) { $warnings += 'Dedikeret BG CA-policy kræver at authentication strength også oprettes eller findes.' }
-    if ($Config.CreateBreakGlassCAPolicy -and -not $Config.EnableBreakGlassCAPolicy) { $warnings += 'Dedikeret BG CA-policy oprettes som report-only som sikker default.' }
+    if (@($Config.AAGUIDs).Count -lt 1) { $warnings += 'AAGUIDs hentes normalt automatisk i Phase 2 efter FIDO2 keys er registreret.' }
 
     $outputFolder = if ($sync.State.OutputFolder) { $sync.State.OutputFolder } else { Join-Path $sync.App.OutputRoot ('BreakGlass-{0}-<timestamp>' -f $tenant.TenantId) }
     $plan = [pscustomobject]@{
@@ -59,9 +60,10 @@ function New-NetIPPlanObject {
         PlannedAdminSSPRStatus    = if ($Config.DisableAdminSSPR) { if ($adminSSPREnabled) { 'Deaktiveres' } else { 'Allerede deaktiveret' } } else { 'Uændret' }
         AuthenticationStrengthName = $Config.AuthenticationStrengthName
         AuthenticationStrengthAAGUIDs = @($Config.AAGUIDs)
-        AuthenticationStrengthStatus = if ($Config.CreateAuthenticationStrength) { if (@($Config.AAGUIDs).Count -gt 0) { 'Oprettes/opdateres' } else { 'Mangler AAGUID' } } else { 'Springes over' }
+        TemporaryAccessPassStatus    = 'Phase 1: oprettes for begge konti, one-time use, 2 timer'
+        AuthenticationStrengthStatus = if (@($Config.AAGUIDs).Count -gt 0) { 'Phase 2: oprettes/opdateres med angivne + fundne AAGUIDs' } else { 'Phase 2: oprettes/opdateres efter automatisk AAGUID refresh' }
         BreakGlassCAPolicyName    = $Config.BreakGlassCAPolicyName
-        BreakGlassCAPolicyStatus  = if ($Config.CreateBreakGlassCAPolicy) { if ($Config.EnableBreakGlassCAPolicy) { 'Oprettes enabled' } else { 'Oprettes report-only' } } else { 'Springes over' }
+        BreakGlassCAPolicyStatus  = 'Phase 2: oprettes disabled og tildeles direkte til de 2 konti'
         ConditionalAccessCount    = @($policies).Count
         PatchConditionalAccess    = [bool]$Config.PatchCAPolicies
         CAPoliciesToChange        = @($toPatch | Select-Object id,displayName,state)

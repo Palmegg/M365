@@ -31,6 +31,7 @@ function Update-NetIPUIState {
     $hasDiscovery = $null -ne $sync.State.Discovery
     $hasVisitedConfig = [bool]$sync.UI.ConfigVisited
     $hasPlan = $null -ne $sync.State.Plan
+    $hasPhase1 = $null -ne $sync.State.Phase1Result
     $hasHandoff = -not [string]::IsNullOrWhiteSpace([string]$sync.State.HandoffPath)
 
     $sync.WPFStepWelcome.IsEnabled = $true
@@ -39,6 +40,8 @@ function Update-NetIPUIState {
     $sync.WPFStepConfig.IsEnabled = $risk -and $hasGraph -and $hasDiscovery
     $sync.WPFStepPlan.IsEnabled = $risk -and $hasGraph -and $hasDiscovery -and $hasVisitedConfig
     $sync.WPFStepApply.IsEnabled = $risk -and $hasGraph -and $hasPlan
+    $sync.WPFStepManualFido.IsEnabled = $risk -and $hasPhase1
+    $sync.WPFStepPhase2.IsEnabled = $risk -and $hasGraph -and $hasPhase1
     $sync.WPFStepHandoff.IsEnabled = $risk -and $hasHandoff
 
     $stepMap = @{
@@ -48,6 +51,8 @@ function Update-NetIPUIState {
         Config = 'WPFStepConfig'
         Plan = 'WPFStepPlan'
         Apply = 'WPFStepApply'
+        ManualFido = 'WPFStepManualFido'
+        Phase2 = 'WPFStepPhase2'
         Handoff = 'WPFStepHandoff'
     }
     $activeBrush = $sync.Form.Resources['AccentSoft']
@@ -67,14 +72,16 @@ function Update-NetIPUIState {
         }
     }
 
-    $steps = @('Welcome','Connect','Discovery','Config','Plan','Apply','Handoff')
+    $steps = @('Welcome','Connect','Discovery','Config','Plan','Apply','ManualFido','Phase2','Handoff')
     $titles = @{
         Welcome = 'Velkommen'
         Connect = 'Forbind'
         Discovery = 'Discovery'
         Config = 'Konfiguration'
         Plan = 'Plan'
-        Apply = 'Udfør'
+        Apply = 'Phase 1a'
+        ManualFido = 'Manuel FIDO2'
+        Phase2 = 'Phase 2'
         Handoff = 'Handoff'
     }
     $current = [string]$sync.UI.CurrentStep

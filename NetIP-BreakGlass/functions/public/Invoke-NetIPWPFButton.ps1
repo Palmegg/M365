@@ -9,6 +9,8 @@ function Invoke-NetIPWPFButton {
         'WPFStepConfig' { Set-NetIPWPFStep -Step 'Config' }
         'WPFStepPlan' { Set-NetIPWPFStep -Step 'Plan' }
         'WPFStepApply' { Set-NetIPWPFStep -Step 'Apply' }
+        'WPFStepManualFido' { Set-NetIPWPFStep -Step 'ManualFido' }
+        'WPFStepPhase2' { Set-NetIPWPFStep -Step 'Phase2' }
         'WPFStepHandoff' { Set-NetIPWPFStep -Step 'Handoff' }
         'WPFBackStep' { Move-NetIPWPFStep -Direction -1 }
         'WPFNextStep' { Move-NetIPWPFStep -Direction 1 }
@@ -16,6 +18,7 @@ function Invoke-NetIPWPFButton {
         'WPFRunDiscovery' { Invoke-NetIPDiscovery }
         'WPFBuildPlan' { Invoke-NetIPBuildPlan }
         'WPFApplyConfiguration' { Invoke-NetIPApplyConfiguration }
+        'WPFApplyPhase2' { Invoke-NetIPApplyPhase2 }
         'WPFCycleNeutralNames' { Set-NetIPNeutralAccountNamePair }
         'WPFFetchAAGUIDs' { Invoke-NetIPFetchAAGUIDs }
         'WPFOpenOutputFolder' { Invoke-NetIPOpenOutputFolder }
@@ -33,7 +36,7 @@ function Set-NetIPWPFStep {
         $sync.UI.ConfigVisited = $true
     }
 
-    foreach ($page in @('WPFPageWelcome','WPFPageConnect','WPFPageDiscovery','WPFPageConfig','WPFPagePlan','WPFPageApply','WPFPageHandoff')) {
+    foreach ($page in @('WPFPageWelcome','WPFPageConnect','WPFPageDiscovery','WPFPageConfig','WPFPagePlan','WPFPageApply','WPFPageManualFido','WPFPagePhase2','WPFPageHandoff')) {
         $sync[$page].Visibility = 'Collapsed'
     }
     $target = switch ($Step) {
@@ -43,6 +46,8 @@ function Set-NetIPWPFStep {
         'Config' { 'WPFPageConfig' }
         'Plan' { 'WPFPagePlan' }
         'Apply' { 'WPFPageApply' }
+        'ManualFido' { 'WPFPageManualFido' }
+        'Phase2' { 'WPFPagePhase2' }
         'Handoff' { 'WPFPageHandoff' }
     }
     $sync[$target].Visibility = 'Visible'
@@ -53,7 +58,7 @@ function Move-NetIPWPFStep {
     [CmdletBinding()]
     param([Parameter(Mandatory)][int] $Direction)
 
-    $steps = @('Welcome','Connect','Discovery','Config','Plan','Apply','Handoff')
+    $steps = @('Welcome','Connect','Discovery','Config','Plan','Apply','ManualFido','Phase2','Handoff')
     $current = [string]$sync.UI.CurrentStep
     $index = [array]::IndexOf($steps, $current)
     if ($index -lt 0) { $index = 0 }
@@ -69,6 +74,8 @@ function Move-NetIPWPFStep {
         Config = 'WPFStepConfig'
         Plan = 'WPFStepPlan'
         Apply = 'WPFStepApply'
+        ManualFido = 'WPFStepManualFido'
+        Phase2 = 'WPFStepPhase2'
         Handoff = 'WPFStepHandoff'
     }
     $targetButtonName = [string]$buttonMap[$targetStep]

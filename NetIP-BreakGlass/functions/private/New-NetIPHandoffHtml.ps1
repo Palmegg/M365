@@ -36,12 +36,21 @@ function New-NetIPHandoffHtml {
     $adminSSPR = Get-NetIPObjectPropertyValue -InputObject $Result -Name 'AdminSSPR'
     $authenticationStrength = Get-NetIPObjectPropertyValue -InputObject $Result -Name 'AuthenticationStrength'
     $breakGlassCAPolicy = Get-NetIPObjectPropertyValue -InputObject $Result -Name 'BreakGlassCAPolicy'
+    $temporaryAccessPasses = @(Get-NetIPObjectPropertyValue -InputObject $Result -Name 'SensitiveTemporaryAccessPasses')
+    $tapSummary = @(Get-NetIPObjectPropertyValue -InputObject $Result -Name 'TemporaryAccessPassSummary')
+    $tapCleanup = @(Get-NetIPObjectPropertyValue -InputObject $Result -Name 'TAPCleanup')
+    $fidoMethods = @(Get-NetIPObjectPropertyValue -InputObject $Result -Name 'Fido2Methods')
+    $extractedAAGUIDs = @(Get-NetIPObjectPropertyValue -InputObject $Result -Name 'ExtractedAAGUIDs')
     $resultWarnings = @(Get-NetIPObjectPropertyValue -InputObject $Result -Name 'Warnings')
     $changedTable = Rows $changed
     $alreadyTable = Rows $already
     $failedTable = Rows $failed
     $membershipTable = Rows $memberships
     $roleAssignmentTable = Rows $roleAssignments
+    $temporaryAccessPassTable = Rows $temporaryAccessPasses
+    $tapSummaryTable = Rows $tapSummary
+    $tapCleanupTable = Rows $tapCleanup
+    $fidoMethodsTable = Rows $fidoMethods
     $warnings = if ($resultWarnings.Count -gt 0) { '<ul>' + (($resultWarnings | ForEach-Object { '<li>{0}</li>' -f (ConvertTo-NetIPHtmlValue $_) }) -join '') + '</ul>' } else { '<p>Ingen.</p>' }
     $html = @"
 <!doctype html>
@@ -61,7 +70,7 @@ function New-NetIPHandoffHtml {
 <body>
   <div class="banner">CONFIDENTIAL - HANDOFF</div>
   <h1>Entra Break Glass handoff</h1>
-  <p>Dette dokument indeholder ikke adgangskoder, tokens eller secrets.</p>
+  <p>Dette dokument er CONFIDENTIAL. Hvis Temporary Access Pass-koder fremgår, skal de flyttes til godkendt password manager eller fysisk nødprocedure og derefter fjernes fra lokale filer.</p>
   <h2>Tenant</h2>
   <table>
     <tr><th>Tenant navn</th><td>$(ConvertTo-NetIPHtmlValue (Get-NetIPObjectPropertyValue -InputObject $Result -Name 'TenantDisplayName'))</td></tr>
@@ -75,10 +84,20 @@ function New-NetIPHandoffHtml {
     <tr><th>Konto 1 display name</th><td>$(ConvertTo-NetIPHtmlValue (Get-NetIPObjectPropertyValue -InputObject $account1 -Name 'DisplayName'))</td></tr>
     <tr><th>Konto 1 UPN</th><td>$(ConvertTo-NetIPHtmlValue (Get-NetIPObjectPropertyValue -InputObject $account1 -Name 'UserPrincipalName'))</td></tr>
     <tr><th>Konto 1 status</th><td>$(ConvertTo-NetIPHtmlValue (Get-NetIPObjectPropertyValue -InputObject $account1 -Name 'Status'))</td></tr>
+    <tr><th>Konto 1 enabled</th><td>$(ConvertTo-NetIPHtmlValue (Get-NetIPObjectPropertyValue -InputObject $account1 -Name 'AccountEnabled'))</td></tr>
     <tr><th>Konto 2 display name</th><td>$(ConvertTo-NetIPHtmlValue (Get-NetIPObjectPropertyValue -InputObject $account2 -Name 'DisplayName'))</td></tr>
     <tr><th>Konto 2 UPN</th><td>$(ConvertTo-NetIPHtmlValue (Get-NetIPObjectPropertyValue -InputObject $account2 -Name 'UserPrincipalName'))</td></tr>
     <tr><th>Konto 2 status</th><td>$(ConvertTo-NetIPHtmlValue (Get-NetIPObjectPropertyValue -InputObject $account2 -Name 'Status'))</td></tr>
+    <tr><th>Konto 2 enabled</th><td>$(ConvertTo-NetIPHtmlValue (Get-NetIPObjectPropertyValue -InputObject $account2 -Name 'AccountEnabled'))</td></tr>
   </table>
+  <h2>Temporary Access Pass</h2>
+  <p>TAP oprettes i Phase 1 som one-time use med 2 timers varighed. Koderne må kun bruges til manuel FIDO2 bootstrap og skal fjernes efter Phase 2, hvis kunden vælger det.</p>
+  <h3>TAP-koder fra Phase 1</h3>
+  $temporaryAccessPassTable
+  <h3>TAP status</h3>
+  $tapSummaryTable
+  <h3>TAP cleanup i Phase 2</h3>
+  $tapCleanupTable
   <h2>Security group</h2>
   <table>
     <tr><th>Navn</th><td>$(ConvertTo-NetIPHtmlValue (Get-NetIPObjectPropertyValue -InputObject $group -Name 'DisplayName'))</td></tr>
@@ -105,7 +124,10 @@ function New-NetIPHandoffHtml {
     <tr><th>Object ID</th><td>$(ConvertTo-NetIPHtmlValue (Get-NetIPObjectPropertyValue -InputObject $authenticationStrength -Name 'id'))</td></tr>
     <tr><th>Status</th><td>$(ConvertTo-NetIPHtmlValue (Get-NetIPObjectPropertyValue -InputObject $authenticationStrength -Name 'Status'))</td></tr>
     <tr><th>Tilladte AAGUIDs</th><td>$(ConvertTo-NetIPHtmlValue (@(Get-NetIPObjectPropertyValue -InputObject $authenticationStrength -Name 'allowedAAGUIDs') -join ', '))</td></tr>
+    <tr><th>Extracted AAGUIDs</th><td>$(ConvertTo-NetIPHtmlValue ($extractedAAGUIDs -join ', '))</td></tr>
   </table>
+  <h3>FIDO2 methods fundet på break-glass konti</h3>
+  $fidoMethodsTable
   <h3>Dedikeret BreakGlass FIDO2 CA-policy</h3>
   <table>
     <tr><th>Navn</th><td>$(ConvertTo-NetIPHtmlValue (Get-NetIPObjectPropertyValue -InputObject $breakGlassCAPolicy -Name 'displayName'))</td></tr>
@@ -129,12 +151,12 @@ function New-NetIPHandoffHtml {
   $warnings
   <h2>Manuelle næste steps</h2>
   <ol>
-    <li>Gem de genererede adgangskoder sikkert efter intern/kundeprocedure.</li>
-    <li>Konfigurer MFA/FIDO2/passkey manuelt, hvis det indgår i kundens standard.</li>
+    <li>Gem de genererede adgangskoder/TAP-koder sikkert efter intern/kundeprocedure og fjern lokale kopier efter handoff.</li>
+    <li>Registrer to separate FIDO2 security keys pr. break-glass konto.</li>
     <li>Verificér at begge break-glass konti har direkte Global Administrator rolle.</li>
     <li>Hvis administrator-SSPR blev deaktiveret, vent op til 60 minutter og test derefter FIDO2/TAP onboarding igen.</li>
     <li>Verificér at begge break-glass konti kan logge ind.</li>
-    <li>Hvis den dedikerede BreakGlass FIDO2 CA-policy er report-only, valider sign-in logs før den sættes til enabled.</li>
+    <li>Den dedikerede BreakGlass FIDO2 CA-policy oprettes som disabled. Valider sign-in logs og authentication strength før den sættes til enabled.</li>
     <li>Verificér at kontiene er medlem af CA-BreakGlass-Exclude.</li>
     <li>Verificér at gruppen er ekskluderet fra de ønskede Conditional Access-politikker, hvis funktionen blev valgt.</li>
     <li>Dokumentér hvor credentials opbevares.</li>

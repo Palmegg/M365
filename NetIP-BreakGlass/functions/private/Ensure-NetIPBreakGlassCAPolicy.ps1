@@ -2,16 +2,18 @@ function Ensure-NetIPBreakGlassCAPolicy {
     [CmdletBinding()]
     param(
         [Parameter(Mandatory)][string] $DisplayName,
-        [Parameter(Mandatory)][string] $GroupId,
+        [string] $GroupId = '',
+        [string[]] $UserIds = @(),
         [Parameter(Mandatory)][string] $AuthenticationStrengthId,
-        [Parameter(Mandatory)][bool] $Enabled,
+        [bool] $Enabled = $false,
         [Parameter(Mandatory)][bool] $Apply
     )
 
-    if ([string]::IsNullOrWhiteSpace($GroupId)) { throw 'CA-BreakGlass-Exclude gruppen skal have et Object ID før CA-politikken kan oprettes.' }
+    $targetUsers = @($UserIds | Where-Object { -not [string]::IsNullOrWhiteSpace([string]$_) })
+    if ($targetUsers.Count -lt 1 -and [string]::IsNullOrWhiteSpace($GroupId)) { throw 'Der skal angives mindst én break-glass konto eller gruppe før CA-politikken kan oprettes.' }
     if ([string]::IsNullOrWhiteSpace($AuthenticationStrengthId)) { throw 'Authentication strength skal have et Object ID før CA-politikken kan oprettes.' }
 
-    $state = if ($Enabled) { 'enabled' } else { 'enabledForReportingButNotEnforced' }
+    $state = if ($Enabled) { 'enabled' } else { 'disabled' }
     if (-not $Apply -or $sync.App.Mock) {
         return [pscustomobject]@{ id='planned-ca-policy'; displayName=$DisplayName; state=$state; Status=if($Apply){'Created'}else{'PlannedCreate'} }
     }
@@ -28,7 +30,8 @@ function Ensure-NetIPBreakGlassCAPolicy {
         state = $state
         conditions = @{
             users = @{
-                includeGroups = @($GroupId)
+                includeUsers = if ($targetUsers.Count -gt 0) { $targetUsers } else { @() }
+                includeGroups = if ($targetUsers.Count -lt 1 -and -not [string]::IsNullOrWhiteSpace($GroupId)) { @($GroupId) } else { @() }
                 excludeUsers = @()
                 excludeGroups = @()
             }

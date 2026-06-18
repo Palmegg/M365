@@ -16,6 +16,10 @@ function Write-NetIPLog {
         $appendLog = {
             $sync.WPFExecutionLog.AppendText($message + [Environment]::NewLine)
             $sync.WPFExecutionLog.ScrollToEnd()
+            if ($sync.WPFPhase2Log) {
+                $sync.WPFPhase2Log.AppendText($message + [Environment]::NewLine)
+                $sync.WPFPhase2Log.ScrollToEnd()
+            }
         }
         $message = $line
         if ($sync.WPFExecutionLog.Dispatcher.CheckAccess()) {
