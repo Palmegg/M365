@@ -2822,6 +2822,7 @@ function Invoke-EbgConnectTenant {
         [System.Windows.Forms.Application]::DoEvents()
 
         Write-EbgStatus -Busy -Message 'Åbner frisk Microsoft Graph-login. Vælg tenant-konto i Microsoft loginvinduet...'
+        Write-Host 'Når login er gennemført, fokuserer BreakGlassConfigurator automatisk igen.' -ForegroundColor Green
         [System.Windows.Forms.Application]::DoEvents()
 
         if ($sync.Form) {
@@ -2845,6 +2846,7 @@ function Invoke-EbgConnectTenant {
         $sync.State.GraphScopes = @($context.Scopes)
         Get-EbgTenantInfo | Out-Null
         Write-EbgStatus -Message 'Microsoft Graph er forbundet.'
+        Write-Host 'Login OK. BreakGlassConfigurator fokuseres nu automatisk.' -ForegroundColor Green
         Update-EbgUIState | Out-Null
         Set-EbgMainWindowForeground
     }
@@ -3255,7 +3257,7 @@ function Stop-EbgCurrentTask {
 $sync.configs.appsettings = @'
 {
   "name": "Entra Break Glass Configurator",
-  "version": "2.4.14",
+  "version": "2.4.15",
   "outputRoot": ".\\Output",
   "groupName": "CA-BreakGlass-Exclude",
   "groupDescription": "Security group used to exclude dedicated break-glass accounts from existing Conditional Access policies.",

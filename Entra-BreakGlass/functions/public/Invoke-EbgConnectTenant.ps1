@@ -49,6 +49,7 @@ function Invoke-EbgConnectTenant {
         [System.Windows.Forms.Application]::DoEvents()
 
         Write-EbgStatus -Busy -Message 'Åbner frisk Microsoft Graph-login. Vælg tenant-konto i Microsoft loginvinduet...'
+        Write-Host 'Når login er gennemført, fokuserer BreakGlassConfigurator automatisk igen.' -ForegroundColor Green
         [System.Windows.Forms.Application]::DoEvents()
 
         if ($sync.Form) {
@@ -72,6 +73,7 @@ function Invoke-EbgConnectTenant {
         $sync.State.GraphScopes = @($context.Scopes)
         Get-EbgTenantInfo | Out-Null
         Write-EbgStatus -Message 'Microsoft Graph er forbundet.'
+        Write-Host 'Login OK. BreakGlassConfigurator fokuseres nu automatisk.' -ForegroundColor Green
         Update-EbgUIState | Out-Null
         Set-EbgMainWindowForeground
     }
