@@ -2,27 +2,30 @@ function Invoke-EbgConnectTenant {
     [CmdletBinding()]
     param()
 
-    Invoke-EbgRunspace -ScriptBlock {
+    if ($sync.UI.ProcessRunning) {
+        [System.Windows.MessageBox]::Show('Der kører allerede en opgave. Vent til den er færdig.', $sync.App.Name, 'OK', 'Information') | Out-Null
+        return
+    }
+
+    $sync.UI.ProcessRunning = $true
+    if ($sync.WPFConnectTenant) { $sync.WPFConnectTenant.IsEnabled = $false }
+
+    try {
         if ($sync.App.Mock) {
             $sync.State.GraphConnected = $true
             $sync.State.GraphAccount = 'mock.consultant@contoso.onmicrosoft.com'
             Get-EbgTenantInfo | Out-Null
             Write-EbgStatus -Message 'Mock tenant er forbundet.'
-            [void]$sync.Form.Dispatcher.Invoke([System.Action]{
-                Update-EbgUIState | Out-Null
-                if ($sync.WPFGraphStatus) { $sync.WPFGraphStatus.Text = if ([string]$sync.State.Language -eq 'en-US') { 'Yes' } else { 'Ja' } }
-                if ($sync.WPFStepDiscovery) { $sync.WPFStepDiscovery.IsEnabled = $true }
-                if ($sync.WPFNextStep -and [string]$sync.UI.CurrentStep -eq 'Connect') { $sync.WPFNextStep.IsEnabled = $true }
-            })
+            Update-EbgUIState | Out-Null
             return
         }
 
         Write-EbgStatus -Busy -Message 'Forbinder til Microsoft Graph...'
+        [System.Windows.Forms.Application]::DoEvents()
+
         $module = Get-Module -ListAvailable -Name Microsoft.Graph.Authentication | Select-Object -First 1
         if (-not $module) {
-            $install = $sync.Form.Dispatcher.Invoke([func[object]]{
-                [System.Windows.MessageBox]::Show('Microsoft.Graph.Authentication mangler. Vil du installere modulet for CurrentUser fra PSGallery?', $sync.App.Name, 'YesNo', 'Question')
-            })
+            $install = [System.Windows.MessageBox]::Show('Microsoft.Graph.Authentication mangler. Vil du installere modulet for CurrentUser fra PSGallery?', $sync.App.Name, 'YesNo', 'Question')
             if ($install -ne 'Yes') {
                 throw 'Microsoft Graph modulet mangler, og installation blev ikke godkendt.'
             }
@@ -41,9 +44,12 @@ function Invoke-EbgConnectTenant {
         $sync.State.TenantDisplayName = ''
         $sync.State.OnMicrosoftDomain = ''
         $sync.State.GraphScopes = @()
-        [void]$sync.Form.Dispatcher.Invoke([System.Action]{ Update-EbgUIState | Out-Null })
+        Update-EbgUIState | Out-Null
+        [System.Windows.Forms.Application]::DoEvents()
 
         Write-EbgStatus -Busy -Message 'Åbner Microsoft Graph-login. Vælg tenant-konto i Microsoft loginvinduet...'
+        [System.Windows.Forms.Application]::DoEvents()
+
         Connect-MgGraph -Scopes $scopes -ContextScope Process -NoWelcome -ErrorAction Stop | Out-Null
 
         $context = Get-MgContext -ErrorAction Stop
@@ -56,17 +62,18 @@ function Invoke-EbgConnectTenant {
         $sync.State.GraphScopes = @($context.Scopes)
         Get-EbgTenantInfo | Out-Null
         Write-EbgStatus -Message 'Microsoft Graph er forbundet.'
-
-        $isEnglish = ([string]$sync.State.Language -eq 'en-US')
-        [void]$sync.Form.Dispatcher.Invoke([System.Action]{
-            Update-EbgUIState | Out-Null
-            if ($sync.WPFGraphStatus) { $sync.WPFGraphStatus.Text = if ($isEnglish) { 'Yes' } else { 'Ja' } }
-            if ($sync.WPFGraphAccount) { $sync.WPFGraphAccount.Text = [string]$sync.State.GraphAccount }
-            if ($sync.WPFTenantId) { $sync.WPFTenantId.Text = [string]$sync.State.TenantId }
-            if ($sync.WPFTenantName) { $sync.WPFTenantName.Text = [string]$sync.State.TenantDisplayName }
-            if ($sync.WPFOnMicrosoftDomain) { $sync.WPFOnMicrosoftDomain.Text = [string]$sync.State.OnMicrosoftDomain }
-            if ($sync.WPFStepDiscovery) { $sync.WPFStepDiscovery.IsEnabled = $true }
-            if ($sync.WPFNextStep -and [string]$sync.UI.CurrentStep -eq 'Connect') { $sync.WPFNextStep.IsEnabled = $true }
-        })
+        Update-EbgUIState | Out-Null
+    }
+    catch {
+        $message = ConvertTo-EbgRedactedError -ErrorRecord $_
+        Write-EbgLog -Level ERROR -Message $message
+        Write-EbgStatus -Message 'Microsoft Graph login fejlede.'
+        [System.Windows.MessageBox]::Show($message, $sync.App.Name, 'OK', 'Error') | Out-Null
+    }
+    finally {
+        $sync.UI.ProcessRunning = $false
+        if ($sync.WPFProgressBar) { $sync.WPFProgressBar.IsIndeterminate = $false }
+        if ($sync.WPFConnectTenant) { $sync.WPFConnectTenant.IsEnabled = $true }
+        Update-EbgUIState | Out-Null
     }
 }
