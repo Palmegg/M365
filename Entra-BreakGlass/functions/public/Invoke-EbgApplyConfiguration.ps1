@@ -51,6 +51,15 @@ Vil du fortsætte?
         Ensure-EbgGraphContext
         [System.Windows.Forms.Application]::DoEvents()
 
+        Write-EbgStatus -Busy -Message 'Phase 1a pre-check: kontrollerer TAP-rettigheder...'
+        [System.Windows.Forms.Application]::DoEvents()
+        $tapPrerequisite = Test-EbgTemporaryAccessPassPrerequisite
+        if (-not [bool](Get-EbgObjectPropertyValue -InputObject $tapPrerequisite -Name 'Allowed')) {
+            $account = [string](Get-EbgObjectPropertyValue -InputObject $tapPrerequisite -Name 'Account')
+            $roles = @((Get-EbgObjectPropertyValue -InputObject $tapPrerequisite -Name 'RequiredRoles')) -join ' eller '
+            throw "Phase 1a stoppet før ændringer: $account mangler Entra rollen $roles. Microsoft Graph kræver en af disse roller for at oprette Temporary Access Pass på andre brugere. Tildel rollen, log ud/ind i konfiguratoren, og kør Phase 1a igen."
+        }
+
         Write-EbgLog -Message 'Phase 1a step 1/10: Henter tenant og klargør outputmappe...'
         Write-EbgStatus -Busy -Message 'Phase 1a step 1/10: henter tenant og klargør outputmappe...'
         [System.Windows.Forms.Application]::DoEvents()

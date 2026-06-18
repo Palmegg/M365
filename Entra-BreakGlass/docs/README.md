@@ -83,9 +83,9 @@ Admin consent kan være nødvendig i kundens tenant.
 
 ## Krævede roller
 
-Den indloggede konto skal have rettigheder til at oprette brugere/grupper, tildele directory roles, oprette Temporary Access Pass, læse FIDO2 authentication methods, læse/opdatere authentication strengths, læse/opdatere authorization policy hvis Admin SSPR deaktiveres og, hvis CA vælges, læse og opdatere Conditional Access-politikker. Typisk kræves Global Administrator eller en kombination med Privileged Role Administrator, Authentication Administrator, Security Administrator, User Administrator, Groups Administrator og Conditional Access Administrator.
+Den indloggede konto skal have rettigheder til at oprette brugere/grupper, tildele directory roles, oprette Temporary Access Pass, læse FIDO2 authentication methods, læse/opdatere authentication strengths, læse/opdatere authorization policy hvis Admin SSPR deaktiveres og, hvis CA vælges, læse og opdatere Conditional Access-politikker.
 
-Hvis target-kontiene allerede har en privilegeret administratorrolle, kan oprettelse af Temporary Access Pass kræve Privileged Authentication Administrator. Nye Phase 1a-runs opretter derfor TAP før Global Administrator rollen tildeles.
+Microsoft Graph kræver `Authentication Administrator` eller `Privileged Authentication Administrator` for at oprette Temporary Access Pass på andre brugere. Hvis target-kontiene allerede har en privilegeret administratorrolle, skal operatoren typisk bruge `Privileged Authentication Administrator`. Phase 1a pre-checker dette før ændringer. Nye Phase 1a-runs opretter TAP før Global Administrator rollen tildeles.
 
 ## Password og TAP-håndtering
 

@@ -1366,7 +1366,7 @@ function New-EbgTemporaryAccessPass {
     catch {
         $message = ConvertTo-EbgRedactedError -ErrorRecord $_
         if ($message -match '403 Forbidden|accessDenied|Request Authorization failed') {
-            throw "Kunne ikke oprette Temporary Access Pass for $upn. Microsoft Graph afviste requesten med 403/accessDenied. Hvis kontoen allerede har en privilegeret administratorrolle, kræver TAP-oprettelse typisk Privileged Authentication Administrator. Kør med en konto der har den rolle, eller fjern midlertidigt Global Administrator fra target-kontoen og kør Phase 1a igen. Nye runs opretter TAP før Global Administrator rollen tildeles."
+            throw "Kunne ikke oprette Temporary Access Pass for $upn. Microsoft Graph afviste requesten med 403/accessDenied. For delegated Graph kræver TAP-oprettelse på andre brugere rollen Authentication Administrator eller Privileged Authentication Administrator. Hvis target-kontoen allerede har en privilegeret administratorrolle, brug Privileged Authentication Administrator eller fjern midlertidigt rollen fra target-kontoen og kør igen."
         }
         throw
     }
@@ -1734,6 +1734,78 @@ function Test-EbgGraphConnection {
         return $false
     }
 }
+function Test-EbgTemporaryAccessPassPrerequisite {
+    [CmdletBinding()]
+    param()
+
+    $requiredRoleNames = @('Authentication Administrator', 'Privileged Authentication Administrator')
+    if ($sync.App.Mock) {
+        return [pscustomobject]@{
+            Allowed = $true
+            Account = [string]$sync.State.GraphAccount
+            MatchedRoles = @('Mock Authentication Administrator')
+            RequiredRoles = $requiredRoleNames
+            Detail = 'Mock mode.'
+        }
+    }
+
+    Write-EbgLog -Message 'Pre-check: kontrollerer om operator kan oprette Temporary Access Pass...'
+    $me = Invoke-EbgGraphRequest -Method GET -Uri 'https://graph.microsoft.com/v1.0/me?$select=id,displayName,userPrincipalName'
+    $operatorId = [string](Get-EbgObjectPropertyValue -InputObject $me -Name 'id')
+    $operatorUpn = [string](Get-EbgObjectPropertyValue -InputObject $me -Name 'userPrincipalName')
+    if ([string]::IsNullOrWhiteSpace($operatorId)) {
+        throw 'Kunne ikke læse object ID for den indloggede Graph-konto.'
+    }
+
+    $memberGroupIds = @()
+    try {
+        $groups = @(Get-EbgGraphCollection -Uri 'https://graph.microsoft.com/v1.0/me/transitiveMemberOf/microsoft.graph.group?$select=id,displayName')
+        $memberGroupIds = @($groups | ForEach-Object { [string](Get-EbgObjectPropertyValue -InputObject $_ -Name 'id') } | Where-Object { $_ })
+    }
+    catch {
+        Write-EbgLog -Level WARN -Message 'Kunne ikke læse operatorens transitive gruppemedlemskaber til TAP role pre-check. Fortsætter med direkte rollecheck.'
+    }
+
+    $matchedRoles = @()
+    foreach ($roleName in $requiredRoleNames) {
+        $filter = [uri]::EscapeDataString("displayName eq '$roleName'")
+        $roleDefinitions = @(Get-EbgGraphCollection -Uri "https://graph.microsoft.com/v1.0/roleManagement/directory/roleDefinitions?`$filter=$filter&`$select=id,displayName")
+        $roleDefinition = $roleDefinitions | Select-Object -First 1
+        $roleDefinitionId = [string](Get-EbgObjectPropertyValue -InputObject $roleDefinition -Name 'id')
+        if ([string]::IsNullOrWhiteSpace($roleDefinitionId)) {
+            Write-EbgLog -Level WARN -Message "Kunne ikke finde role definition: $roleName"
+            continue
+        }
+
+        $assignmentFilter = [uri]::EscapeDataString("roleDefinitionId eq '$roleDefinitionId'")
+        $assignments = @(Get-EbgGraphCollection -Uri "https://graph.microsoft.com/v1.0/roleManagement/directory/roleAssignments?`$filter=$assignmentFilter&`$select=id,principalId,roleDefinitionId,directoryScopeId")
+        foreach ($assignment in $assignments) {
+            $principalId = [string](Get-EbgObjectPropertyValue -InputObject $assignment -Name 'principalId')
+            if ($principalId -eq $operatorId -or ($memberGroupIds -contains $principalId)) {
+                $matchedRoles += $roleName
+                break
+            }
+        }
+    }
+
+    $matchedRoles = @($matchedRoles | Select-Object -Unique)
+    $allowed = $matchedRoles.Count -gt 0
+    if ($allowed) {
+        Write-EbgLog -Level PASS -Message "TAP pre-check OK: $operatorUpn har $($matchedRoles -join ', ')."
+    }
+    else {
+        Write-EbgLog -Level WARN -Message "TAP pre-check fejlede: $operatorUpn har ikke Authentication Administrator eller Privileged Authentication Administrator."
+    }
+
+    return [pscustomobject]@{
+        Allowed = $allowed
+        Account = $operatorUpn
+        MatchedRoles = $matchedRoles
+        RequiredRoles = $requiredRoleNames
+        Detail = if ($allowed) { 'OK' } else { 'Temporary Access Pass kræver Authentication Administrator eller Privileged Authentication Administrator for delegated Graph.' }
+    }
+}
+
 function Update-EbgUIState {
     [CmdletBinding()]
     param()
@@ -2125,6 +2197,15 @@ Vil du fortsætte?
 
         Ensure-EbgGraphContext
         [System.Windows.Forms.Application]::DoEvents()
+
+        Write-EbgStatus -Busy -Message 'Phase 1a pre-check: kontrollerer TAP-rettigheder...'
+        [System.Windows.Forms.Application]::DoEvents()
+        $tapPrerequisite = Test-EbgTemporaryAccessPassPrerequisite
+        if (-not [bool](Get-EbgObjectPropertyValue -InputObject $tapPrerequisite -Name 'Allowed')) {
+            $account = [string](Get-EbgObjectPropertyValue -InputObject $tapPrerequisite -Name 'Account')
+            $roles = @((Get-EbgObjectPropertyValue -InputObject $tapPrerequisite -Name 'RequiredRoles')) -join ' eller '
+            throw "Phase 1a stoppet før ændringer: $account mangler Entra rollen $roles. Microsoft Graph kræver en af disse roller for at oprette Temporary Access Pass på andre brugere. Tildel rollen, log ud/ind i konfiguratoren, og kør Phase 1a igen."
+        }
 
         Write-EbgLog -Message 'Phase 1a step 1/10: Henter tenant og klargør outputmappe...'
         Write-EbgStatus -Busy -Message 'Phase 1a step 1/10: henter tenant og klargør outputmappe...'
@@ -3004,7 +3085,7 @@ function Stop-EbgCurrentTask {
 $sync.configs.appsettings = @'
 {
   "name": "Entra Break Glass Configurator",
-  "version": "2.4.7",
+  "version": "2.4.8",
   "outputRoot": ".\\Output",
   "groupName": "CA-BreakGlass-Exclude",
   "groupDescription": "Security group used to exclude dedicated break-glass accounts from existing Conditional Access policies.",
