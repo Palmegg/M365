@@ -293,4 +293,17 @@ function Update-EbgUIState {
     if ($sync.WPFFetchAAGUIDs) {
         $sync.WPFFetchAAGUIDs.IsEnabled = (-not [bool]$sync.UI.ProcessRunning) -and $hasGraph
     }
+    if ($sync.WPFPhase2ActionHint) {
+        $hasAAGUIDs = $false
+        if ($sync.WPFAAGUIDs) {
+            $hasAAGUIDs = @(ConvertFrom-EbgAAGUIDText -Text $sync.WPFAAGUIDs.Text).Count -gt 0
+        }
+        $sync.WPFPhase2ActionHint.Text = if ($hasAAGUIDs) {
+            "AAGUID er klar. Tryk 'Kør Phase 2'. Først derefter kan du gå videre til Handoff."
+        }
+        else {
+            "Hent AAGUID fra en konto med registreret FIDO2/passkey, og tryk derefter 'Kør Phase 2'."
+        }
+        $sync.WPFPhase2ActionHint.Foreground = if ($hasAAGUIDs) { [System.Windows.Media.Brushes]::LightGreen } else { $sync.Form.Resources['TextSecondary'] }
+    }
 }

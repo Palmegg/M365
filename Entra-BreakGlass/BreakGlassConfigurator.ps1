@@ -2834,6 +2834,19 @@ function Update-EbgUIState {
     if ($sync.WPFFetchAAGUIDs) {
         $sync.WPFFetchAAGUIDs.IsEnabled = (-not [bool]$sync.UI.ProcessRunning) -and $hasGraph
     }
+    if ($sync.WPFPhase2ActionHint) {
+        $hasAAGUIDs = $false
+        if ($sync.WPFAAGUIDs) {
+            $hasAAGUIDs = @(ConvertFrom-EbgAAGUIDText -Text $sync.WPFAAGUIDs.Text).Count -gt 0
+        }
+        $sync.WPFPhase2ActionHint.Text = if ($hasAAGUIDs) {
+            "AAGUID er klar. Tryk 'Kør Phase 2'. Først derefter kan du gå videre til Handoff."
+        }
+        else {
+            "Hent AAGUID fra en konto med registreret FIDO2/passkey, og tryk derefter 'Kør Phase 2'."
+        }
+        $sync.WPFPhase2ActionHint.Foreground = if ($hasAAGUIDs) { [System.Windows.Media.Brushes]::LightGreen } else { $sync.Form.Resources['TextSecondary'] }
+    }
 }
 
 function Update-EbgAAGUIDSourceOptions {
@@ -3932,7 +3945,8 @@ function Invoke-EbgFetchAAGUIDs {
         $existing = @(ConvertFrom-EbgAAGUIDText -Text $sync.WPFAAGUIDs.Text)
         $merged = @($existing + $aaGuids | Select-Object -Unique)
         $sync.WPFAAGUIDs.Text = ($merged -join [Environment]::NewLine)
-        Write-EbgStatus -Message "AAGUIDs hentet fra $sourceUpn."
+        $sync.State.AAGUIDsFetched = $true
+        Write-EbgStatus -Message "AAGUIDs hentet fra $sourceUpn. Tryk nu 'Kør Phase 2' for at oprette auth strength og disabled CA-policy."
         [System.Windows.MessageBox]::Show("AAGUIDs hentet fra ${sourceUpn}:`n`n$($aaGuids -join [Environment]::NewLine)", $sync.App.Name, 'OK', 'Information') | Out-Null
     }
     catch {
@@ -4166,7 +4180,7 @@ function Stop-EbgCurrentTask {
 $sync.configs.appsettings = @'
 {
   "name": "Entra Break Glass Configurator",
-  "version": "2.4.26",
+  "version": "2.4.27",
   "outputRoot": ".\\Output",
   "groupName": "CA-BreakGlass-Exclude",
   "groupDescription": "Security group used to exclude dedicated break-glass accounts from existing Conditional Access policies.",
@@ -4843,11 +4857,18 @@ $inputXML = @'
                 </Grid>
 
                 <Grid x:Name="WPFPagePhase2" Visibility="Collapsed">
-                    <DockPanel>
-                        <StackPanel DockPanel.Dock="Top">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="*"/>
+                        </Grid.RowDefinitions>
+                        <StackPanel Grid.Row="0">
                             <TextBlock Text="Phase 2 - FIDO2 og dedikeret CA-policy" FontSize="22" FontWeight="SemiBold" Margin="0,0,0,12"/>
                             <TextBlock Text="Dette trin refresher de to konti, læser de registrerede FIDO2/passkey security keys, udtrækker deres AAGUIDs, kan slette TAP, opretter/opdaterer BreakGlass-FIDO2 authentication strength og opretter den dedikerede CA-policy som disabled." TextWrapping="Wrap"/>
-                            <Border Margin="0,18,0,8" Padding="16" Background="{StaticResource PanelRaised}" BorderBrush="{StaticResource BorderSoft}" BorderThickness="1" CornerRadius="10">
+                        </StackPanel>
+                        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" Margin="0,14,0,0">
+                            <StackPanel>
+                            <Border Padding="14" Background="{StaticResource PanelRaised}" BorderBrush="{StaticResource BorderSoft}" BorderThickness="1" CornerRadius="10">
                                 <Grid>
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="160"/>
@@ -4870,14 +4891,15 @@ $inputXML = @'
                                     <TextBlock Grid.Row="2" Grid.Column="0" Text="Domain"/>
                                     <TextBox x:Name="WPFPhase2Domain" Grid.Row="2" Grid.Column="1" Grid.ColumnSpan="4" IsReadOnly="True"/>
                                     <TextBlock Grid.Row="3" Grid.Column="0" Text="Target UPN preview"/>
-                                    <TextBox x:Name="WPFPhase2UpnPreview" Grid.Row="3" Grid.Column="1" Grid.ColumnSpan="4" IsReadOnly="True" AcceptsReturn="True" Height="52" FontFamily="Consolas"/>
+                                    <TextBox x:Name="WPFPhase2UpnPreview" Grid.Row="3" Grid.Column="1" Grid.ColumnSpan="4" IsReadOnly="True" AcceptsReturn="True" Height="44" FontFamily="Consolas"/>
                                 </Grid>
                             </Border>
-                            <Grid Margin="0,18,0,8">
+                            <Border Margin="0,12,0,8" Padding="14" Background="{StaticResource PanelRaised}" BorderBrush="{StaticResource BorderSoft}" BorderThickness="1" CornerRadius="10">
+                            <Grid>
                                 <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="190"/>
+                                    <ColumnDefinition Width="170"/>
                                     <ColumnDefinition Width="*"/>
-                                    <ColumnDefinition Width="190"/>
+                                    <ColumnDefinition Width="170"/>
                                     <ColumnDefinition Width="*"/>
                                 </Grid.ColumnDefinitions>
                                 <Grid.RowDefinitions>
@@ -4903,14 +4925,16 @@ $inputXML = @'
                                 <TextBlock Grid.Row="2" Grid.Column="0" Text="Allowed key AAGUIDs"/>
                                 <StackPanel Grid.Row="2" Grid.Column="1" Grid.ColumnSpan="3">
                                     <TextBlock Text="One AAGUID per line. Click Fetch FIDO2 AAGUIDs after FIDO2 keys are registered on the selected account." Foreground="{StaticResource TextMuted}" Margin="0,0,0,4"/>
-                                    <TextBox x:Name="WPFAAGUIDs" AcceptsReturn="True" TextWrapping="NoWrap" Height="118" FontFamily="Consolas" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"/>
+                                    <TextBox x:Name="WPFAAGUIDs" AcceptsReturn="True" TextWrapping="NoWrap" Height="72" FontFamily="Consolas" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"/>
                                 </StackPanel>
-                                <TextBlock Grid.Row="3" Grid.Column="0" Grid.ColumnSpan="4" Foreground="#FBBF24" Text="Phase 2 bliver først tilgængelig efter Phase 1a og manuel FIDO2-registrering. CA-politikken oprettes som disabled."/>
+                                <TextBlock x:Name="WPFPhase2ActionHint" Grid.Row="3" Grid.Column="0" Grid.ColumnSpan="3" Foreground="#FBBF24" Text="Hent AAGUID fra en konto med registreret FIDO2/passkey, og tryk derefter 'Kør Phase 2'." TextWrapping="Wrap" Margin="0,12,12,0"/>
+                                <Button x:Name="WPFApplyPhase2" Grid.Row="3" Grid.Column="3" Content="Kør Phase 2" Width="160" HorizontalAlignment="Right" Margin="0,8,0,0"/>
                             </Grid>
-                            <Button x:Name="WPFApplyPhase2" Content="Kør Phase 2" Width="160" HorizontalAlignment="Left" Margin="0,14,0,8"/>
-                        </StackPanel>
-                        <TextBox x:Name="WPFPhase2Log" IsReadOnly="True" AcceptsReturn="True" MinHeight="150" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" FontFamily="Consolas"/>
-                    </DockPanel>
+                            </Border>
+                            <TextBox x:Name="WPFPhase2Log" IsReadOnly="True" AcceptsReturn="True" Height="92" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" FontFamily="Consolas"/>
+                            </StackPanel>
+                        </ScrollViewer>
+                    </Grid>
                 </Grid>
 
                 <Grid x:Name="WPFPageHandoff" Visibility="Collapsed">

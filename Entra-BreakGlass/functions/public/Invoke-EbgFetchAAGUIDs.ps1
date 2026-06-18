@@ -57,7 +57,8 @@ function Invoke-EbgFetchAAGUIDs {
         $existing = @(ConvertFrom-EbgAAGUIDText -Text $sync.WPFAAGUIDs.Text)
         $merged = @($existing + $aaGuids | Select-Object -Unique)
         $sync.WPFAAGUIDs.Text = ($merged -join [Environment]::NewLine)
-        Write-EbgStatus -Message "AAGUIDs hentet fra $sourceUpn."
+        $sync.State.AAGUIDsFetched = $true
+        Write-EbgStatus -Message "AAGUIDs hentet fra $sourceUpn. Tryk nu 'Kør Phase 2' for at oprette auth strength og disabled CA-policy."
         [System.Windows.MessageBox]::Show("AAGUIDs hentet fra ${sourceUpn}:`n`n$($aaGuids -join [Environment]::NewLine)", $sync.App.Name, 'OK', 'Information') | Out-Null
     }
     catch {
