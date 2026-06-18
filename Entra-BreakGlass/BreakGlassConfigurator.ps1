@@ -2318,9 +2318,13 @@ function Invoke-EbgConnectTenant {
             }
             Install-Module -Name Microsoft.Graph.Authentication -Scope CurrentUser -Repository PSGallery -Force -AllowClobber -ErrorAction Stop
         }
+
         Import-Module Microsoft.Graph.Authentication -ErrorAction Stop
         $scopes = @($sync.configs.graphScopes)
+
         try { Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null } catch {}
+        try { Set-MgGraphOption -DisableLoginByWAM $true -ErrorAction SilentlyContinue | Out-Null } catch {}
+
         $sync.State.GraphConnected = $false
         $sync.State.GraphAccount = ''
         $sync.State.TenantId = ''
@@ -2328,133 +2332,21 @@ function Invoke-EbgConnectTenant {
         $sync.State.OnMicrosoftDomain = ''
         $sync.State.GraphScopes = @()
         [void]$sync.Form.Dispatcher.Invoke([System.Action]{ Update-EbgUIState | Out-Null })
-        Write-EbgStatus -Busy -Message 'Åbner separat PowerShell-vindue til Microsoft Graph-login...'
 
-        $workerRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("EbgGraphLogin-{0}" -f ([guid]::NewGuid().ToString('N')))
-        New-Item -ItemType Directory -Path $workerRoot -Force | Out-Null
-        $disconnectScript = Join-Path $workerRoot 'Disconnect-MgGraph-Sessions.ps1'
-        $workerScript = Join-Path $workerRoot 'Connect-MgGraph-Login.ps1'
-        $resultPath = Join-Path $workerRoot 'result.json'
-        $scopeLiteral = (($scopes | ForEach-Object { "'$($_.Replace("'", "''"))'" }) -join ', ')
-        $workerCode = @"
-`$ErrorActionPreference = 'Stop'
-`$resultPath = '$($resultPath.Replace("'", "''"))'
-`$result = [ordered]@{
-    Success = `$false
-    Account = ''
-    TenantId = ''
-    Scopes = @()
-    Error = ''
-}
-try {
-    `$host.UI.RawUI.WindowTitle = 'Entra Break Glass Configurator - Microsoft Graph login'
-    Write-Host ''
-    Write-Host 'Entra Break Glass Configurator - Microsoft Graph login' -ForegroundColor Cyan
-    Write-Host 'Dette vindue bruges kun til Microsoft Graph login.' -ForegroundColor Cyan
-    Write-Host ''
-    Write-Host 'Log ind i Microsoft loginvinduet. Når login er gennemført, kan du lukke dette PowerShell-vindue for at fortsætte i WPF.' -ForegroundColor Yellow
-    Write-Host ''
-    Import-Module Microsoft.Graph.Authentication -ErrorAction Stop
-    Write-Host 'Rydder Graph PowerShell session/cache før login...' -ForegroundColor DarkYellow
-    `$identityServicePath = Join-Path `$env:LOCALAPPDATA '.IdentityService'
-    `$cacheBackupPath = Join-Path '$($workerRoot.Replace("'", "''"))' 'GraphTokenCacheBackup'
-    New-Item -ItemType Directory -Path `$cacheBackupPath -Force | Out-Null
-    if (Test-Path -LiteralPath `$identityServicePath) {
-        Get-ChildItem -LiteralPath `$identityServicePath -Filter 'mg.msal.cache*' -Force -ErrorAction SilentlyContinue | ForEach-Object {
-            try { Move-Item -LiteralPath `$_.FullName -Destination (Join-Path `$cacheBackupPath `$_.Name) -Force -ErrorAction Stop } catch {}
-        }
-    }
-    try { Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null } catch {}
-    try { Set-MgGraphOption -DisableLoginByWAM `$true -ErrorAction SilentlyContinue | Out-Null } catch {}
-    `$scopes = @($scopeLiteral)
-    Connect-MgGraph -Scopes `$scopes -ContextScope CurrentUser -NoWelcome -ErrorAction Stop | Out-Null
-    `$context = Get-MgContext -ErrorAction Stop
-    if (-not `$context -or [string]::IsNullOrWhiteSpace([string]`$context.Account)) {
-        throw 'Microsoft Graph login returnerede ingen aktiv konto.'
-    }
-    `$result.Success = `$true
-    `$result.Account = [string]`$context.Account
-    `$result.TenantId = [string]`$context.TenantId
-    `$result.Scopes = @(`$context.Scopes)
-    Write-Host ''
-    Write-Host "Login OK: `$(`$context.Account)" -ForegroundColor Green
-    Write-Host 'Luk dette PowerShell-vindue for at fortsætte i WPF.' -ForegroundColor Green
-}
-catch {
-    `$result.Error = [string]`$_.Exception.Message
-    Write-Host ''
-    Write-Host "Login fejlede: `$(`$_.Exception.Message)" -ForegroundColor Red
-    Write-Host 'Luk dette PowerShell-vindue for at vende tilbage til WPF.' -ForegroundColor Yellow
-}
-finally {
-    `$result | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath `$resultPath -Encoding UTF8
-    while (`$true) { Start-Sleep -Seconds 1 }
-}
-"@
-        Set-Content -LiteralPath $workerScript -Value $workerCode -Encoding UTF8
-        $disconnectCode = @"
-`$ErrorActionPreference = 'SilentlyContinue'
-Import-Module Microsoft.Graph.Authentication -ErrorAction SilentlyContinue
-try { Set-MgGraphOption -DisableLoginByWAM `$true -ErrorAction SilentlyContinue | Out-Null } catch {}
-try { Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null } catch {}
-`$identityServicePath = Join-Path `$env:LOCALAPPDATA '.IdentityService'
-`$cacheBackupPath = Join-Path '$($workerRoot.Replace("'", "''"))' 'GraphTokenCacheBackup'
-New-Item -ItemType Directory -Path `$cacheBackupPath -Force | Out-Null
-if (Test-Path -LiteralPath `$identityServicePath) {
-    Get-ChildItem -LiteralPath `$identityServicePath -Filter 'mg.msal.cache*' -Force -ErrorAction SilentlyContinue | ForEach-Object {
-        try { Move-Item -LiteralPath `$_.FullName -Destination (Join-Path `$cacheBackupPath `$_.Name) -Force -ErrorAction Stop } catch {}
-    }
-}
-"@
-        Set-Content -LiteralPath $disconnectScript -Value $disconnectCode -Encoding UTF8
-        $pwshPath = Join-Path $PSHOME 'pwsh.exe'
-        if (-not (Test-Path -LiteralPath $pwshPath)) {
-            $pwshPath = (Get-Command pwsh -ErrorAction Stop).Source
-        }
+        Write-EbgStatus -Busy -Message 'Åbner Microsoft Graph-login. Vælg tenant-konto i Microsoft loginvinduet...'
+        Connect-MgGraph -Scopes $scopes -ContextScope Process -NoWelcome -ErrorAction Stop | Out-Null
 
-        Write-EbgStatus -Busy -Message 'Rydder eksisterende Microsoft Graph sessioner før login...'
-        $disconnectProcess = Start-Process -FilePath $pwshPath -ArgumentList @(
-            '-NoProfile',
-            '-ExecutionPolicy',
-            'Bypass',
-            '-File',
-            $disconnectScript
-        ) -WindowStyle Hidden -PassThru
-        if (-not $disconnectProcess.WaitForExit(30000)) {
-            try { Stop-Process -Id $disconnectProcess.Id -Force -ErrorAction SilentlyContinue } catch {}
-            throw 'Kunne ikke rydde eksisterende Microsoft Graph sessioner inden for 30 sekunder.'
-        }
-
-        $process = Start-Process -FilePath $pwshPath -ArgumentList @(
-            '-NoProfile',
-            '-ExecutionPolicy',
-            'Bypass',
-            '-File',
-            $workerScript
-        ) -WindowStyle Normal -PassThru
-        Write-EbgStatus -Busy -Message 'Afventer Microsoft Graph-login. Luk login-PowerShell-vinduet når der står Login OK...'
-        while (-not $process.HasExited) {
-            Start-Sleep -Milliseconds 300
-        }
-        if (-not (Test-Path -LiteralPath $resultPath)) {
-            throw 'Login-vinduet blev lukket før Microsoft Graph returnerede et resultat.'
-        }
-        $workerResult = Get-Content -LiteralPath $resultPath -Raw | ConvertFrom-Json
-        if (-not [bool]$workerResult.Success) {
-            throw "Microsoft Graph login fejlede: $($workerResult.Error)"
-        }
-
-        try { Set-MgGraphOption -DisableLoginByWAM $true -ErrorAction SilentlyContinue | Out-Null } catch {}
-        Connect-MgGraph -ContextScope CurrentUser -NoWelcome -ErrorAction Stop | Out-Null
         $context = Get-MgContext -ErrorAction Stop
         if (-not $context -or [string]::IsNullOrWhiteSpace([string]$context.Account)) {
             throw 'Microsoft Graph login returnerede ingen aktiv konto.'
         }
+
         $sync.State.GraphConnected = $true
         $sync.State.GraphAccount = [string]$context.Account
         $sync.State.GraphScopes = @($context.Scopes)
         Get-EbgTenantInfo | Out-Null
         Write-EbgStatus -Message 'Microsoft Graph er forbundet.'
+
         $isEnglish = ([string]$sync.State.Language -eq 'en-US')
         [void]$sync.Form.Dispatcher.Invoke([System.Action]{
             Update-EbgUIState | Out-Null
@@ -2466,7 +2358,6 @@ if (Test-Path -LiteralPath `$identityServicePath) {
             if ($sync.WPFStepDiscovery) { $sync.WPFStepDiscovery.IsEnabled = $true }
             if ($sync.WPFNextStep -and [string]$sync.UI.CurrentStep -eq 'Connect') { $sync.WPFNextStep.IsEnabled = $true }
         })
-        Remove-Item -LiteralPath $workerRoot -Recurse -Force -ErrorAction SilentlyContinue
     }
 }
 
@@ -2754,7 +2645,7 @@ function Move-EbgWPFStep {
 $sync.configs.appsettings = @'
 {
   "name": "Entra Break Glass Configurator",
-  "version": "2.3.1",
+  "version": "2.3.3",
   "outputRoot": ".\\Output",
   "groupName": "CA-BreakGlass-Exclude",
   "groupDescription": "Security group used to exclude dedicated break-glass accounts from existing Conditional Access policies.",
