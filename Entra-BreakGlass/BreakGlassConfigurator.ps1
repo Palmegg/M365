@@ -775,6 +775,7 @@ function Get-EbgTenantInfo {
             TenantId          = '00000000-0000-0000-0000-000000000001'
             TenantDisplayName = 'Contoso Demo Tenant'
             OnMicrosoftDomain = 'contoso.onmicrosoft.com'
+            VerifiedDomains   = @('contoso.onmicrosoft.com')
         }
         $sync.State.TenantId = $info.TenantId
         $sync.State.TenantDisplayName = $info.TenantDisplayName
@@ -788,12 +789,14 @@ function Get-EbgTenantInfo {
         TenantId          = [string](Get-EbgObjectPropertyValue -InputObject $org -Name 'id')
         TenantDisplayName = [string](Get-EbgObjectPropertyValue -InputObject $org -Name 'displayName')
         OnMicrosoftDomain = Get-EbgOnMicrosoftDomain -Organization $org
+        VerifiedDomains   = @((Get-EbgObjectPropertyValue -InputObject $org -Name 'verifiedDomains') | ForEach-Object { [string](Get-EbgObjectPropertyValue -InputObject $_ -Name 'name') } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
     }
     $sync.State.TenantId = $info.TenantId
     $sync.State.TenantDisplayName = $info.TenantDisplayName
     $sync.State.OnMicrosoftDomain = $info.OnMicrosoftDomain
     return $info
 }
+
 function Get-EbgUserByUpn {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string] $UserPrincipalName)
@@ -1390,6 +1393,8 @@ function Set-EbgLanguage {
         @{ Da = 'Forbind'; En = 'Connect' }
         @{ Da = 'Forbind én gang til Microsoft Graph. Samme session bruges til discovery, plan og udførsel.'; En = 'Connect once to Microsoft Graph. The same session is used for discovery, plan, and apply.' }
         @{ Da = 'Requested Graph scopes:'; En = 'Requested Graph scopes:' }
+        @{ Da = 'Target tenant ID/domain'; En = 'Target tenant ID/domain' }
+        @{ Da = 'Skriv kundens tenant ID eller .onmicrosoft.com domæne for at tvinge Graph-login mod den tenant.'; En = 'Enter the customer tenant ID or .onmicrosoft.com domain to force Graph sign-in against that tenant.' }
         @{ Da = 'Forbind til Microsoft 365 tenant'; En = 'Connect to Microsoft 365 tenant' }
         @{ Da = 'Forbundet:'; En = 'Connected:' }
         @{ Da = 'Konto:'; En = 'Account:' }
@@ -1475,6 +1480,7 @@ function Set-EbgLanguage {
     if ($sync.WPFAppTitle) { $sync.WPFAppTitle.Text = $sync.App.Name }
     if ($sync.WPFVersionBadge) { $sync.WPFVersionBadge.Text = "v$($sync.App.Version)" }
 }
+
 function Set-EbgNeutralAccountNamePair {
     [CmdletBinding()]
     param([switch] $Random)
@@ -2324,6 +2330,8 @@ function Invoke-EbgConnectTenant {
 
         Import-Module Microsoft.Graph.Authentication -ErrorAction Stop
         $scopes = @($sync.configs.graphScopes)
+        $requestedTenant = if ($sync.WPFConnectTenantId) { [string]$sync.WPFConnectTenantId.Text } else { '' }
+        $requestedTenant = $requestedTenant.Trim()
 
         try { Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null } catch {}
         try { Set-MgGraphOption -DisableLoginByWAM $true -ErrorAction SilentlyContinue | Out-Null } catch {}
@@ -2340,7 +2348,18 @@ function Invoke-EbgConnectTenant {
         Write-EbgStatus -Busy -Message 'Åbner Microsoft Graph-login. Vælg tenant-konto i Microsoft loginvinduet...'
         [System.Windows.Forms.Application]::DoEvents()
 
-        Connect-MgGraph -Scopes $scopes -ContextScope Process -NoWelcome -ErrorAction Stop | Out-Null
+        $connectParams = @{
+            Scopes       = $scopes
+            ContextScope = 'Process'
+            NoWelcome    = $true
+            ErrorAction   = 'Stop'
+        }
+        if (-not [string]::IsNullOrWhiteSpace($requestedTenant)) {
+            $connectParams.TenantId = $requestedTenant
+            Write-EbgLog -Message "Target tenant requested for Graph login: $requestedTenant"
+        }
+
+        Connect-MgGraph @connectParams | Out-Null
 
         $context = Get-MgContext -ErrorAction Stop
         if (-not $context -or [string]::IsNullOrWhiteSpace([string]$context.Account)) {
@@ -2350,7 +2369,21 @@ function Invoke-EbgConnectTenant {
         $sync.State.GraphConnected = $true
         $sync.State.GraphAccount = [string]$context.Account
         $sync.State.GraphScopes = @($context.Scopes)
-        Get-EbgTenantInfo | Out-Null
+        $tenantInfo = Get-EbgTenantInfo
+        if (-not [string]::IsNullOrWhiteSpace($requestedTenant)) {
+            $requestedTenantLower = $requestedTenant.ToLowerInvariant()
+            $verifiedDomains = @($tenantInfo.VerifiedDomains | ForEach-Object { [string]$_ }).Where({ -not [string]::IsNullOrWhiteSpace($_) })
+            $tenantMatches = (
+                $requestedTenantLower -eq ([string]$tenantInfo.TenantId).ToLowerInvariant() -or
+                $requestedTenantLower -eq ([string]$tenantInfo.OnMicrosoftDomain).ToLowerInvariant() -or
+                ($verifiedDomains | ForEach-Object { $_.ToLowerInvariant() }) -contains $requestedTenantLower
+            )
+            if (-not $tenantMatches) {
+                try { Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null } catch {}
+                $sync.State.GraphConnected = $false
+                throw "Microsoft Graph forbandt til '$($tenantInfo.TenantDisplayName)' ($($tenantInfo.TenantId)) i stedet for den ønskede tenant '$requestedTenant'. Log ud af den cachede Microsoft session, eller angiv den korrekte tenant ID/.onmicrosoft.com domæne."
+            }
+        }
         Write-EbgStatus -Message 'Microsoft Graph er forbundet.'
         Update-EbgUIState | Out-Null
     }
@@ -2652,7 +2685,7 @@ function Move-EbgWPFStep {
 $sync.configs.appsettings = @'
 {
   "name": "Entra Break Glass Configurator",
-  "version": "2.3.4",
+  "version": "2.3.5",
   "outputRoot": ".\\Output",
   "groupName": "CA-BreakGlass-Exclude",
   "groupDescription": "Security group used to exclude dedicated break-glass accounts from existing Conditional Access policies.",
@@ -3116,6 +3149,13 @@ $inputXML = @'
                                     <TextBlock Text="Graph scopes" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,8"/>
                                     <TextBlock Text="Requested permissions ved Microsoft Graph sign-in." Foreground="{StaticResource TextMuted}" Margin="0,0,0,10"/>
                                     <TextBox x:Name="WPFGraphScopes" IsReadOnly="True" AcceptsReturn="True" Height="150" FontFamily="Consolas" Background="Transparent" BorderThickness="0" Padding="0" VerticalScrollBarVisibility="Disabled" HorizontalScrollBarVisibility="Disabled"/>
+                                </StackPanel>
+                            </Border>
+                            <Border Background="{StaticResource PanelRaised}" BorderBrush="{StaticResource BorderSoft}" BorderThickness="1" CornerRadius="10" Padding="18,16" VerticalAlignment="Top" Margin="0,12,0,0">
+                                <StackPanel>
+                                    <TextBlock Text="Target tenant ID/domain" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,8"/>
+                                    <TextBlock Text="Skriv kundens tenant ID eller .onmicrosoft.com domæne for at tvinge Graph-login mod den tenant." Foreground="{StaticResource TextMuted}" TextWrapping="Wrap" Margin="0,0,0,10"/>
+                                    <TextBox x:Name="WPFConnectTenantId" Height="40" VerticalContentAlignment="Center"/>
                                 </StackPanel>
                             </Border>
                             <Button x:Name="WPFConnectTenant" Content="Forbind til Microsoft 365 tenant" Width="260" HorizontalAlignment="Left" Margin="0,10,0,0"/>

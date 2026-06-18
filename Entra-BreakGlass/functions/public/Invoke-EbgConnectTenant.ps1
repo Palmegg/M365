@@ -34,6 +34,8 @@ function Invoke-EbgConnectTenant {
 
         Import-Module Microsoft.Graph.Authentication -ErrorAction Stop
         $scopes = @($sync.configs.graphScopes)
+        $requestedTenant = if ($sync.WPFConnectTenantId) { [string]$sync.WPFConnectTenantId.Text } else { '' }
+        $requestedTenant = $requestedTenant.Trim()
 
         try { Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null } catch {}
         try { Set-MgGraphOption -DisableLoginByWAM $true -ErrorAction SilentlyContinue | Out-Null } catch {}
@@ -50,7 +52,18 @@ function Invoke-EbgConnectTenant {
         Write-EbgStatus -Busy -Message 'Åbner Microsoft Graph-login. Vælg tenant-konto i Microsoft loginvinduet...'
         [System.Windows.Forms.Application]::DoEvents()
 
-        Connect-MgGraph -Scopes $scopes -ContextScope Process -NoWelcome -ErrorAction Stop | Out-Null
+        $connectParams = @{
+            Scopes       = $scopes
+            ContextScope = 'Process'
+            NoWelcome    = $true
+            ErrorAction   = 'Stop'
+        }
+        if (-not [string]::IsNullOrWhiteSpace($requestedTenant)) {
+            $connectParams.TenantId = $requestedTenant
+            Write-EbgLog -Message "Target tenant requested for Graph login: $requestedTenant"
+        }
+
+        Connect-MgGraph @connectParams | Out-Null
 
         $context = Get-MgContext -ErrorAction Stop
         if (-not $context -or [string]::IsNullOrWhiteSpace([string]$context.Account)) {
@@ -60,7 +73,21 @@ function Invoke-EbgConnectTenant {
         $sync.State.GraphConnected = $true
         $sync.State.GraphAccount = [string]$context.Account
         $sync.State.GraphScopes = @($context.Scopes)
-        Get-EbgTenantInfo | Out-Null
+        $tenantInfo = Get-EbgTenantInfo
+        if (-not [string]::IsNullOrWhiteSpace($requestedTenant)) {
+            $requestedTenantLower = $requestedTenant.ToLowerInvariant()
+            $verifiedDomains = @($tenantInfo.VerifiedDomains | ForEach-Object { [string]$_ }).Where({ -not [string]::IsNullOrWhiteSpace($_) })
+            $tenantMatches = (
+                $requestedTenantLower -eq ([string]$tenantInfo.TenantId).ToLowerInvariant() -or
+                $requestedTenantLower -eq ([string]$tenantInfo.OnMicrosoftDomain).ToLowerInvariant() -or
+                ($verifiedDomains | ForEach-Object { $_.ToLowerInvariant() }) -contains $requestedTenantLower
+            )
+            if (-not $tenantMatches) {
+                try { Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null } catch {}
+                $sync.State.GraphConnected = $false
+                throw "Microsoft Graph forbandt til '$($tenantInfo.TenantDisplayName)' ($($tenantInfo.TenantId)) i stedet for den ønskede tenant '$requestedTenant'. Log ud af den cachede Microsoft session, eller angiv den korrekte tenant ID/.onmicrosoft.com domæne."
+            }
+        }
         Write-EbgStatus -Message 'Microsoft Graph er forbundet.'
         Update-EbgUIState | Out-Null
     }
