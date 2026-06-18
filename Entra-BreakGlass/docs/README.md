@@ -9,9 +9,7 @@ PowerShell 7/WPF værktøj til en simpel Microsoft Graph-baseret v1 opsætning a
 - Før login kaldes `Disconnect-MgGraph`, Graph PowerShell cache under `$HOME\.mg` flyttes til backup under `Output`, og Graph MSAL cachefiler `mg.msal.cache*` flyttes til backup. Derefter forsøger værktøjet at deaktivere WAM-login med `Set-MgGraphOption -DisableLoginByWAM $true`, så login ikke bare genbruger den seneste Windows/WAM session.
 - Efter succesfuldt Graph-login forsøger værktøjet at flytte fokus tilbage til WPF-vinduet.
 - WPF-vinduet minimeres kort mens Microsoft Graph-login åbnes, så Microsofts loginvindue ikke skjules bag konfiguratoren. Efter login restore'r værktøjet WPF-vinduet.
-- Background-steps sikrer aktiv Graph context i worker-runspace før Graph-kald. Discovery viser løbende hvilket Graph-step der køres.
-- Background-runspace kører som STA, så Microsoft Graph PowerShell ikke hænger på Graph requests efter WPF-login.
-- Discovery kører på WPF/UI-runspacet, fordi Microsoft Graph PowerShell i nogle tenants hænger på det første Graph-kald fra background-runspace. UI-status opdateres mellem hvert Graph-kald.
+- Discovery, plan og Phase 1a kører på WPF/UI-runspacet, fordi Microsoft Graph PowerShell i nogle tenants hænger på Graph-kald fra background-runspace. UI-status opdateres mellem hvert Graph-kald.
 - Finder tenantens `*.onmicrosoft.com` domæne.
 - Kontrollerer de eksakte target UPNs for to break-glass konti.
 - Phase 1a opretter manglende cloud-only brugere, hvis valgt.
@@ -19,9 +17,9 @@ PowerShell 7/WPF værktøj til en simpel Microsoft Graph-baseret v1 opsætning a
 - Viser passwords én gang i GUI'en.
 - Opretter eller genbruger security group `CA-BreakGlass-Exclude`.
 - Tilføjer kontiene til gruppen, hvis valgt.
-- Tildeler begge break-glass konti direkte `Global Administrator` på tenant scope (`/`).
 - Kan deaktivere administrator-SSPR tenant-wide, hvis valgt. Ændringen kan tage op til 60 minutter.
-- Phase 1a opretter Temporary Access Pass for begge konti med `one-time use = Yes` og `duration = 2 hours`.
+- Phase 1a opretter Temporary Access Pass for begge konti med `one-time use = Yes` og `duration = 2 hours` før Global Administrator rollen tildeles.
+- Tildeler begge break-glass konti direkte `Global Administrator` på tenant scope (`/`).
 - Phase 1a kan ekskludere gruppen fra eksisterende Conditional Access-politikker.
 - Phase 1b er manuel: konsulenten logger ind med TAP og registrerer to FIDO2 security keys pr. konto.
 - Phase 2 refresher kontiene, henter AAGUIDs fra de registrerede FIDO2/passkey methods og kan slette TAP.
@@ -85,7 +83,9 @@ Admin consent kan være nødvendig i kundens tenant.
 
 ## Krævede roller
 
-Den indloggede konto skal have rettigheder til at oprette brugere/grupper, tildele directory roles, læse FIDO2 authentication methods, læse/opdatere authentication strengths, læse/opdatere authorization policy hvis Admin SSPR deaktiveres og, hvis CA vælges, læse og opdatere Conditional Access-politikker. Typisk kræves Global Administrator eller en kombination med Privileged Role Administrator, Authentication Administrator, Security Administrator, User Administrator, Groups Administrator og Conditional Access Administrator.
+Den indloggede konto skal have rettigheder til at oprette brugere/grupper, tildele directory roles, oprette Temporary Access Pass, læse FIDO2 authentication methods, læse/opdatere authentication strengths, læse/opdatere authorization policy hvis Admin SSPR deaktiveres og, hvis CA vælges, læse og opdatere Conditional Access-politikker. Typisk kræves Global Administrator eller en kombination med Privileged Role Administrator, Authentication Administrator, Security Administrator, User Administrator, Groups Administrator og Conditional Access Administrator.
+
+Hvis target-kontiene allerede har en privilegeret administratorrolle, kan oprettelse af Temporary Access Pass kræve Privileged Authentication Administrator. Nye Phase 1a-runs opretter derfor TAP før Global Administrator rollen tildeles.
 
 ## Password og TAP-håndtering
 

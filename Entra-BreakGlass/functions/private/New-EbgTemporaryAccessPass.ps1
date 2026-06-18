@@ -28,7 +28,16 @@ function New-EbgTemporaryAccessPass {
         lifetimeInMinutes = $LifetimeInMinutes
         isUsableOnce = $IsUsableOnce
     }
-    $created = Invoke-EbgGraphRequest -Method POST -Uri "https://graph.microsoft.com/v1.0/users/$userId/authentication/temporaryAccessPassMethods" -Body $body
+    try {
+        $created = Invoke-EbgGraphRequest -Method POST -Uri "https://graph.microsoft.com/v1.0/users/$userId/authentication/temporaryAccessPassMethods" -Body $body
+    }
+    catch {
+        $message = ConvertTo-EbgRedactedError -ErrorRecord $_
+        if ($message -match '403 Forbidden|accessDenied|Request Authorization failed') {
+            throw "Kunne ikke oprette Temporary Access Pass for $upn. Microsoft Graph afviste requesten med 403/accessDenied. Hvis kontoen allerede har en privilegeret administratorrolle, kræver TAP-oprettelse typisk Privileged Authentication Administrator. Kør med en konto der har den rolle, eller fjern midlertidigt Global Administrator fra target-kontoen og kør Phase 1a igen. Nye runs opretter TAP før Global Administrator rollen tildeles."
+        }
+        throw
+    }
     $created | Add-Member -MemberType NoteProperty -Name UserPrincipalName -Value $upn -Force
     $created | Add-Member -MemberType NoteProperty -Name lifetimeInMinutes -Value $LifetimeInMinutes -Force
     $created | Add-Member -MemberType NoteProperty -Name isUsableOnce -Value $IsUsableOnce -Force

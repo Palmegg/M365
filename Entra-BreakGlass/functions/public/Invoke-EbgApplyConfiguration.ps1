@@ -25,9 +25,9 @@ Phase 1a udfører:
 
 1. Sikrer CA-BreakGlass-Exclude security group
 2. Opretter/genbruger de 2 break-glass konti
-3. Tildeler direkte Global Administrator rolle
-4. Deaktiverer Admin SSPR tenant-wide: $($config.DisableAdminSSPR)
-5. Opretter Temporary Access Pass: one-time use = Yes, duration = 2 hours
+3. Deaktiverer Admin SSPR tenant-wide: $($config.DisableAdminSSPR)
+4. Opretter Temporary Access Pass: one-time use = Yes, duration = 2 hours
+5. Tildeler direkte Global Administrator rolle
 6. Melder konti ind i exclude-gruppen
 7. Ekskluderer gruppen fra eksisterende CA policies: $($config.PatchCAPolicies)
 
@@ -99,17 +99,10 @@ Vil du fortsætte?
             Write-EbgLog -Level PASS -Message "Bruger oprettet: $($item.Upn)"
         }
 
-        Write-EbgLog -Message 'Phase 1a step 4/10: Tildeler direkte Global Administrator rolle...'
-        Write-EbgStatus -Busy -Message 'Phase 1a step 4/10: tildeler direkte Global Administrator rolle...'
-        [System.Windows.Forms.Application]::DoEvents()
-        $roleDefinition = Get-EbgGlobalAdministratorRoleDefinition
         $roleAssignments = @()
-        foreach ($user in $users | Where-Object { Get-EbgObjectPropertyValue -InputObject $_ -Name 'id' }) {
-            $roleAssignments += Ensure-EbgGlobalAdministratorAssignment -User $user -RoleDefinition $roleDefinition -Apply $true
-        }
 
-        Write-EbgLog -Message 'Phase 1a step 5/10: Håndterer administrator-SSPR...'
-        Write-EbgStatus -Busy -Message 'Phase 1a step 5/10: håndterer administrator-SSPR...'
+        Write-EbgLog -Message 'Phase 1a step 4/10: Håndterer administrator-SSPR...'
+        Write-EbgStatus -Busy -Message 'Phase 1a step 4/10: håndterer administrator-SSPR...'
         [System.Windows.Forms.Application]::DoEvents()
         $adminSSPRResult = if ($config.DisableAdminSSPR) {
             $result = Set-EbgAdminSSPRDisabled -Apply $true
@@ -127,12 +120,20 @@ Vil du fortsætte?
             }
         }
 
-        Write-EbgLog -Message 'Phase 1a step 6/10: Opretter Temporary Access Pass for begge konti...'
-        Write-EbgStatus -Busy -Message 'Phase 1a step 6/10: opretter Temporary Access Pass for begge konti...'
+        Write-EbgLog -Message 'Phase 1a step 5/10: Opretter Temporary Access Pass for begge konti før Global Administrator rollen tildeles...'
+        Write-EbgStatus -Busy -Message 'Phase 1a step 5/10: opretter Temporary Access Pass for begge konti...'
         [System.Windows.Forms.Application]::DoEvents()
         $temporaryAccessPasses = @()
         foreach ($user in $users | Where-Object { Get-EbgObjectPropertyValue -InputObject $_ -Name 'id' }) {
             $temporaryAccessPasses += New-EbgTemporaryAccessPass -User $user -LifetimeInMinutes 120 -IsUsableOnce $true -Apply $true
+        }
+
+        Write-EbgLog -Message 'Phase 1a step 6/10: Tildeler direkte Global Administrator rolle...'
+        Write-EbgStatus -Busy -Message 'Phase 1a step 6/10: tildeler direkte Global Administrator rolle...'
+        [System.Windows.Forms.Application]::DoEvents()
+        $roleDefinition = Get-EbgGlobalAdministratorRoleDefinition
+        foreach ($user in $users | Where-Object { Get-EbgObjectPropertyValue -InputObject $_ -Name 'id' }) {
+            $roleAssignments += Ensure-EbgGlobalAdministratorAssignment -User $user -RoleDefinition $roleDefinition -Apply $true
         }
 
         Write-EbgLog -Message 'Phase 1a step 7/10: Sikrer gruppemedlemskab...'
