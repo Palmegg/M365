@@ -1933,8 +1933,12 @@ function Set-EbgLanguage {
         @{ Da = 'Midlertidige adgangskoder vises kun én gang og gemmes ikke i log, JSON eller handoff dokument.'; En = 'Temporary passwords are shown only once and are not saved to logs, JSON, or the handoff document.' }
         @{ Da = 'Hvor vil du starte?'; En = 'Where do you want to start?' }
         @{ Da = 'Start fra Phase 1 - opret konti, gruppe, TAP og CA exclusions'; En = 'Start from Phase 1 - create accounts, group, TAP, and CA exclusions' }
+        @{ Da = 'Start fra Phase 1'; En = 'Start from Phase 1' }
+        @{ Da = 'Opret konti, gruppe, TAP og CA exclusions fra start.'; En = 'Create accounts, group, TAP, and CA exclusions from the beginning.' }
         @{ Da = "Brug denne når tenant'en skal have grundopsætningen lavet fra start."; En = 'Use this when the tenant needs the baseline setup from the beginning.' }
         @{ Da = 'Fortsæt fra Phase 2 - FIDO2 keys er allerede registreret manuelt'; En = 'Resume from Phase 2 - FIDO2 keys are already registered manually' }
+        @{ Da = 'Fortsæt fra Phase 2'; En = 'Resume from Phase 2' }
+        @{ Da = 'Brug hvis Phase 1 allerede er kørt, og FIDO2 keys er registreret manuelt.'; En = 'Use this when Phase 1 has already run, and FIDO2 keys are already registered manually.' }
         @{ Da = 'Brug denne hvis Phase 1 allerede er kørt, programmet blev lukket, og du kun mangler AAGUID, authentication strength, CA-policy og handoff.'; En = 'Use this when Phase 1 has already run, the program was closed, and only AAGUID, authentication strength, CA policy, and handoff remain.' }
         @{ Da = 'Jeg forstår at dette script ændrer sikkerhedskritisk tenant-konfiguration.'; En = 'I understand that this script changes security-critical tenant configuration.' }
         @{ Da = 'Forbind'; En = 'Connect' }
@@ -3648,7 +3652,7 @@ function Stop-EbgCurrentTask {
 $sync.configs.appsettings = @'
 {
   "name": "Entra Break Glass Configurator",
-  "version": "2.4.20",
+  "version": "2.4.21",
   "outputRoot": ".\\Output",
   "groupName": "CA-BreakGlass-Exclude",
   "groupDescription": "Security group used to exclude dedicated break-glass accounts from existing Conditional Access policies.",
@@ -3656,6 +3660,7 @@ $sync.configs.appsettings = @'
   "authenticationStrengthDescription": "Requires passkeys (FIDO2) from approved attested security key AAGUIDs for break-glass accounts.",
   "breakGlassCAPolicyName": "[CA999] IdentityProtection-AnyApp-AnyPlatform-BreakGlass-FIDO2"
 }
+
 
 '@ | ConvertFrom-Json
 $sync.configs.defaults = @'
@@ -3939,6 +3944,20 @@ $inputXML = @'
             <Setter Property="Margin" Value="0,4,0,8"/>
             <Setter Property="Foreground" Value="{DynamicResource TextPrimary}"/>
         </Style>
+        <Style TargetType="RadioButton">
+            <Setter Property="Margin" Value="0,6,0,0"/>
+            <Setter Property="Foreground" Value="{DynamicResource TextPrimary}"/>
+            <Setter Property="VerticalContentAlignment" Value="Center"/>
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Foreground" Value="{DynamicResource TextSecondary}"/>
+                    <Setter Property="Cursor" Value="Hand"/>
+                </Trigger>
+                <Trigger Property="IsEnabled" Value="False">
+                    <Setter Property="Opacity" Value="0.55"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
         <Style TargetType="ToggleButton">
             <Setter Property="MinHeight" Value="34"/>
             <Setter Property="Padding" Value="14,6"/>
@@ -4073,34 +4092,39 @@ $inputXML = @'
             </StackPanel>
 
             <Grid Grid.Row="1" Margin="34,20">
-                <Grid x:Name="WPFPageWelcome">
-                    <ScrollViewer VerticalScrollBarVisibility="Auto">
-                        <StackPanel MaxWidth="940" HorizontalAlignment="Center">
-                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,0,0,12">
-                                <TextBlock x:Name="WPFLanguageLabel" Text="Sprog" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                                <ComboBox x:Name="WPFLanguageSelector" Width="150" SelectedIndex="0">
-                                    <ComboBoxItem Content="Dansk" Tag="da-DK"/>
-                                    <ComboBoxItem Content="English" Tag="en-US"/>
-                                </ComboBox>
-                            </StackPanel>
-                            <TextBlock Text="Velkommen" FontSize="22" FontWeight="SemiBold" Margin="0,0,0,12"/>
-                            <TextBlock Text="Værktøjet kører i to faser: Phase 1 opretter break-glass konti, Global Administrator rolle, TAP, CA-exclude gruppe, FIDO2/passkey method policy, registration campaign exclusion og CA-exclusions. Derefter logger konsulenten manuelt på kontiene og registrerer FIDO2 keys."/>
-                            <TextBlock Margin="0,12,0,0" Text="Phase 2 refresher kontiene, læser FIDO2 AAGUIDs, kan slette TAP, opretter BreakGlass-FIDO2 authentication strength og opretter en dedikeret CA-policy som disabled."/>
-                            <TextBlock Margin="0,12,0,0" Text="Værktøjet forbinder kun til Microsoft Graph. Det bruger ikke Azure, PIM, RMAU, Log Analytics eller Sentinel."/>
-                            <TextBlock Margin="0,12,0,0" Text="Discovery og Plan foretager ingen ændringer. Ændringer udføres først i Phase 1 og Phase 2."/>
-                            <TextBlock Margin="0,12,0,0" Text="Initiale passwords og TAP-koder skrives ikke til almindelig log. TAP-koder kan bruges flere gange inden for 2 timer."/>
-                            <Border Margin="0,22,0,0" Padding="16" Background="{StaticResource PanelRaised}" BorderBrush="{StaticResource BorderSoft}" BorderThickness="1" CornerRadius="10">
-                                <StackPanel>
-                                    <TextBlock Text="Hvor vil du starte?" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,10"/>
-                                    <RadioButton x:Name="WPFStartPhase1" GroupName="StartMode" Content="Start fra Phase 1 - opret konti, gruppe, TAP og CA exclusions" IsChecked="True"/>
-                                    <TextBlock Text="Brug denne når tenant'en skal have grundopsætningen lavet fra start." Foreground="{StaticResource TextMuted}" Margin="24,4,0,12"/>
-                                    <RadioButton x:Name="WPFResumePhase2" GroupName="StartMode" Content="Fortsæt fra Phase 2 - FIDO2 keys er allerede registreret manuelt"/>
-                                    <TextBlock Text="Brug denne hvis Phase 1 allerede er kørt, programmet blev lukket, og du kun mangler AAGUID, authentication strength, CA-policy og handoff." Foreground="{StaticResource TextMuted}" Margin="24,4,0,0"/>
-                                </StackPanel>
-                            </Border>
-                            <CheckBox x:Name="WPFWelcomeRiskAccepted" Margin="0,24,0,0" Content="Jeg forstår at dette script ændrer sikkerhedskritisk tenant-konfiguration."/>
+                <Grid x:Name="WPFPageWelcome" MaxWidth="1120" HorizontalAlignment="Center" VerticalAlignment="Top">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="1.25*"/>
+                        <ColumnDefinition Width="34"/>
+                        <ColumnDefinition Width="0.95*"/>
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Grid.Column="0" Margin="0,22,0,0">
+                        <TextBlock Text="Velkommen" FontSize="22" FontWeight="SemiBold" Margin="0,0,0,14"/>
+                        <TextBlock Text="Værktøjet kører i to faser: Phase 1 opretter break-glass konti, Global Administrator rolle, TAP, CA-exclude gruppe, FIDO2/passkey method policy, registration campaign exclusion og CA-exclusions. Derefter logger konsulenten manuelt på kontiene og registrerer FIDO2 keys."/>
+                        <TextBlock Margin="0,12,0,0" Text="Phase 2 refresher kontiene, læser FIDO2 AAGUIDs, kan slette TAP, opretter BreakGlass-FIDO2 authentication strength og opretter en dedikeret CA-policy som disabled."/>
+                        <TextBlock Margin="0,12,0,0" Text="Værktøjet forbinder kun til Microsoft Graph. Det bruger ikke Azure, PIM, RMAU, Log Analytics eller Sentinel."/>
+                        <TextBlock Margin="0,12,0,0" Text="Discovery og Plan foretager ingen ændringer. Ændringer udføres først i Phase 1 og Phase 2."/>
+                        <TextBlock Margin="0,12,0,0" Text="Initiale passwords og TAP-koder skrives ikke til almindelig log. TAP-koder kan bruges flere gange inden for 2 timer."/>
+                    </StackPanel>
+                    <StackPanel Grid.Column="2" Margin="0,22,0,0">
+                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,0,0,16">
+                            <TextBlock x:Name="WPFLanguageLabel" Text="Sprog" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                            <ComboBox x:Name="WPFLanguageSelector" Width="150" SelectedIndex="0">
+                                <ComboBoxItem Content="Dansk" Tag="da-DK"/>
+                                <ComboBoxItem Content="English" Tag="en-US"/>
+                            </ComboBox>
                         </StackPanel>
-                    </ScrollViewer>
+                        <Border Padding="18" Background="{StaticResource PanelRaised}" BorderBrush="{StaticResource BorderSoft}" BorderThickness="1" CornerRadius="10">
+                            <StackPanel>
+                                <TextBlock Text="Hvor vil du starte?" FontSize="17" FontWeight="SemiBold" Margin="0,0,0,12"/>
+                                <RadioButton x:Name="WPFStartPhase1" GroupName="StartMode" Content="Start fra Phase 1" FontSize="14" FontWeight="SemiBold" IsChecked="True"/>
+                                <TextBlock Text="Opret konti, gruppe, TAP og CA exclusions fra start." Foreground="{StaticResource TextSecondary}" Margin="24,4,0,14"/>
+                                <RadioButton x:Name="WPFResumePhase2" GroupName="StartMode" Content="Fortsæt fra Phase 2" FontSize="14" FontWeight="SemiBold"/>
+                                <TextBlock Text="Brug hvis Phase 1 allerede er kørt, og FIDO2 keys er registreret manuelt." Foreground="{StaticResource TextSecondary}" Margin="24,4,0,0"/>
+                            </StackPanel>
+                        </Border>
+                        <CheckBox x:Name="WPFWelcomeRiskAccepted" Margin="0,24,0,0" Content="Jeg forstår at dette script ændrer sikkerhedskritisk tenant-konfiguration."/>
+                    </StackPanel>
                 </Grid>
 
                 <Grid x:Name="WPFPageConnect" Visibility="Collapsed">

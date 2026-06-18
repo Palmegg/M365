@@ -218,6 +218,20 @@
             <Setter Property="Margin" Value="0,4,0,8"/>
             <Setter Property="Foreground" Value="{DynamicResource TextPrimary}"/>
         </Style>
+        <Style TargetType="RadioButton">
+            <Setter Property="Margin" Value="0,6,0,0"/>
+            <Setter Property="Foreground" Value="{DynamicResource TextPrimary}"/>
+            <Setter Property="VerticalContentAlignment" Value="Center"/>
+            <Style.Triggers>
+                <Trigger Property="IsMouseOver" Value="True">
+                    <Setter Property="Foreground" Value="{DynamicResource TextSecondary}"/>
+                    <Setter Property="Cursor" Value="Hand"/>
+                </Trigger>
+                <Trigger Property="IsEnabled" Value="False">
+                    <Setter Property="Opacity" Value="0.55"/>
+                </Trigger>
+            </Style.Triggers>
+        </Style>
         <Style TargetType="ToggleButton">
             <Setter Property="MinHeight" Value="34"/>
             <Setter Property="Padding" Value="14,6"/>
@@ -352,34 +366,39 @@
             </StackPanel>
 
             <Grid Grid.Row="1" Margin="34,20">
-                <Grid x:Name="WPFPageWelcome">
-                    <ScrollViewer VerticalScrollBarVisibility="Auto">
-                        <StackPanel MaxWidth="940" HorizontalAlignment="Center">
-                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,0,0,12">
-                                <TextBlock x:Name="WPFLanguageLabel" Text="Sprog" VerticalAlignment="Center" Margin="0,0,8,0"/>
-                                <ComboBox x:Name="WPFLanguageSelector" Width="150" SelectedIndex="0">
-                                    <ComboBoxItem Content="Dansk" Tag="da-DK"/>
-                                    <ComboBoxItem Content="English" Tag="en-US"/>
-                                </ComboBox>
-                            </StackPanel>
-                            <TextBlock Text="Velkommen" FontSize="22" FontWeight="SemiBold" Margin="0,0,0,12"/>
-                            <TextBlock Text="Værktøjet kører i to faser: Phase 1 opretter break-glass konti, Global Administrator rolle, TAP, CA-exclude gruppe, FIDO2/passkey method policy, registration campaign exclusion og CA-exclusions. Derefter logger konsulenten manuelt på kontiene og registrerer FIDO2 keys."/>
-                            <TextBlock Margin="0,12,0,0" Text="Phase 2 refresher kontiene, læser FIDO2 AAGUIDs, kan slette TAP, opretter BreakGlass-FIDO2 authentication strength og opretter en dedikeret CA-policy som disabled."/>
-                            <TextBlock Margin="0,12,0,0" Text="Værktøjet forbinder kun til Microsoft Graph. Det bruger ikke Azure, PIM, RMAU, Log Analytics eller Sentinel."/>
-                            <TextBlock Margin="0,12,0,0" Text="Discovery og Plan foretager ingen ændringer. Ændringer udføres først i Phase 1 og Phase 2."/>
-                            <TextBlock Margin="0,12,0,0" Text="Initiale passwords og TAP-koder skrives ikke til almindelig log. TAP-koder kan bruges flere gange inden for 2 timer."/>
-                            <Border Margin="0,22,0,0" Padding="16" Background="{StaticResource PanelRaised}" BorderBrush="{StaticResource BorderSoft}" BorderThickness="1" CornerRadius="10">
-                                <StackPanel>
-                                    <TextBlock Text="Hvor vil du starte?" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,10"/>
-                                    <RadioButton x:Name="WPFStartPhase1" GroupName="StartMode" Content="Start fra Phase 1 - opret konti, gruppe, TAP og CA exclusions" IsChecked="True"/>
-                                    <TextBlock Text="Brug denne når tenant'en skal have grundopsætningen lavet fra start." Foreground="{StaticResource TextMuted}" Margin="24,4,0,12"/>
-                                    <RadioButton x:Name="WPFResumePhase2" GroupName="StartMode" Content="Fortsæt fra Phase 2 - FIDO2 keys er allerede registreret manuelt"/>
-                                    <TextBlock Text="Brug denne hvis Phase 1 allerede er kørt, programmet blev lukket, og du kun mangler AAGUID, authentication strength, CA-policy og handoff." Foreground="{StaticResource TextMuted}" Margin="24,4,0,0"/>
-                                </StackPanel>
-                            </Border>
-                            <CheckBox x:Name="WPFWelcomeRiskAccepted" Margin="0,24,0,0" Content="Jeg forstår at dette script ændrer sikkerhedskritisk tenant-konfiguration."/>
+                <Grid x:Name="WPFPageWelcome" MaxWidth="1120" HorizontalAlignment="Center" VerticalAlignment="Top">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="1.25*"/>
+                        <ColumnDefinition Width="34"/>
+                        <ColumnDefinition Width="0.95*"/>
+                    </Grid.ColumnDefinitions>
+                    <StackPanel Grid.Column="0" Margin="0,22,0,0">
+                        <TextBlock Text="Velkommen" FontSize="22" FontWeight="SemiBold" Margin="0,0,0,14"/>
+                        <TextBlock Text="Værktøjet kører i to faser: Phase 1 opretter break-glass konti, Global Administrator rolle, TAP, CA-exclude gruppe, FIDO2/passkey method policy, registration campaign exclusion og CA-exclusions. Derefter logger konsulenten manuelt på kontiene og registrerer FIDO2 keys."/>
+                        <TextBlock Margin="0,12,0,0" Text="Phase 2 refresher kontiene, læser FIDO2 AAGUIDs, kan slette TAP, opretter BreakGlass-FIDO2 authentication strength og opretter en dedikeret CA-policy som disabled."/>
+                        <TextBlock Margin="0,12,0,0" Text="Værktøjet forbinder kun til Microsoft Graph. Det bruger ikke Azure, PIM, RMAU, Log Analytics eller Sentinel."/>
+                        <TextBlock Margin="0,12,0,0" Text="Discovery og Plan foretager ingen ændringer. Ændringer udføres først i Phase 1 og Phase 2."/>
+                        <TextBlock Margin="0,12,0,0" Text="Initiale passwords og TAP-koder skrives ikke til almindelig log. TAP-koder kan bruges flere gange inden for 2 timer."/>
+                    </StackPanel>
+                    <StackPanel Grid.Column="2" Margin="0,22,0,0">
+                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,0,0,16">
+                            <TextBlock x:Name="WPFLanguageLabel" Text="Sprog" VerticalAlignment="Center" Margin="0,0,8,0"/>
+                            <ComboBox x:Name="WPFLanguageSelector" Width="150" SelectedIndex="0">
+                                <ComboBoxItem Content="Dansk" Tag="da-DK"/>
+                                <ComboBoxItem Content="English" Tag="en-US"/>
+                            </ComboBox>
                         </StackPanel>
-                    </ScrollViewer>
+                        <Border Padding="18" Background="{StaticResource PanelRaised}" BorderBrush="{StaticResource BorderSoft}" BorderThickness="1" CornerRadius="10">
+                            <StackPanel>
+                                <TextBlock Text="Hvor vil du starte?" FontSize="17" FontWeight="SemiBold" Margin="0,0,0,12"/>
+                                <RadioButton x:Name="WPFStartPhase1" GroupName="StartMode" Content="Start fra Phase 1" FontSize="14" FontWeight="SemiBold" IsChecked="True"/>
+                                <TextBlock Text="Opret konti, gruppe, TAP og CA exclusions fra start." Foreground="{StaticResource TextSecondary}" Margin="24,4,0,14"/>
+                                <RadioButton x:Name="WPFResumePhase2" GroupName="StartMode" Content="Fortsæt fra Phase 2" FontSize="14" FontWeight="SemiBold"/>
+                                <TextBlock Text="Brug hvis Phase 1 allerede er kørt, og FIDO2 keys er registreret manuelt." Foreground="{StaticResource TextSecondary}" Margin="24,4,0,0"/>
+                            </StackPanel>
+                        </Border>
+                        <CheckBox x:Name="WPFWelcomeRiskAccepted" Margin="0,24,0,0" Content="Jeg forstår at dette script ændrer sikkerhedskritisk tenant-konfiguration."/>
+                    </StackPanel>
                 </Grid>
 
                 <Grid x:Name="WPFPageConnect" Visibility="Collapsed">

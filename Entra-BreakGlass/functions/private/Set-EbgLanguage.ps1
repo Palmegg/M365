@@ -27,8 +27,12 @@ function Set-EbgLanguage {
         @{ Da = 'Midlertidige adgangskoder vises kun én gang og gemmes ikke i log, JSON eller handoff dokument.'; En = 'Temporary passwords are shown only once and are not saved to logs, JSON, or the handoff document.' }
         @{ Da = 'Hvor vil du starte?'; En = 'Where do you want to start?' }
         @{ Da = 'Start fra Phase 1 - opret konti, gruppe, TAP og CA exclusions'; En = 'Start from Phase 1 - create accounts, group, TAP, and CA exclusions' }
+        @{ Da = 'Start fra Phase 1'; En = 'Start from Phase 1' }
+        @{ Da = 'Opret konti, gruppe, TAP og CA exclusions fra start.'; En = 'Create accounts, group, TAP, and CA exclusions from the beginning.' }
         @{ Da = "Brug denne når tenant'en skal have grundopsætningen lavet fra start."; En = 'Use this when the tenant needs the baseline setup from the beginning.' }
         @{ Da = 'Fortsæt fra Phase 2 - FIDO2 keys er allerede registreret manuelt'; En = 'Resume from Phase 2 - FIDO2 keys are already registered manually' }
+        @{ Da = 'Fortsæt fra Phase 2'; En = 'Resume from Phase 2' }
+        @{ Da = 'Brug hvis Phase 1 allerede er kørt, og FIDO2 keys er registreret manuelt.'; En = 'Use this when Phase 1 has already run, and FIDO2 keys are already registered manually.' }
         @{ Da = 'Brug denne hvis Phase 1 allerede er kørt, programmet blev lukket, og du kun mangler AAGUID, authentication strength, CA-policy og handoff.'; En = 'Use this when Phase 1 has already run, the program was closed, and only AAGUID, authentication strength, CA policy, and handoff remain.' }
         @{ Da = 'Jeg forstår at dette script ændrer sikkerhedskritisk tenant-konfiguration.'; En = 'I understand that this script changes security-critical tenant configuration.' }
         @{ Da = 'Forbind'; En = 'Connect' }
