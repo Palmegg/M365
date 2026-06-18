@@ -19,10 +19,10 @@ function Write-NetIPLog {
         }
         $message = $line
         if ($sync.WPFExecutionLog.Dispatcher.CheckAccess()) {
-            & $appendLog
+            & $appendLog | Out-Null
         }
         else {
-            $sync.WPFExecutionLog.Dispatcher.Invoke([System.Action]$appendLog)
+            [void]$sync.WPFExecutionLog.Dispatcher.Invoke([System.Action]$appendLog)
         }
     }
 }

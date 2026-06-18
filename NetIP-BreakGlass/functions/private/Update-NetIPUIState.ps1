@@ -4,7 +4,7 @@ function Update-NetIPUIState {
 
     if (-not $sync.Form) { return }
     if (-not $sync.Form.Dispatcher.CheckAccess()) {
-        $sync.Form.Dispatcher.Invoke([System.Action]{ Update-NetIPUIState })
+        [void]$sync.Form.Dispatcher.Invoke([System.Action]{ Update-NetIPUIState | Out-Null })
         return
     }
 

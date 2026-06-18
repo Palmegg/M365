@@ -4,6 +4,35 @@ param(
     [switch] $NoCompileBanner
 )
 
+if ($PSVersionTable.PSVersion.Major -lt 7) {
+    $pwshCommand = Get-Command pwsh.exe -ErrorAction SilentlyContinue
+    $pwshPath = if ($pwshCommand) {
+        $pwshCommand.Source
+    }
+    else {
+        $candidate = Join-Path -Path $env:ProgramFiles -ChildPath 'PowerShell\7\pwsh.exe'
+        if (Test-Path -LiteralPath $candidate) { $candidate } else { $null }
+    }
+
+    if (-not $pwshPath) {
+        throw 'PowerShell 7 er påkrævet for dette WPF/Graph værktøj. Installer PowerShell 7 og kør scriptet igen.'
+    }
+
+    $scriptPath = if ($PSCommandPath) { $PSCommandPath } else { $MyInvocation.MyCommand.Path }
+    $arguments = @(
+        '-NoProfile',
+        '-ExecutionPolicy', 'Bypass',
+        '-STA',
+        '-File', ('"{0}"' -f $scriptPath)
+    )
+    if ($Mock) { $arguments += '-Mock' }
+    if ($DebugMode) { $arguments += '-DebugMode' }
+    if ($NoCompileBanner) { $arguments += '-NoCompileBanner' }
+
+    Start-Process -FilePath $pwshPath -ArgumentList $arguments | Out-Null
+    return
+}
+
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 

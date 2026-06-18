@@ -8,6 +8,35 @@ param(
     [switch] $NoCompileBanner
 )
 
+if ($PSVersionTable.PSVersion.Major -lt 7) {
+    $pwshCommand = Get-Command pwsh.exe -ErrorAction SilentlyContinue
+    $pwshPath = if ($pwshCommand) {
+        $pwshCommand.Source
+    }
+    else {
+        $candidate = Join-Path -Path $env:ProgramFiles -ChildPath 'PowerShell\7\pwsh.exe'
+        if (Test-Path -LiteralPath $candidate) { $candidate } else { $null }
+    }
+
+    if (-not $pwshPath) {
+        throw 'PowerShell 7 er påkrævet for dette WPF/Graph værktøj. Installer PowerShell 7 og kør scriptet igen.'
+    }
+
+    $scriptPath = if ($PSCommandPath) { $PSCommandPath } else { $MyInvocation.MyCommand.Path }
+    $arguments = @(
+        '-NoProfile',
+        '-ExecutionPolicy', 'Bypass',
+        '-STA',
+        '-File', ('"{0}"' -f $scriptPath)
+    )
+    if ($Mock) { $arguments += '-Mock' }
+    if ($DebugMode) { $arguments += '-DebugMode' }
+    if ($NoCompileBanner) { $arguments += '-NoCompileBanner' }
+
+    Start-Process -FilePath $pwshPath -ArgumentList $arguments | Out-Null
+    return
+}
+
 Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
@@ -795,7 +824,7 @@ function Invoke-NetIPRunspace {
     }
     $sync.UI.ProcessRunning = $true
     if ($sync.WPFProgressBar) {
-        $sync.WPFProgressBar.Dispatcher.Invoke([System.Action]{ $sync.WPFProgressBar.IsIndeterminate = $true })
+        [void]$sync.WPFProgressBar.Dispatcher.Invoke([System.Action]{ $sync.WPFProgressBar.IsIndeterminate = $true })
     }
     $ps = [PowerShell]::Create()
     $ps.RunspacePool = $sync.Runspace
@@ -809,7 +838,7 @@ function Invoke-NetIPRunspace {
             Write-NetIPLog -Level ERROR -Message (ConvertTo-NetIPRedactedError -ErrorRecord $_)
             $sync.State.Errors += $friendly
             if ($sync.Form) {
-                $sync.Form.Dispatcher.Invoke([System.Action]{
+                [void]$sync.Form.Dispatcher.Invoke([System.Action]{
                     $sync.WPFStatusText.Text = $friendly
                     [System.Windows.MessageBox]::Show($friendly, $sync.App.Name, 'OK', 'Error') | Out-Null
                 })
@@ -818,9 +847,9 @@ function Invoke-NetIPRunspace {
         finally {
             $sync.UI.ProcessRunning = $false
             if ($sync.Form) {
-                $sync.Form.Dispatcher.Invoke([System.Action]{
+                [void]$sync.Form.Dispatcher.Invoke([System.Action]{
                     $sync.WPFProgressBar.IsIndeterminate = $false
-                    Update-NetIPUIState
+                    Update-NetIPUIState | Out-Null
                 })
             }
         }
@@ -1200,7 +1229,7 @@ function Set-NetIPLanguage {
 
     if (-not $sync.Form) { return }
     if (-not $sync.Form.Dispatcher.CheckAccess()) {
-        $sync.Form.Dispatcher.Invoke([System.Action]{ Set-NetIPLanguage -Language $Language })
+        [void]$sync.Form.Dispatcher.Invoke([System.Action]{ Set-NetIPLanguage -Language $Language | Out-Null })
         return
     }
 
@@ -1413,7 +1442,7 @@ function Update-NetIPUIState {
 
     if (-not $sync.Form) { return }
     if (-not $sync.Form.Dispatcher.CheckAccess()) {
-        $sync.Form.Dispatcher.Invoke([System.Action]{ Update-NetIPUIState })
+        [void]$sync.Form.Dispatcher.Invoke([System.Action]{ Update-NetIPUIState | Out-Null })
         return
     }
 
@@ -1536,10 +1565,10 @@ function Write-NetIPLog {
         }
         $message = $line
         if ($sync.WPFExecutionLog.Dispatcher.CheckAccess()) {
-            & $appendLog
+            & $appendLog | Out-Null
         }
         else {
-            $sync.WPFExecutionLog.Dispatcher.Invoke([System.Action]$appendLog)
+            [void]$sync.WPFExecutionLog.Dispatcher.Invoke([System.Action]$appendLog)
         }
     }
 }
@@ -1560,10 +1589,10 @@ function Write-NetIPStatus {
             $sync.WPFProgressBar.IsIndeterminate = $isBusy
         }
         if ($sync.WPFStatusText.Dispatcher.CheckAccess()) {
-            & $updateStatus
+            & $updateStatus | Out-Null
         }
         else {
-            $sync.WPFStatusText.Dispatcher.Invoke([System.Action]$updateStatus)
+            [void]$sync.WPFStatusText.Dispatcher.Invoke([System.Action]$updateStatus)
         }
     }
 }
@@ -2810,7 +2839,14 @@ $sync.Keys | ForEach-Object {
     if ($control -and $control.GetType().Name -eq 'Button' -and $_ -like 'WPF*') {
         $control.Add_Click({
             param($sender, $eventArgs)
-            Invoke-NetIPWPFButton -Name $sender.Name
+            try {
+                Invoke-NetIPWPFButton -Name $sender.Name | Out-Null
+            }
+            catch {
+                $message = ConvertTo-NetIPRedactedError -ErrorRecord $_
+                Write-NetIPLog -Level ERROR -Message $message
+                [System.Windows.MessageBox]::Show($message, $sync.App.Name, 'OK', 'Error') | Out-Null
+            }
         })
     }
 }
@@ -2821,14 +2857,14 @@ foreach ($box in @('WPFDisplayName1','WPFUserPrefix1','WPFDisplayName2','WPFUser
     }
 }
 
-$sync.WPFWelcomeRiskAccepted.Add_Checked({ Update-NetIPUIState })
-$sync.WPFWelcomeRiskAccepted.Add_Unchecked({ Update-NetIPUIState })
+$sync.WPFWelcomeRiskAccepted.Add_Checked({ Update-NetIPUIState | Out-Null })
+$sync.WPFWelcomeRiskAccepted.Add_Unchecked({ Update-NetIPUIState | Out-Null })
 if ($sync.WPFLanguageSelector) {
     $sync.WPFLanguageSelector.Add_SelectionChanged({
         $selected = $sync.WPFLanguageSelector.SelectedItem
         $language = if ($selected -and $selected.Tag) { [string]$selected.Tag } else { 'da-DK' }
-        Set-NetIPLanguage -Language $language
-        Update-NetIPUIState
+        Set-NetIPLanguage -Language $language | Out-Null
+        Update-NetIPUIState | Out-Null
     })
 }
 

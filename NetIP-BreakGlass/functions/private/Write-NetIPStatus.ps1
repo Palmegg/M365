@@ -14,10 +14,10 @@ function Write-NetIPStatus {
             $sync.WPFProgressBar.IsIndeterminate = $isBusy
         }
         if ($sync.WPFStatusText.Dispatcher.CheckAccess()) {
-            & $updateStatus
+            & $updateStatus | Out-Null
         }
         else {
-            $sync.WPFStatusText.Dispatcher.Invoke([System.Action]$updateStatus)
+            [void]$sync.WPFStatusText.Dispatcher.Invoke([System.Action]$updateStatus)
         }
     }
 }

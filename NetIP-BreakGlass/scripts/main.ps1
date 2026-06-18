@@ -29,7 +29,14 @@ $sync.Keys | ForEach-Object {
     if ($control -and $control.GetType().Name -eq 'Button' -and $_ -like 'WPF*') {
         $control.Add_Click({
             param($sender, $eventArgs)
-            Invoke-NetIPWPFButton -Name $sender.Name
+            try {
+                Invoke-NetIPWPFButton -Name $sender.Name | Out-Null
+            }
+            catch {
+                $message = ConvertTo-NetIPRedactedError -ErrorRecord $_
+                Write-NetIPLog -Level ERROR -Message $message
+                [System.Windows.MessageBox]::Show($message, $sync.App.Name, 'OK', 'Error') | Out-Null
+            }
         })
     }
 }
@@ -40,14 +47,14 @@ foreach ($box in @('WPFDisplayName1','WPFUserPrefix1','WPFDisplayName2','WPFUser
     }
 }
 
-$sync.WPFWelcomeRiskAccepted.Add_Checked({ Update-NetIPUIState })
-$sync.WPFWelcomeRiskAccepted.Add_Unchecked({ Update-NetIPUIState })
+$sync.WPFWelcomeRiskAccepted.Add_Checked({ Update-NetIPUIState | Out-Null })
+$sync.WPFWelcomeRiskAccepted.Add_Unchecked({ Update-NetIPUIState | Out-Null })
 if ($sync.WPFLanguageSelector) {
     $sync.WPFLanguageSelector.Add_SelectionChanged({
         $selected = $sync.WPFLanguageSelector.SelectedItem
         $language = if ($selected -and $selected.Tag) { [string]$selected.Tag } else { 'da-DK' }
-        Set-NetIPLanguage -Language $language
-        Update-NetIPUIState
+        Set-NetIPLanguage -Language $language | Out-Null
+        Update-NetIPUIState | Out-Null
     })
 }
 

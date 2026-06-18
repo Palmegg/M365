@@ -4,7 +4,7 @@ function Set-NetIPLanguage {
 
     if (-not $sync.Form) { return }
     if (-not $sync.Form.Dispatcher.CheckAccess()) {
-        $sync.Form.Dispatcher.Invoke([System.Action]{ Set-NetIPLanguage -Language $Language })
+        [void]$sync.Form.Dispatcher.Invoke([System.Action]{ Set-NetIPLanguage -Language $Language | Out-Null })
         return
     }
 
