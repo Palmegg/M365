@@ -20,7 +20,23 @@ function Invoke-EbgApplyPhase1 {
 
     $config = Get-EbgConfigFromUI
     $plan = $sync.State.Plan
-    $summary = @"
+    $summary = if ($config.RegularSSPROnly) {
+@"
+Regular SSPR only udfører:
+
+1. Henter de to eksisterende break-glass konti ud fra UPN-felterne
+2. Opretter/opdaterer dynamic group: $($config.RegularSSPRGroupName)
+3. Dynamic rule inkluderer enabled member users, men ekskluderer de to BG account object IDs
+4. Gemmer handoff med gruppenavn, object ID og dynamic rule
+
+Der oprettes ikke brugere, TAP, roller, CA-exclusions, FIDO2 policies eller Admin SSPR ændringer.
+Regular SSPR-gruppen skal stadig vælges manuelt under Entra Password reset > Properties > Selected.
+
+Vil du fortsætte?
+"@
+    }
+    else {
+@"
 Phase 1a udfører:
 
 1. Sikrer CA-BreakGlass-Exclude security group
@@ -39,6 +55,7 @@ Initial passwords og TAP-koder skrives ikke til almindelig log.
 
 Vil du fortsætte?
 "@
+    }
     $answer = [System.Windows.MessageBox]::Show($summary, $sync.App.Name, 'YesNo', 'Warning')
     if ($answer -ne 'Yes') { return }
 
@@ -53,6 +70,87 @@ Vil du fortsætte?
 
         Ensure-EbgGraphContext
         [System.Windows.Forms.Application]::DoEvents()
+
+        if ($config.RegularSSPROnly) {
+            Write-EbgLog -Message 'Regular SSPR only: henter tenant og eksisterende break-glass konti...'
+            Write-EbgStatus -Busy -Message 'Regular SSPR only: henter tenant og eksisterende konti...'
+            [System.Windows.Forms.Application]::DoEvents()
+
+            $tenant = Get-EbgTenantInfo
+            $output = if ($sync.State.OutputFolder) { $sync.State.OutputFolder } else { New-EbgOutputFolder -TenantId $tenant.TenantId }
+            $sync.State.OutputFolder = $output
+            New-Item -ItemType Directory -Force -Path $output | Out-Null
+
+            $upn1 = ConvertTo-BreakGlassUpn -Prefix $config.UserPrefix1 -OnMicrosoftDomain $tenant.OnMicrosoftDomain
+            $upn2 = ConvertTo-BreakGlassUpn -Prefix $config.UserPrefix2 -OnMicrosoftDomain $tenant.OnMicrosoftDomain
+            $user1 = Get-EbgUserByUpn -UserPrincipalName $upn1
+            $user2 = Get-EbgUserByUpn -UserPrincipalName $upn2
+            if (-not $user1 -or -not $user2) {
+                throw "Regular SSPR only kræver at begge konti findes. Fundet: $upn1=$([bool]$user1), $upn2=$([bool]$user2). Ret UPN-prefixes eller opret kontiene først."
+            }
+            $users = @($user1, $user2)
+
+            Write-EbgLog -Message "Regular SSPR only: opretter/opdaterer dynamic group $($config.RegularSSPRGroupName)..."
+            Write-EbgStatus -Busy -Message 'Regular SSPR only: opretter/opdaterer dynamic group...'
+            [System.Windows.Forms.Application]::DoEvents()
+            $regularSSPRGroup = Ensure-EbgRegularSSPRScopeGroup -DisplayName $config.RegularSSPRGroupName -Description $config.RegularSSPRGroupDescription -BreakGlassUsers $users -CreateOrUpdate $true -Apply $true
+            if ($sync.WPFRegularSSPRRulePreview) { $sync.WPFRegularSSPRRulePreview.Text = [string](Get-EbgObjectPropertyValue -InputObject $regularSSPRGroup -Name 'MembershipRule') }
+            Write-EbgLog -Level PASS -Message "Regular SSPR scope-gruppe håndteret: $($regularSSPRGroup.Status)"
+            Write-EbgLog -Level WARN -Message "Manuelt step: Sæt regular SSPR til Selected og vælg gruppen $($config.RegularSSPRGroupName)."
+
+            $result = [pscustomobject]@{
+                Phase = 'Regular SSPR only'
+                TenantDisplayName = $tenant.TenantDisplayName
+                TenantId = $tenant.TenantId
+                Timestamp = (Get-Date).ToString('o')
+                Operator = $sync.State.GraphAccount
+                OnMicrosoftDomain = $tenant.OnMicrosoftDomain
+                Account1 = [pscustomobject]@{
+                    DisplayName=[string](Get-EbgObjectPropertyValue -InputObject $user1 -Name 'displayName')
+                    UserPrincipalName=$upn1
+                    Id=[string](Get-EbgObjectPropertyValue -InputObject $user1 -Name 'id')
+                    AccountEnabled=Get-EbgObjectPropertyValue -InputObject $user1 -Name 'accountEnabled'
+                    Status='Existing'
+                }
+                Account2 = [pscustomobject]@{
+                    DisplayName=[string](Get-EbgObjectPropertyValue -InputObject $user2 -Name 'displayName')
+                    UserPrincipalName=$upn2
+                    Id=[string](Get-EbgObjectPropertyValue -InputObject $user2 -Name 'id')
+                    AccountEnabled=Get-EbgObjectPropertyValue -InputObject $user2 -Name 'accountEnabled'
+                    Status='Existing'
+                }
+                Group = [pscustomobject]@{ DisplayName=''; Id=''; Status='Skipped - SSPR only' }
+                GroupMembership = @()
+                Fido2AuthenticationMethodPolicy = [pscustomobject]@{ Status='Skipped - SSPR only' }
+                RegistrationCampaign = [pscustomobject]@{ Status='Skipped - SSPR only' }
+                RegularSSPR = $regularSSPRGroup
+                RoleAssignments = @()
+                AdminSSPR = [pscustomobject]@{ Setting='allowedToUseSSPR'; Status='Skipped - SSPR only'; Detail='No administrator SSPR changes were made.' }
+                TemporaryAccessPassSummary = @()
+                AuthenticationStrength = [pscustomobject]@{ id=''; displayName=$config.AuthenticationStrengthName; Status='Skipped - SSPR only' }
+                BreakGlassCAPolicy = [pscustomobject]@{ id=''; displayName=$config.BreakGlassCAPolicyName; state='Skipped - SSPR only'; Status='Skipped - SSPR only' }
+                CAExclusionsEnabled = $false
+                CAPoliciesChangedCount = 0
+                CAPoliciesChanged = @()
+                CAPoliciesAlreadyExcluded = @()
+                CAPoliciesFailed = @()
+                CABackupPath = ''
+                Warnings = @(
+                    'Regular SSPR scope-gruppen er oprettet/opdateret.'
+                    'Manuelt step: Sæt Self service password reset til Selected og vælg gruppen fra handoff.'
+                    'Der er ikke oprettet eller ændret brugere, TAP, roller, Conditional Access eller FIDO2 policies.'
+                )
+            }
+            $sync.State.Result = $result
+            Save-EbgResultJson -Result $result -OutputFolder $output | Out-Null
+            $handoff = New-EbgHandoffHtml -Result $result -OutputFolder $output
+            $sync.State.HandoffPath = $handoff
+            $sync.WPFOutputFolder.Text = $sync.State.OutputFolder
+            $sync.WPFHandoffPath.Text = $sync.State.HandoffPath
+            Invoke-EbgWPFButton -Name 'WPFStepHandoff'
+            Write-EbgStatus -Message 'Regular SSPR scope-gruppe er færdig. Vælg gruppen manuelt i Entra Password reset.'
+            return
+        }
 
         Write-EbgStatus -Busy -Message 'Phase 1a pre-check: kontrollerer TAP-rettigheder...'
         [System.Windows.Forms.Application]::DoEvents()

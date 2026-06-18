@@ -54,6 +54,10 @@ foreach ($box in @('WPFPhase2UserPrefix1','WPFPhase2UserPrefix2')) {
 
 $sync.WPFWelcomeRiskAccepted.Add_Checked({ Update-EbgUIState | Out-Null })
 $sync.WPFWelcomeRiskAccepted.Add_Unchecked({ Update-EbgUIState | Out-Null })
+if ($sync.WPFRegularSSPROnly) {
+    $sync.WPFRegularSSPROnly.Add_Checked({ Update-EbgUIState | Out-Null })
+    $sync.WPFRegularSSPROnly.Add_Unchecked({ Update-EbgUIState | Out-Null })
+}
 if ($sync.WPFStartPhase1) {
     $sync.WPFStartPhase1.Add_Checked({
         $sync.State.StartMode = 'Phase1'

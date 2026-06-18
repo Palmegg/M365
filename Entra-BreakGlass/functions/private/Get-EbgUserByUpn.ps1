@@ -6,6 +6,9 @@ function Get-EbgUserByUpn {
         if ($UserPrincipalName -like 'horse.unit@*') {
             return [pscustomobject]@{ id = 'mock-user-1'; displayName = 'Horse Unit'; userPrincipalName = $UserPrincipalName; accountEnabled = $true }
         }
+        if ($UserPrincipalName -like 'master.player@*') {
+            return [pscustomobject]@{ id = 'mock-user-2'; displayName = 'Master Player'; userPrincipalName = $UserPrincipalName; accountEnabled = $true }
+        }
         return $null
     }
     try {

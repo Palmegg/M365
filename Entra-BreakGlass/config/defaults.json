@@ -9,6 +9,7 @@
   "disableAdminSSPR": true,
   "patchCAPolicies": true,
   "createRegularSSPRScopeGroup": true,
+  "regularSSPROnly": false,
   "createAuthenticationStrength": false,
   "createBreakGlassCAPolicy": false,
   "enableBreakGlassCAPolicy": false,

@@ -518,6 +518,7 @@
                                 <CheckBox x:Name="WPFDisableAdminSSPR" Content="Deaktivér administrator-SSPR tenant-wide"/>
                                 <TextBlock Foreground="#FBBF24" Text="Admin SSPR kan ikke slås fra kun for de to konti. Hvis valgt, deaktiveres administrator-SSPR for alle administratorroller i tenant'en."/>
                                 <CheckBox x:Name="WPFCreateRegularSSPRScopeGroup" Content="Opret/opdatér regular SSPR scope-gruppe: alle brugere undtagen break-glass konti"/>
+                                <CheckBox x:Name="WPFRegularSSPROnly" Content="Kør kun regular SSPR scope-gruppe for eksisterende break-glass konti"/>
                                 <TextBlock Foreground="#FBBF24" Text="Configuratoren opretter gruppen og reglen. Vælg derefter gruppen manuelt under Entra Password reset &gt; Properties &gt; Selected." TextWrapping="Wrap"/>
                                 <CheckBox x:Name="WPFPatchCAPolicies" Content="Phase 1: Ekskludér CA-BreakGlass-Exclude fra alle eksisterende Conditional Access-politikker"/>
                                 <TextBlock Foreground="#FBBF24" Text="Dette ændrer eksisterende Conditional Access-politikker. Der oprettes backup før ændringerne udføres."/>
@@ -546,8 +547,8 @@
                     <DockPanel>
                         <StackPanel DockPanel.Dock="Top">
                             <TextBlock Text="Phase 1a - Grundopsætning" FontSize="22" FontWeight="SemiBold" Margin="0,0,0,12"/>
-                            <TextBlock Text="Dette trin opretter/genbruger CA-BreakGlass-Exclude, de to konti, regular SSPR scope-gruppe, Global Administrator assignments, Admin SSPR, TAP, gruppemedlemskab, FIDO2/passkey method policy, registration campaign exclusion og CA exclusions."/>
-                            <TextBlock Foreground="#FBBF24" Margin="0,8,0,0" Text="Admin SSPR kan tage op til 60 minutter før ændringen slår igennem. TAP oprettes som genanvendelig i 2 timer."/>
+                            <TextBlock x:Name="WPFApplyIntro" Text="Dette trin opretter/genbruger CA-BreakGlass-Exclude, de to konti, regular SSPR scope-gruppe, Global Administrator assignments, Admin SSPR, TAP, gruppemedlemskab, FIDO2/passkey method policy, registration campaign exclusion og CA exclusions." TextWrapping="Wrap"/>
+                            <TextBlock x:Name="WPFApplyWarning" Foreground="#FBBF24" Margin="0,8,0,0" Text="Admin SSPR kan tage op til 60 minutter før ændringen slår igennem. TAP oprettes som genanvendelig i 2 timer." TextWrapping="Wrap"/>
                             <Button x:Name="WPFApplyConfiguration" Content="Kør Phase 1a" Width="180" HorizontalAlignment="Left" Margin="0,14,0,8"/>
                         </StackPanel>
                         <TextBox x:Name="WPFExecutionLog" IsReadOnly="True" AcceptsReturn="True" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" FontFamily="Consolas"/>

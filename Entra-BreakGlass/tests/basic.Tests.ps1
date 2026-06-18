@@ -74,6 +74,24 @@ Describe 'Ebg-BreakGlass basic functions' {
         if ($plan.BreakGlassCAPolicyStatus -ne 'Phase 2: oprettes disabled og tildeles direkte til de 2 konti') { throw "Unexpected BG CA plan: $($plan.BreakGlassCAPolicyStatus)" }
     }
 
+    It 'plans regular SSPR-only without tenant changes outside the SSPR group' {
+        $config = @{
+            UserPrefix1 = 'horse.unit'; UserPrefix2 = 'master.player'
+            DisplayName1 = 'Horse Unit'; DisplayName2 = 'Master Player'
+            GroupName = 'CA-BreakGlass-Exclude'; CreateUsers = $false; CreateGroup = $false
+            AddUsersToGroup = $false; DisableAdminSSPR = $false; PatchCAPolicies = $false
+            CreateRegularSSPRScopeGroup = $true; RegularSSPROnly = $true; RegularSSPRGroupName = 'SG-SSPR-AllUsers-Except-BreakGlass'; RegularSSPRGroupDescription = 'Test'
+            CreateAuthenticationStrength = $false; CreateBreakGlassCAPolicy = $false; EnableBreakGlassCAPolicy = $false
+            AuthenticationStrengthName = 'BreakGlass-FIDO2'; BreakGlassCAPolicyName = '[CA999] IdentityProtection-AnyApp-AnyPlatform-BreakGlass-FIDO2'
+            AAGUIDs = @()
+        }
+        $plan = New-EbgPlanObject -Config $config
+        if (-not $plan.RegularSSPROnly) { throw 'Plan should be regular SSPR-only.' }
+        if ($plan.AssignGlobalAdministrator) { throw 'Regular SSPR-only should not assign Global Administrator.' }
+        if ($plan.TemporaryAccessPassStatus -ne 'Springes over - SSPR-only') { throw "Unexpected TAP status: $($plan.TemporaryAccessPassStatus)" }
+        if ($plan.PatchConditionalAccess) { throw 'Regular SSPR-only should not patch Conditional Access.' }
+    }
+
     It 'preserves existing CA exclusions in mock patch plan' {
         $policies = @(Get-EbgConditionalAccessPolicies)
         $result = Add-EbgGroupExclusionToCAPolicies -Policies $policies -GroupId 'mock-ca-exclude-group' -Apply $false

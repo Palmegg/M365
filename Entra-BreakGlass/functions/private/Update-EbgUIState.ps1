@@ -41,6 +41,7 @@ function Update-EbgUIState {
     $hasPhase1 = $null -ne $sync.State.Phase1Result
     $hasHandoff = -not [string]::IsNullOrWhiteSpace([string]$sync.State.HandoffPath)
     $resumePhase2 = [string]$sync.State.StartMode -eq 'Phase2'
+    $regularSSPROnly = [bool]$sync.WPFRegularSSPROnly.IsChecked
     $canPhase2 = if ($resumePhase2) {
         $risk -and $hasGraph
     }
@@ -117,6 +118,35 @@ function Update-EbgUIState {
         $sync.WPFCurrentPhaseText.Text = "Aktuel fase: $phaseLabel"
     }
 
+    if ($sync.WPFCreateRegularSSPRScopeGroup -and $regularSSPROnly) {
+        $sync.WPFCreateRegularSSPRScopeGroup.IsChecked = $true
+    }
+    foreach ($phase1Option in @('WPFCreateUsers','WPFCreateGroup','WPFAddUsersToGroup','WPFDisableAdminSSPR','WPFPatchCAPolicies')) {
+        if ($sync[$phase1Option]) { $sync[$phase1Option].IsEnabled = -not $regularSSPROnly }
+    }
+    if ($sync.WPFCreateRegularSSPRScopeGroup) {
+        $sync.WPFCreateRegularSSPRScopeGroup.IsEnabled = -not $regularSSPROnly
+    }
+    if ($sync.WPFApplyIntro) {
+        $sync.WPFApplyIntro.Text = if ($regularSSPROnly) {
+            'Dette trin opretter/opdaterer kun regular SSPR dynamic security group for eksisterende break-glass konti. Der oprettes ikke brugere, TAP, roller, CA exclusions, FIDO2 policy eller Admin SSPR ændringer.'
+        }
+        else {
+            'Dette trin opretter/genbruger CA-BreakGlass-Exclude, de to konti, regular SSPR scope-gruppe, Global Administrator assignments, Admin SSPR, TAP, gruppemedlemskab, FIDO2/passkey method policy, registration campaign exclusion og CA exclusions.'
+        }
+    }
+    if ($sync.WPFApplyWarning) {
+        $sync.WPFApplyWarning.Text = if ($regularSSPROnly) {
+            'Begge break-glass konti skal allerede findes. Gruppen skal stadig vælges manuelt under Entra Password reset > Properties > Selected.'
+        }
+        else {
+            'Admin SSPR kan tage op til 60 minutter før ændringen slår igennem. TAP oprettes som genanvendelig i 2 timer.'
+        }
+    }
+    if ($sync.WPFApplyConfiguration -and -not [bool]$sync.UI.ProcessRunning) {
+        $sync.WPFApplyConfiguration.Content = if ($regularSSPROnly) { 'Kør regular SSPR-only' } else { 'Kør Phase 1a' }
+    }
+
     $phaseDefinitions = @(
         @{
             Key='Prep'; Card='WPFPhasePrepCard'; Title='WPFPhasePrepTitle'; Status='WPFPhasePrepStatus'
@@ -133,7 +163,7 @@ function Update-EbgUIState {
             IsActive=($current -eq 'Apply')
             IsDone=($hasPhase1 -or $resumePhase2)
             IsAvailable=($hasPlan -or $resumePhase2)
-            ActiveText='Aktiv: opretter konti, TAP og CA exclusions'
+            ActiveText=$(if ($regularSSPROnly) { 'Aktiv: regular SSPR group only' } else { 'Aktiv: opretter konti, TAP og CA exclusions' })
             DoneText=$(if ($resumePhase2) { 'Springes over - Phase 1 er allerede udført' } else { 'Færdig' })
             LockedText='Låst indtil plan er genereret'
             ReadyText='Klar til kørsel'

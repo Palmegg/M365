@@ -29,6 +29,7 @@ function Initialize-EbgWPFUI {
     $sync.WPFDisableAdminSSPR.IsChecked = [bool]$defaults.disableAdminSSPR
     $sync.WPFPatchCAPolicies.IsChecked = [bool]$defaults.patchCAPolicies
     $sync.WPFCreateRegularSSPRScopeGroup.IsChecked = [bool]$defaults.createRegularSSPRScopeGroup
+    $sync.WPFRegularSSPROnly.IsChecked = [bool]$defaults.regularSSPROnly
     if ($sync['WPFCreateAuthenticationStrength']) { $sync['WPFCreateAuthenticationStrength'].IsChecked = [bool]$defaults.createAuthenticationStrength }
     if ($sync['WPFCreateBreakGlassCAPolicy']) { $sync['WPFCreateBreakGlassCAPolicy'].IsChecked = [bool]$defaults.createBreakGlassCAPolicy }
     if ($sync['WPFEnableBreakGlassCAPolicy']) { $sync['WPFEnableBreakGlassCAPolicy'].IsChecked = [bool]$defaults.enableBreakGlassCAPolicy }
