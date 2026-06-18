@@ -1265,7 +1265,7 @@ function Get-EbgWorkflowSteps {
     param()
 
     if ([string]$sync.State.StartMode -eq 'Phase2') {
-        return @('Welcome','Connect','Discovery','Config','Phase2','Handoff')
+        return @('Welcome','Connect','Config','Phase2','Handoff')
     }
 
     return @('Welcome','Connect','Discovery','Config','Plan','Apply','ManualFido','Phase2','Handoff')
@@ -2315,7 +2315,7 @@ function Update-EbgUIState {
     $hasHandoff = -not [string]::IsNullOrWhiteSpace([string]$sync.State.HandoffPath)
     $resumePhase2 = [string]$sync.State.StartMode -eq 'Phase2'
     $canPhase2 = if ($resumePhase2) {
-        $risk -and $hasGraph -and $hasDiscovery -and $hasVisitedConfig
+        $risk -and $hasGraph -and $hasVisitedConfig
     }
     else {
         $risk -and $hasGraph -and $hasPhase1
@@ -2323,8 +2323,8 @@ function Update-EbgUIState {
 
     $sync.WPFStepWelcome.IsEnabled = $true
     $sync.WPFStepConnect.IsEnabled = $risk
-    $sync.WPFStepDiscovery.IsEnabled = $risk -and $hasGraph
-    $sync.WPFStepConfig.IsEnabled = $risk -and $hasGraph -and $hasDiscovery
+    $sync.WPFStepDiscovery.IsEnabled = (-not $resumePhase2) -and $risk -and $hasGraph
+    $sync.WPFStepConfig.IsEnabled = $risk -and $hasGraph -and ($resumePhase2 -or $hasDiscovery)
     $sync.WPFStepPlan.IsEnabled = (-not $resumePhase2) -and $risk -and $hasGraph -and $hasDiscovery -and $hasVisitedConfig
     $sync.WPFStepApply.IsEnabled = (-not $resumePhase2) -and $risk -and $hasGraph -and $hasPlan
     $sync.WPFStepManualFido.IsEnabled = (-not $resumePhase2) -and $risk -and $hasPhase1
@@ -2364,7 +2364,7 @@ function Update-EbgUIState {
         Welcome = 'Start'
         Connect = 'Forbind'
         Discovery = 'Discovery'
-        Config = 'Phase 1 konfiguration'
+        Config = $(if ($resumePhase2) { 'Phase 2 konfiguration' } else { 'Phase 1 konfiguration' })
         Plan = 'Phase 1 plan'
         Apply = 'Phase 1a'
         ManualFido = 'Phase 1b manuel FIDO2'
@@ -2380,7 +2380,7 @@ function Update-EbgUIState {
     }
     if ($sync.WPFCurrentPhaseText) {
         $phaseLabel = switch ($current) {
-            { $_ -in @('Welcome','Connect','Discovery','Config','Plan') } { 'Forberedelse' }
+            { $_ -in @('Welcome','Connect','Discovery','Config','Plan') } { if ($resumePhase2) { 'Forberedelse til Phase 2' } else { 'Forberedelse' } }
             'Apply' { 'Phase 1a - automatiske tenant-ændringer' }
             'ManualFido' { 'Phase 1b - manuel FIDO2 registrering' }
             'Phase2' { 'Phase 2 - FIDO2 enforcement forberedes' }
@@ -2396,7 +2396,7 @@ function Update-EbgUIState {
             IsActive=($current -in @('Welcome','Connect','Discovery','Config','Plan'))
             IsDone=($current -in @('Apply','ManualFido','Phase2','Handoff'))
             IsAvailable=$true
-            ActiveText='Aktiv: start, connect, discovery og plan'
+            ActiveText=$(if ($resumePhase2) { 'Aktiv: start, connect og Phase 2 config' } else { 'Aktiv: start, connect, discovery og plan' })
             DoneText='Færdig'
             LockedText=''
             ReadyText='Klar'
@@ -3652,7 +3652,7 @@ function Stop-EbgCurrentTask {
 $sync.configs.appsettings = @'
 {
   "name": "Entra Break Glass Configurator",
-  "version": "2.4.21",
+  "version": "2.4.22",
   "outputRoot": ".\\Output",
   "groupName": "CA-BreakGlass-Exclude",
   "groupDescription": "Security group used to exclude dedicated break-glass accounts from existing Conditional Access policies.",
@@ -3660,6 +3660,7 @@ $sync.configs.appsettings = @'
   "authenticationStrengthDescription": "Requires passkeys (FIDO2) from approved attested security key AAGUIDs for break-glass accounts.",
   "breakGlassCAPolicyName": "[CA999] IdentityProtection-AnyApp-AnyPlatform-BreakGlass-FIDO2"
 }
+
 
 
 '@ | ConvertFrom-Json
