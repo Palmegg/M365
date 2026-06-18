@@ -42,6 +42,7 @@ function Invoke-EbgConnectTenant {
 
         $workerRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("EbgGraphLogin-{0}" -f ([guid]::NewGuid().ToString('N')))
         New-Item -ItemType Directory -Path $workerRoot -Force | Out-Null
+        $disconnectScript = Join-Path $workerRoot 'Disconnect-MgGraph-Sessions.ps1'
         $workerScript = Join-Path $workerRoot 'Connect-MgGraph-Login.ps1'
         $resultPath = Join-Path $workerRoot 'result.json'
         $scopeLiteral = (($scopes | ForEach-Object { "'$($_.Replace("'", "''"))'" }) -join ', ')
@@ -92,10 +93,31 @@ finally {
 }
 "@
         Set-Content -LiteralPath $workerScript -Value $workerCode -Encoding UTF8
+        $disconnectCode = @"
+`$ErrorActionPreference = 'SilentlyContinue'
+Import-Module Microsoft.Graph.Authentication -ErrorAction SilentlyContinue
+try { Set-MgGraphOption -DisableLoginByWAM `$true -ErrorAction SilentlyContinue | Out-Null } catch {}
+try { Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null } catch {}
+"@
+        Set-Content -LiteralPath $disconnectScript -Value $disconnectCode -Encoding UTF8
         $pwshPath = Join-Path $PSHOME 'pwsh.exe'
         if (-not (Test-Path -LiteralPath $pwshPath)) {
             $pwshPath = (Get-Command pwsh -ErrorAction Stop).Source
         }
+
+        Write-EbgStatus -Busy -Message 'Rydder eksisterende Microsoft Graph sessioner før login...'
+        $disconnectProcess = Start-Process -FilePath $pwshPath -ArgumentList @(
+            '-NoProfile',
+            '-ExecutionPolicy',
+            'Bypass',
+            '-File',
+            $disconnectScript
+        ) -WindowStyle Hidden -PassThru
+        if (-not $disconnectProcess.WaitForExit(30000)) {
+            try { Stop-Process -Id $disconnectProcess.Id -Force -ErrorAction SilentlyContinue } catch {}
+            throw 'Kunne ikke rydde eksisterende Microsoft Graph sessioner inden for 30 sekunder.'
+        }
+
         $process = Start-Process -FilePath $pwshPath -ArgumentList @(
             '-NoProfile',
             '-ExecutionPolicy',
