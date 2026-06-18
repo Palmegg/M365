@@ -1219,7 +1219,7 @@ function New-EbgHandoffHtml {
     <tr><th>Konto 2 enabled</th><td>$(ConvertTo-EbgHtmlValue (Get-EbgObjectPropertyValue -InputObject $account2 -Name 'AccountEnabled'))</td></tr>
   </table>
   <h2>Temporary Access Pass</h2>
-  <p>TAP oprettes i Phase 1 som one-time use med 2 timers varighed. Koderne må kun bruges til manuel FIDO2 bootstrap og skal fjernes efter Phase 2, hvis kunden vælger det.</p>
+  <p>TAP oprettes i Phase 1 med one-time use = No og 2 timers varighed. Koderne må kun bruges til manuel FIDO2 bootstrap og skal fjernes efter Phase 2, hvis kunden vælger det.</p>
   <h3>TAP-koder fra Phase 1</h3>
   $temporaryAccessPassTable
   <h3>TAP status</h3>
@@ -1297,6 +1297,7 @@ function New-EbgHandoffHtml {
     $sync.State.HandoffPath = $path
     return $path
 }
+
 function New-EbgOutputFolder {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string] $TenantId)
@@ -1342,7 +1343,7 @@ function New-EbgPlanObject {
     if ($user2) { $warnings += 'Konto 2 findes allerede. Password bliver ikke ændret automatisk.' }
     $warnings += 'Begge break-glass konti får direkte Global Administrator rolle på tenant scope (/).'
     if ($Config.DisableAdminSSPR) { $warnings += 'Administrator-SSPR deaktiveres tenant-wide og kan tage op til 60 minutter at slå igennem.' }
-    $warnings += 'Phase 1 opretter Temporary Access Pass for begge konti: one-time use = Yes, duration = 2 hours.'
+    $warnings += 'Phase 1 opretter Temporary Access Pass for begge konti: one-time use = No, duration = 2 hours.'
     $warnings += 'Phase 1b kræver manuel registrering af to FIDO2 security keys pr. konto.'
     $warnings += 'Phase 2 opretter/opdaterer BreakGlass-FIDO2 authentication strength og en dedikeret CA-policy som disabled.'
     if ($Config.PatchCAPolicies) { $warnings += 'Eksisterende Conditional Access-politikker ændres. Backup oprettes før ændringer.' }
@@ -1369,7 +1370,7 @@ function New-EbgPlanObject {
         PlannedAdminSSPRStatus    = if ($Config.DisableAdminSSPR) { if ($adminSSPREnabled) { 'Deaktiveres' } else { 'Allerede deaktiveret' } } else { 'Uændret' }
         AuthenticationStrengthName = $Config.AuthenticationStrengthName
         AuthenticationStrengthAAGUIDs = @($Config.AAGUIDs)
-        TemporaryAccessPassStatus    = 'Phase 1: oprettes for begge konti, one-time use, 2 timer'
+        TemporaryAccessPassStatus    = 'Phase 1: oprettes for begge konti, genanvendelig i 2 timer'
         AuthenticationStrengthStatus = if (@($Config.AAGUIDs).Count -gt 0) { 'Phase 2: oprettes/opdateres med angivne + fundne AAGUIDs' } else { 'Phase 2: oprettes/opdateres efter automatisk AAGUID refresh' }
         BreakGlassCAPolicyName    = $Config.BreakGlassCAPolicyName
         BreakGlassCAPolicyStatus  = 'Phase 2: oprettes disabled og tildeles direkte til de 2 konti'
@@ -1385,6 +1386,7 @@ function New-EbgPlanObject {
     $sync.State.Plan = $plan
     return $plan
 }
+
 function New-EbgRandomPassword {
     [CmdletBinding()]
     param([int] $Length = 28)
@@ -1437,7 +1439,7 @@ function New-EbgTemporaryAccessPass {
     param(
         [Parameter(Mandatory)] $User,
         [int] $LifetimeInMinutes = 120,
-        [bool] $IsUsableOnce = $true,
+        [bool] $IsUsableOnce = $false,
         [Parameter(Mandatory)][bool] $Apply
     )
 
@@ -2318,7 +2320,7 @@ Phase 1a udfører:
 1. Sikrer CA-BreakGlass-Exclude security group
 2. Opretter/genbruger de 2 break-glass konti
 3. Deaktiverer Admin SSPR tenant-wide: $($config.DisableAdminSSPR)
-4. Opretter Temporary Access Pass: one-time use = Yes, duration = 2 hours
+4. Opretter Temporary Access Pass: one-time use = No, duration = 2 hours
 5. Tildeler direkte Global Administrator rolle
 6. Melder konti ind i exclude-gruppen
 7. Ekskluderer gruppen fra eksisterende CA policies: $($config.PatchCAPolicies)
@@ -2431,7 +2433,7 @@ Vil du fortsætte?
         [System.Windows.Forms.Application]::DoEvents()
         $temporaryAccessPasses = @()
         foreach ($user in $users | Where-Object { Get-EbgObjectPropertyValue -InputObject $_ -Name 'id' }) {
-            $temporaryAccessPasses += New-EbgTemporaryAccessPass -User $user -LifetimeInMinutes 120 -IsUsableOnce $true -Apply $true
+            $temporaryAccessPasses += New-EbgTemporaryAccessPass -User $user -LifetimeInMinutes 120 -IsUsableOnce $false -Apply $true
         }
 
         Write-EbgLog -Message 'Phase 1a step 6/10: Tildeler direkte Global Administrator rolle...'
@@ -3253,7 +3255,7 @@ function Stop-EbgCurrentTask {
 $sync.configs.appsettings = @'
 {
   "name": "Entra Break Glass Configurator",
-  "version": "2.4.13",
+  "version": "2.4.14",
   "outputRoot": ".\\Output",
   "groupName": "CA-BreakGlass-Exclude",
   "groupDescription": "Security group used to exclude dedicated break-glass accounts from existing Conditional Access policies.",
@@ -3693,7 +3695,7 @@ $inputXML = @'
                             <TextBlock Margin="0,12,0,0" Text="Phase 2 refresher kontiene, læser FIDO2 AAGUIDs, kan slette TAP, opretter BreakGlass-FIDO2 authentication strength og opretter en dedikeret CA-policy som disabled."/>
                             <TextBlock Margin="0,12,0,0" Text="Værktøjet forbinder kun til Microsoft Graph. Det bruger ikke Azure, PIM, RMAU, Log Analytics eller Sentinel."/>
                             <TextBlock Margin="0,12,0,0" Text="Discovery og Plan foretager ingen ændringer. Ændringer udføres først i Phase 1 og Phase 2."/>
-                            <TextBlock Margin="0,12,0,0" Text="Initiale passwords og TAP-koder skrives ikke til almindelig log. TAP-koder er one-time use og gyldige i 2 timer."/>
+                            <TextBlock Margin="0,12,0,0" Text="Initiale passwords og TAP-koder skrives ikke til almindelig log. TAP-koder kan bruges flere gange inden for 2 timer."/>
                             <CheckBox x:Name="WPFWelcomeRiskAccepted" Margin="0,24,0,0" Content="Jeg forstår at dette script ændrer sikkerhedskritisk tenant-konfiguration."/>
                         </StackPanel>
                     </ScrollViewer>
@@ -3837,7 +3839,7 @@ $inputXML = @'
                         <StackPanel DockPanel.Dock="Top">
                             <TextBlock Text="Phase 1a - Grundopsætning" FontSize="22" FontWeight="SemiBold" Margin="0,0,0,12"/>
                             <TextBlock Text="Dette trin opretter/genbruger CA-BreakGlass-Exclude, de to konti, Global Administrator assignments, Admin SSPR, TAP, gruppemedlemskab og CA exclusions."/>
-                            <TextBlock Foreground="#FBBF24" Margin="0,8,0,0" Text="Admin SSPR kan tage op til 60 minutter før ændringen slår igennem. TAP oprettes som one-time use med 2 timers varighed."/>
+                            <TextBlock Foreground="#FBBF24" Margin="0,8,0,0" Text="Admin SSPR kan tage op til 60 minutter før ændringen slår igennem. TAP oprettes som genanvendelig i 2 timer."/>
                             <Button x:Name="WPFApplyConfiguration" Content="Kør Phase 1a" Width="180" HorizontalAlignment="Left" Margin="0,14,0,8"/>
                         </StackPanel>
                         <TextBox x:Name="WPFExecutionLog" IsReadOnly="True" AcceptsReturn="True" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" FontFamily="Consolas"/>

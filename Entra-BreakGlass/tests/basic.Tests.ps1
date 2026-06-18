@@ -51,7 +51,7 @@ Describe 'Ebg-BreakGlass basic functions' {
         $plan = New-EbgPlanObject -Config $config
         if ($plan.Account1UPN -ne 'horse.unit@contoso.onmicrosoft.com') { throw "Unexpected planned UPN: $($plan.Account1UPN)" }
         if ($plan.PlannedAdminSSPRStatus -ne 'Deaktiveres') { throw "Unexpected Admin SSPR plan: $($plan.PlannedAdminSSPRStatus)" }
-        if ($plan.TemporaryAccessPassStatus -ne 'Phase 1: oprettes for begge konti, one-time use, 2 timer') { throw "Unexpected TAP plan: $($plan.TemporaryAccessPassStatus)" }
+        if ($plan.TemporaryAccessPassStatus -ne 'Phase 1: oprettes for begge konti, genanvendelig i 2 timer') { throw "Unexpected TAP plan: $($plan.TemporaryAccessPassStatus)" }
         if ($plan.AuthenticationStrengthStatus -ne 'Phase 2: oprettes/opdateres med angivne + fundne AAGUIDs') { throw "Unexpected auth strength plan: $($plan.AuthenticationStrengthStatus)" }
         if ($plan.BreakGlassCAPolicyStatus -ne 'Phase 2: oprettes disabled og tildeles direkte til de 2 konti') { throw "Unexpected BG CA plan: $($plan.BreakGlassCAPolicyStatus)" }
     }
@@ -125,9 +125,9 @@ Describe 'Ebg-BreakGlass basic functions' {
 
     It 'creates Temporary Access Pass in mock mode' {
         $user = @{ id = 'mock-user-2'; userPrincipalName = 'svc_ea_02@contoso.onmicrosoft.com' }
-        $tap = New-EbgTemporaryAccessPass -User $user -LifetimeInMinutes 120 -IsUsableOnce $true -Apply $true
+        $tap = New-EbgTemporaryAccessPass -User $user -LifetimeInMinutes 120 -IsUsableOnce $false -Apply $true
         if ($tap.Status -ne 'Created') { throw "Unexpected TAP status: $($tap.Status)" }
-        if ($tap.isUsableOnce -ne $true) { throw "Unexpected TAP one-time setting: $($tap.isUsableOnce)" }
+        if ($tap.isUsableOnce -ne $false) { throw "Unexpected TAP one-time setting: $($tap.isUsableOnce)" }
         if ($tap.lifetimeInMinutes -ne 120) { throw "Unexpected TAP lifetime: $($tap.lifetimeInMinutes)" }
     }
 

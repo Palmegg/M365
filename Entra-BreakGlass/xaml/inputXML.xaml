@@ -367,7 +367,7 @@
                             <TextBlock Margin="0,12,0,0" Text="Phase 2 refresher kontiene, læser FIDO2 AAGUIDs, kan slette TAP, opretter BreakGlass-FIDO2 authentication strength og opretter en dedikeret CA-policy som disabled."/>
                             <TextBlock Margin="0,12,0,0" Text="Værktøjet forbinder kun til Microsoft Graph. Det bruger ikke Azure, PIM, RMAU, Log Analytics eller Sentinel."/>
                             <TextBlock Margin="0,12,0,0" Text="Discovery og Plan foretager ingen ændringer. Ændringer udføres først i Phase 1 og Phase 2."/>
-                            <TextBlock Margin="0,12,0,0" Text="Initiale passwords og TAP-koder skrives ikke til almindelig log. TAP-koder er one-time use og gyldige i 2 timer."/>
+                            <TextBlock Margin="0,12,0,0" Text="Initiale passwords og TAP-koder skrives ikke til almindelig log. TAP-koder kan bruges flere gange inden for 2 timer."/>
                             <CheckBox x:Name="WPFWelcomeRiskAccepted" Margin="0,24,0,0" Content="Jeg forstår at dette script ændrer sikkerhedskritisk tenant-konfiguration."/>
                         </StackPanel>
                     </ScrollViewer>
@@ -511,7 +511,7 @@
                         <StackPanel DockPanel.Dock="Top">
                             <TextBlock Text="Phase 1a - Grundopsætning" FontSize="22" FontWeight="SemiBold" Margin="0,0,0,12"/>
                             <TextBlock Text="Dette trin opretter/genbruger CA-BreakGlass-Exclude, de to konti, Global Administrator assignments, Admin SSPR, TAP, gruppemedlemskab og CA exclusions."/>
-                            <TextBlock Foreground="#FBBF24" Margin="0,8,0,0" Text="Admin SSPR kan tage op til 60 minutter før ændringen slår igennem. TAP oprettes som one-time use med 2 timers varighed."/>
+                            <TextBlock Foreground="#FBBF24" Margin="0,8,0,0" Text="Admin SSPR kan tage op til 60 minutter før ændringen slår igennem. TAP oprettes som genanvendelig i 2 timer."/>
                             <Button x:Name="WPFApplyConfiguration" Content="Kør Phase 1a" Width="180" HorizontalAlignment="Left" Margin="0,14,0,8"/>
                         </StackPanel>
                         <TextBox x:Name="WPFExecutionLog" IsReadOnly="True" AcceptsReturn="True" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" FontFamily="Consolas"/>

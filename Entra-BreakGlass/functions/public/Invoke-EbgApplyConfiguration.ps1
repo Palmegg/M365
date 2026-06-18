@@ -26,7 +26,7 @@ Phase 1a udfører:
 1. Sikrer CA-BreakGlass-Exclude security group
 2. Opretter/genbruger de 2 break-glass konti
 3. Deaktiverer Admin SSPR tenant-wide: $($config.DisableAdminSSPR)
-4. Opretter Temporary Access Pass: one-time use = Yes, duration = 2 hours
+4. Opretter Temporary Access Pass: one-time use = No, duration = 2 hours
 5. Tildeler direkte Global Administrator rolle
 6. Melder konti ind i exclude-gruppen
 7. Ekskluderer gruppen fra eksisterende CA policies: $($config.PatchCAPolicies)
@@ -139,7 +139,7 @@ Vil du fortsætte?
         [System.Windows.Forms.Application]::DoEvents()
         $temporaryAccessPasses = @()
         foreach ($user in $users | Where-Object { Get-EbgObjectPropertyValue -InputObject $_ -Name 'id' }) {
-            $temporaryAccessPasses += New-EbgTemporaryAccessPass -User $user -LifetimeInMinutes 120 -IsUsableOnce $true -Apply $true
+            $temporaryAccessPasses += New-EbgTemporaryAccessPass -User $user -LifetimeInMinutes 120 -IsUsableOnce $false -Apply $true
         }
 
         Write-EbgLog -Message 'Phase 1a step 6/10: Tildeler direkte Global Administrator rolle...'

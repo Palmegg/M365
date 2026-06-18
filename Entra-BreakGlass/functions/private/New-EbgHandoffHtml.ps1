@@ -91,7 +91,7 @@ function New-EbgHandoffHtml {
     <tr><th>Konto 2 enabled</th><td>$(ConvertTo-EbgHtmlValue (Get-EbgObjectPropertyValue -InputObject $account2 -Name 'AccountEnabled'))</td></tr>
   </table>
   <h2>Temporary Access Pass</h2>
-  <p>TAP oprettes i Phase 1 som one-time use med 2 timers varighed. Koderne må kun bruges til manuel FIDO2 bootstrap og skal fjernes efter Phase 2, hvis kunden vælger det.</p>
+  <p>TAP oprettes i Phase 1 med one-time use = No og 2 timers varighed. Koderne må kun bruges til manuel FIDO2 bootstrap og skal fjernes efter Phase 2, hvis kunden vælger det.</p>
   <h3>TAP-koder fra Phase 1</h3>
   $temporaryAccessPassTable
   <h3>TAP status</h3>

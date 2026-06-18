@@ -3,7 +3,7 @@ function New-EbgTemporaryAccessPass {
     param(
         [Parameter(Mandatory)] $User,
         [int] $LifetimeInMinutes = 120,
-        [bool] $IsUsableOnce = $true,
+        [bool] $IsUsableOnce = $false,
         [Parameter(Mandatory)][bool] $Apply
     )
 
