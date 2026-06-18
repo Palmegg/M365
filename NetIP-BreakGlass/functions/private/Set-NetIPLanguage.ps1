@@ -36,7 +36,7 @@ function Set-NetIPLanguage {
         @{ Da = '.onmicrosoft.com domæne:'; En = '.onmicrosoft.com domain:' }
         @{ Da = 'Nej'; En = 'No' }
         @{ Da = 'Ja'; En = 'Yes' }
-        @{ Da = 'Discovery er read-only og kontrollerer kun de eksakte target UPNs, CA-BreakGlass-Exclude og eksisterende Conditional Access-politikker.'; En = 'Discovery is read-only and checks only the exact target UPNs, CA-BreakGlass-Exclude, and existing Conditional Access policies.' }
+        @{ Da = 'Discovery er read-only og viser aktive Global Administrator-konti, de aktuelle target UPNs, CA-BreakGlass-Exclude og eksisterende Conditional Access-politikker.'; En = 'Discovery is read-only and shows active Global Administrator accounts, the current target UPNs, CA-BreakGlass-Exclude, and existing Conditional Access policies.' }
         @{ Da = 'Kør discovery'; En = 'Run discovery' }
         @{ Da = 'Konfiguration'; En = 'Configuration' }
         @{ Da = 'Account 1 display name'; En = 'Account 1 display name' }

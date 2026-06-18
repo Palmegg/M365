@@ -524,6 +524,57 @@ function Export-NetIPJsonSafe {
     return $Path
 }
 
+function Get-NetIPActiveGlobalAdministrators {
+    [CmdletBinding()]
+    param()
+
+    if ($sync.App.Mock) {
+        return @(
+            [pscustomobject]@{
+                id = 'mock-ga-1'
+                displayName = 'Mock Global Admin'
+                userPrincipalName = 'mock.globaladmin@contoso.onmicrosoft.com'
+                accountEnabled = $true
+                assignmentType = 'Direct Global Administrator assignment'
+            }
+        )
+    }
+
+    $role = Get-NetIPGlobalAdministratorRoleDefinition
+    $roleId = [string](Get-NetIPObjectPropertyValue -InputObject $role -Name 'id')
+    if ([string]::IsNullOrWhiteSpace($roleId)) {
+        return @()
+    }
+
+    $filter = [uri]::EscapeDataString("roleDefinitionId eq '$roleId'")
+    $assignments = @(Get-NetIPGraphCollection -Uri "https://graph.microsoft.com/v1.0/roleManagement/directory/roleAssignments?`$filter=$filter&`$select=id,principalId,roleDefinitionId,directoryScopeId")
+    $admins = New-Object System.Collections.Generic.List[object]
+
+    foreach ($assignment in $assignments) {
+        $principalId = [string](Get-NetIPObjectPropertyValue -InputObject $assignment -Name 'principalId')
+        if ([string]::IsNullOrWhiteSpace($principalId)) { continue }
+
+        try {
+            $user = Invoke-NetIPGraphRequest -Method GET -Uri ("https://graph.microsoft.com/v1.0/users/{0}?`$select=id,displayName,userPrincipalName,accountEnabled" -f [uri]::EscapeDataString($principalId)) -SuppressNotFoundLog
+            $enabled = [bool](Get-NetIPObjectPropertyValue -InputObject $user -Name 'accountEnabled')
+            if (-not $enabled) { continue }
+
+            $admins.Add([pscustomobject]@{
+                id = [string](Get-NetIPObjectPropertyValue -InputObject $user -Name 'id')
+                displayName = [string](Get-NetIPObjectPropertyValue -InputObject $user -Name 'displayName')
+                userPrincipalName = [string](Get-NetIPObjectPropertyValue -InputObject $user -Name 'userPrincipalName')
+                accountEnabled = $enabled
+                assignmentType = 'Direct Global Administrator assignment'
+            })
+        }
+        catch {
+            Write-NetIPLog -Level WARN -Message "Springer Global Administrator principal over, fordi den ikke kunne læses som aktiv bruger: $principalId"
+        }
+    }
+
+    return @($admins | Sort-Object userPrincipalName -Unique)
+}
+
 function Get-NetIPAuthenticationStrengthByName {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string] $DisplayName)
@@ -1261,7 +1312,7 @@ function Set-NetIPLanguage {
         @{ Da = '.onmicrosoft.com domæne:'; En = '.onmicrosoft.com domain:' }
         @{ Da = 'Nej'; En = 'No' }
         @{ Da = 'Ja'; En = 'Yes' }
-        @{ Da = 'Discovery er read-only og kontrollerer kun de eksakte target UPNs, CA-BreakGlass-Exclude og eksisterende Conditional Access-politikker.'; En = 'Discovery is read-only and checks only the exact target UPNs, CA-BreakGlass-Exclude, and existing Conditional Access policies.' }
+        @{ Da = 'Discovery er read-only og viser aktive Global Administrator-konti, de aktuelle target UPNs, CA-BreakGlass-Exclude og eksisterende Conditional Access-politikker.'; En = 'Discovery is read-only and shows active Global Administrator accounts, the current target UPNs, CA-BreakGlass-Exclude, and existing Conditional Access policies.' }
         @{ Da = 'Kør discovery'; En = 'Run discovery' }
         @{ Da = 'Konfiguration'; En = 'Configuration' }
         @{ Da = 'Account 1 display name'; En = 'Account 1 display name' }
@@ -1342,14 +1393,19 @@ function Set-NetIPLanguage {
 
 function Set-NetIPNeutralAccountNamePair {
     [CmdletBinding()]
-    param()
+    param([switch] $Random)
 
     $pairs = @($sync.configs.defaults.neutralNamePairs)
     if ($pairs.Count -lt 1) {
         throw 'Der er ingen neutrale navnepar i defaults.json.'
     }
 
-    $nextIndex = ([int]$sync.State.NeutralNameIndex + 1) % $pairs.Count
+    $nextIndex = if ($Random) {
+        Get-Random -Minimum 0 -Maximum $pairs.Count
+    }
+    else {
+        ([int]$sync.State.NeutralNameIndex + 1) % $pairs.Count
+    }
     $sync.State.NeutralNameIndex = $nextIndex
     $pair = $pairs[$nextIndex]
 
@@ -1364,7 +1420,8 @@ function Set-NetIPNeutralAccountNamePair {
     $sync.WPFUserPrefix1.Text = ConvertTo-NetIPNeutralUserPrefix -DisplayName $account1
     $sync.WPFUserPrefix2.Text = ConvertTo-NetIPNeutralUserPrefix -DisplayName $account2
 
-    Write-NetIPLog -Message "Skiftede neutrale kontonavne til: $account1 / $account2"
+    $action = if ($Random) { 'Valgte tilfældige neutrale kontonavne' } else { 'Skiftede neutrale kontonavne' }
+    Write-NetIPLog -Message "${action} til: $account1 / $account2"
     Update-NetIPUIState
 }
 
@@ -1628,6 +1685,7 @@ function Initialize-NetIPWPFUI {
     $sync.WPFCreateBreakGlassCAPolicy.IsChecked = [bool]$defaults.createBreakGlassCAPolicy
     $sync.WPFEnableBreakGlassCAPolicy.IsChecked = [bool]$defaults.enableBreakGlassCAPolicy
     if ($sync.WPFLanguageSelector) { $sync.WPFLanguageSelector.SelectedIndex = 0 }
+    Set-NetIPNeutralAccountNamePair -Random
     Set-NetIPLanguage -Language $sync.State.Language
 
     if ($sync.App.Mock) {
@@ -1967,6 +2025,7 @@ function Invoke-NetIPDiscovery {
         $user2 = Get-NetIPUserByUpn -UserPrincipalName $upn2
         $group = Get-NetIPGroupByDisplayName -DisplayName $config.GroupName
         $policies = @(Get-NetIPConditionalAccessPolicies)
+        $activeGlobalAdmins = @(Get-NetIPActiveGlobalAdministrators)
         $already = @()
         $groupId = [string](Get-NetIPObjectPropertyValue -InputObject $group -Name 'id')
         if ($group -and $groupId) {
@@ -1982,12 +2041,13 @@ function Invoke-NetIPDiscovery {
             Group = $group
             CAPolicies = $policies
             CAPoliciesAlreadyExcluded = $already
+            ActiveGlobalAdministrators = $activeGlobalAdmins
             TargetUPN1 = $upn1
             TargetUPN2 = $upn2
             Timestamp = (Get-Date).ToString('o')
         }
         $sync.State.Discovery = $discovery
-        $summary = "User1: $(if($user1){'findes'}else{'mangler'}); User2: $(if($user2){'findes'}else{'mangler'}); Gruppe: $(if($group){'findes'}else{'mangler'}); CA policies: $($policies.Count)"
+        $summary = "Aktive Global Admins: $($activeGlobalAdmins.Count); Target user1: $(if($user1){'findes'}else{'mangler'}); Target user2: $(if($user2){'findes'}else{'mangler'}); Gruppe: $(if($group){'findes'}else{'mangler'}); CA policies: $($policies.Count)"
         $userMissingSeverity = if ($config.CreateUsers) { 'Warning' } else { 'Bad' }
         $groupMissingSeverity = if ($config.CreateGroup) { 'Warning' } else { 'Bad' }
         $excludedSeverity = if ($policies.Count -eq 0) {
@@ -2017,9 +2077,16 @@ function Invoke-NetIPDiscovery {
             [pscustomobject]@{ Severity = if($user1){'Good'}else{$userMissingSeverity}; Text = "Target user 1: $upn1 - $(if($user1){'Findes'}elseif($config.CreateUsers){'Mangler - planlagt oprettet'}else{'Mangler - oprettelse er fravalgt'})" },
             [pscustomobject]@{ Severity = if($user2){'Good'}else{$userMissingSeverity}; Text = "Target user 2: $upn2 - $(if($user2){'Findes'}elseif($config.CreateUsers){'Mangler - planlagt oprettet'}else{'Mangler - oprettelse er fravalgt'})" },
             [pscustomobject]@{ Severity = if($group){'Good'}else{$groupMissingSeverity}; Text = "Group $($config.GroupName): $(if($group){'Findes'}elseif($config.CreateGroup){'Mangler - planlagt oprettet'}else{'Mangler - oprettelse er fravalgt'})" },
+            [pscustomobject]@{ Severity = if($activeGlobalAdmins.Count -gt 0){'Info'}else{'Warning'}; Text = "Aktive direkte Global Administrator brugere: $($activeGlobalAdmins.Count)" },
             [pscustomobject]@{ Severity = 'Info'; Text = "Conditional Access policies: $($policies.Count)" },
             [pscustomobject]@{ Severity = $excludedSeverity; Text = "Policies der allerede ekskluderer gruppen: $($already.Count) af $($policies.Count)" }
         )
+        foreach ($admin in $activeGlobalAdmins) {
+            $lines += [pscustomobject]@{
+                Severity = 'Info'
+                Text = " - GA: $([string](Get-NetIPObjectPropertyValue -InputObject $admin -Name 'displayName')) <$([string](Get-NetIPObjectPropertyValue -InputObject $admin -Name 'userPrincipalName'))>"
+            }
+        }
         $sync.Form.Dispatcher.Invoke([System.Action]{
             $sync.WPFDiscoverySummary.Text = $summary
             $sync.WPFDiscoverySummary.Foreground = switch ($summarySeverity) {
@@ -2220,7 +2287,7 @@ function Move-NetIPWPFStep {
 $sync.configs.appsettings = @'
 {
   "name": "Entra Break Glass Configurator",
-  "version": "2.2.7",
+  "version": "2.2.8",
   "outputRoot": ".\\Output",
   "groupName": "CA-BreakGlass-Exclude",
   "groupDescription": "Security group used to exclude dedicated break-glass accounts from existing Conditional Access policies.",
@@ -2658,7 +2725,7 @@ $inputXML = @'
                     <DockPanel>
                         <StackPanel DockPanel.Dock="Top">
                             <TextBlock Text="Discovery" FontSize="22" FontWeight="SemiBold" Margin="0,0,0,12"/>
-                            <TextBlock Text="Discovery er read-only og kontrollerer kun de eksakte target UPNs, CA-BreakGlass-Exclude og eksisterende Conditional Access-politikker."/>
+                            <TextBlock Text="Discovery er read-only og viser aktive Global Administrator-konti, de aktuelle target UPNs, CA-BreakGlass-Exclude og eksisterende Conditional Access-politikker."/>
                             <Button x:Name="WPFRunDiscovery" Content="Kør discovery" Width="150" HorizontalAlignment="Left" Margin="0,14,0,8"/>
                             <TextBlock x:Name="WPFDiscoverySummary" FontWeight="SemiBold"/>
                         </StackPanel>

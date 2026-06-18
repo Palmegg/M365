@@ -1,13 +1,18 @@
 function Set-NetIPNeutralAccountNamePair {
     [CmdletBinding()]
-    param()
+    param([switch] $Random)
 
     $pairs = @($sync.configs.defaults.neutralNamePairs)
     if ($pairs.Count -lt 1) {
         throw 'Der er ingen neutrale navnepar i defaults.json.'
     }
 
-    $nextIndex = ([int]$sync.State.NeutralNameIndex + 1) % $pairs.Count
+    $nextIndex = if ($Random) {
+        Get-Random -Minimum 0 -Maximum $pairs.Count
+    }
+    else {
+        ([int]$sync.State.NeutralNameIndex + 1) % $pairs.Count
+    }
     $sync.State.NeutralNameIndex = $nextIndex
     $pair = $pairs[$nextIndex]
 
@@ -22,6 +27,7 @@ function Set-NetIPNeutralAccountNamePair {
     $sync.WPFUserPrefix1.Text = ConvertTo-NetIPNeutralUserPrefix -DisplayName $account1
     $sync.WPFUserPrefix2.Text = ConvertTo-NetIPNeutralUserPrefix -DisplayName $account2
 
-    Write-NetIPLog -Message "Skiftede neutrale kontonavne til: $account1 / $account2"
+    $action = if ($Random) { 'Valgte tilfældige neutrale kontonavne' } else { 'Skiftede neutrale kontonavne' }
+    Write-NetIPLog -Message "${action} til: $account1 / $account2"
     Update-NetIPUIState
 }

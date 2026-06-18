@@ -366,7 +366,7 @@
                     <DockPanel>
                         <StackPanel DockPanel.Dock="Top">
                             <TextBlock Text="Discovery" FontSize="22" FontWeight="SemiBold" Margin="0,0,0,12"/>
-                            <TextBlock Text="Discovery er read-only og kontrollerer kun de eksakte target UPNs, CA-BreakGlass-Exclude og eksisterende Conditional Access-politikker."/>
+                            <TextBlock Text="Discovery er read-only og viser aktive Global Administrator-konti, de aktuelle target UPNs, CA-BreakGlass-Exclude og eksisterende Conditional Access-politikker."/>
                             <Button x:Name="WPFRunDiscovery" Content="Kør discovery" Width="150" HorizontalAlignment="Left" Margin="0,14,0,8"/>
                             <TextBlock x:Name="WPFDiscoverySummary" FontWeight="SemiBold"/>
                         </StackPanel>

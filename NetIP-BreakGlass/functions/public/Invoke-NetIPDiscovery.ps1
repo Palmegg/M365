@@ -17,6 +17,7 @@ function Invoke-NetIPDiscovery {
         $user2 = Get-NetIPUserByUpn -UserPrincipalName $upn2
         $group = Get-NetIPGroupByDisplayName -DisplayName $config.GroupName
         $policies = @(Get-NetIPConditionalAccessPolicies)
+        $activeGlobalAdmins = @(Get-NetIPActiveGlobalAdministrators)
         $already = @()
         $groupId = [string](Get-NetIPObjectPropertyValue -InputObject $group -Name 'id')
         if ($group -and $groupId) {
@@ -32,12 +33,13 @@ function Invoke-NetIPDiscovery {
             Group = $group
             CAPolicies = $policies
             CAPoliciesAlreadyExcluded = $already
+            ActiveGlobalAdministrators = $activeGlobalAdmins
             TargetUPN1 = $upn1
             TargetUPN2 = $upn2
             Timestamp = (Get-Date).ToString('o')
         }
         $sync.State.Discovery = $discovery
-        $summary = "User1: $(if($user1){'findes'}else{'mangler'}); User2: $(if($user2){'findes'}else{'mangler'}); Gruppe: $(if($group){'findes'}else{'mangler'}); CA policies: $($policies.Count)"
+        $summary = "Aktive Global Admins: $($activeGlobalAdmins.Count); Target user1: $(if($user1){'findes'}else{'mangler'}); Target user2: $(if($user2){'findes'}else{'mangler'}); Gruppe: $(if($group){'findes'}else{'mangler'}); CA policies: $($policies.Count)"
         $userMissingSeverity = if ($config.CreateUsers) { 'Warning' } else { 'Bad' }
         $groupMissingSeverity = if ($config.CreateGroup) { 'Warning' } else { 'Bad' }
         $excludedSeverity = if ($policies.Count -eq 0) {
@@ -67,9 +69,16 @@ function Invoke-NetIPDiscovery {
             [pscustomobject]@{ Severity = if($user1){'Good'}else{$userMissingSeverity}; Text = "Target user 1: $upn1 - $(if($user1){'Findes'}elseif($config.CreateUsers){'Mangler - planlagt oprettet'}else{'Mangler - oprettelse er fravalgt'})" },
             [pscustomobject]@{ Severity = if($user2){'Good'}else{$userMissingSeverity}; Text = "Target user 2: $upn2 - $(if($user2){'Findes'}elseif($config.CreateUsers){'Mangler - planlagt oprettet'}else{'Mangler - oprettelse er fravalgt'})" },
             [pscustomobject]@{ Severity = if($group){'Good'}else{$groupMissingSeverity}; Text = "Group $($config.GroupName): $(if($group){'Findes'}elseif($config.CreateGroup){'Mangler - planlagt oprettet'}else{'Mangler - oprettelse er fravalgt'})" },
+            [pscustomobject]@{ Severity = if($activeGlobalAdmins.Count -gt 0){'Info'}else{'Warning'}; Text = "Aktive direkte Global Administrator brugere: $($activeGlobalAdmins.Count)" },
             [pscustomobject]@{ Severity = 'Info'; Text = "Conditional Access policies: $($policies.Count)" },
             [pscustomobject]@{ Severity = $excludedSeverity; Text = "Policies der allerede ekskluderer gruppen: $($already.Count) af $($policies.Count)" }
         )
+        foreach ($admin in $activeGlobalAdmins) {
+            $lines += [pscustomobject]@{
+                Severity = 'Info'
+                Text = " - GA: $([string](Get-NetIPObjectPropertyValue -InputObject $admin -Name 'displayName')) <$([string](Get-NetIPObjectPropertyValue -InputObject $admin -Name 'userPrincipalName'))>"
+            }
+        }
         $sync.Form.Dispatcher.Invoke([System.Action]{
             $sync.WPFDiscoverySummary.Text = $summary
             $sync.WPFDiscoverySummary.Foreground = switch ($summarySeverity) {
