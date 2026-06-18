@@ -9,6 +9,7 @@ PowerShell 7/WPF værktøj til en simpel Microsoft Graph-baseret v1 opsætning a
 - Før login-vinduet åbnes, køres en separat Graph sign-out cleanup, der kalder `Disconnect-MgGraph`.
 - Det separate login-vindue rydder også eksisterende Graph-session med `Disconnect-MgGraph` og beder derefter om nyt login.
 - Login-vinduet forsøger at deaktivere Web Account Manager login (`Set-MgGraphOption -DisableLoginByWAM $true`) før standard `Connect-MgGraph`.
+- Graph PowerShell token cachefiler `mg.msal.cache*` under `%LOCALAPPDATA%\.IdentityService` flyttes midlertidigt væk før login, så gammel Graph PowerShell konto ikke genbruges.
 - Finder tenantens `*.onmicrosoft.com` domæne.
 - Kontrollerer de eksakte target UPNs for to break-glass konti.
 - Phase 1a opretter manglende cloud-only brugere, hvis valgt.

@@ -65,6 +65,15 @@ try {
     Write-Host 'Log ind i Microsoft loginvinduet. Når login er gennemført, kan du lukke dette PowerShell-vindue for at fortsætte i WPF.' -ForegroundColor Yellow
     Write-Host ''
     Import-Module Microsoft.Graph.Authentication -ErrorAction Stop
+    Write-Host 'Rydder Graph PowerShell session/cache før login...' -ForegroundColor DarkYellow
+    `$identityServicePath = Join-Path `$env:LOCALAPPDATA '.IdentityService'
+    `$cacheBackupPath = Join-Path '$($workerRoot.Replace("'", "''"))' 'GraphTokenCacheBackup'
+    New-Item -ItemType Directory -Path `$cacheBackupPath -Force | Out-Null
+    if (Test-Path -LiteralPath `$identityServicePath) {
+        Get-ChildItem -LiteralPath `$identityServicePath -Filter 'mg.msal.cache*' -Force -ErrorAction SilentlyContinue | ForEach-Object {
+            try { Move-Item -LiteralPath `$_.FullName -Destination (Join-Path `$cacheBackupPath `$_.Name) -Force -ErrorAction Stop } catch {}
+        }
+    }
     try { Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null } catch {}
     try { Set-MgGraphOption -DisableLoginByWAM `$true -ErrorAction SilentlyContinue | Out-Null } catch {}
     `$scopes = @($scopeLiteral)
@@ -98,6 +107,14 @@ finally {
 Import-Module Microsoft.Graph.Authentication -ErrorAction SilentlyContinue
 try { Set-MgGraphOption -DisableLoginByWAM `$true -ErrorAction SilentlyContinue | Out-Null } catch {}
 try { Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null } catch {}
+`$identityServicePath = Join-Path `$env:LOCALAPPDATA '.IdentityService'
+`$cacheBackupPath = Join-Path '$($workerRoot.Replace("'", "''"))' 'GraphTokenCacheBackup'
+New-Item -ItemType Directory -Path `$cacheBackupPath -Force | Out-Null
+if (Test-Path -LiteralPath `$identityServicePath) {
+    Get-ChildItem -LiteralPath `$identityServicePath -Filter 'mg.msal.cache*' -Force -ErrorAction SilentlyContinue | ForEach-Object {
+        try { Move-Item -LiteralPath `$_.FullName -Destination (Join-Path `$cacheBackupPath `$_.Name) -Force -ErrorAction Stop } catch {}
+    }
+}
 "@
         Set-Content -LiteralPath $disconnectScript -Value $disconnectCode -Encoding UTF8
         $pwshPath = Join-Path $PSHOME 'pwsh.exe'
