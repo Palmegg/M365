@@ -40,4 +40,26 @@ function Update-NetIPUIState {
     $sync.WPFStepPlan.IsEnabled = $risk -and $hasGraph -and $hasDiscovery -and $hasVisitedConfig
     $sync.WPFStepApply.IsEnabled = $risk -and $hasGraph -and $hasPlan
     $sync.WPFStepHandoff.IsEnabled = $risk -and $hasHandoff
+
+    $stepMap = @{
+        Welcome = 'WPFStepWelcome'
+        Connect = 'WPFStepConnect'
+        Discovery = 'WPFStepDiscovery'
+        Config = 'WPFStepConfig'
+        Plan = 'WPFStepPlan'
+        Apply = 'WPFStepApply'
+        Handoff = 'WPFStepHandoff'
+    }
+    foreach ($entry in $stepMap.GetEnumerator()) {
+        $button = $sync[$entry.Value]
+        if (-not $button) { continue }
+        if ([string]$sync.UI.CurrentStep -eq [string]$entry.Key) {
+            $button.Background = [System.Windows.Media.BrushConverter]::new().ConvertFromString('#0F3040')
+            $button.BorderBrush = [System.Windows.Media.BrushConverter]::new().ConvertFromString('#38BDF8')
+        }
+        else {
+            $button.Background = [System.Windows.Media.BrushConverter]::new().ConvertFromString('#181B1F')
+            $button.BorderBrush = [System.Windows.Media.BrushConverter]::new().ConvertFromString('#E5E7EB')
+        }
+    }
 }

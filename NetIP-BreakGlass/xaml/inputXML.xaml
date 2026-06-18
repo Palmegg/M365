@@ -1,70 +1,163 @@
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Entra Break Glass Configurator"
-        Width="1180" Height="760" MinWidth="980" MinHeight="650"
+        Width="1280" Height="820" MinWidth="1080" MinHeight="720"
         WindowStartupLocation="CenterScreen"
-        Background="#F8FAFC">
+        Background="#0B0D0F">
     <Window.Resources>
+        <SolidColorBrush x:Key="AppBackground" Color="#0B0D0F"/>
+        <SolidColorBrush x:Key="PanelBackground" Color="#121416"/>
+        <SolidColorBrush x:Key="PanelRaised" Color="#181B1F"/>
+        <SolidColorBrush x:Key="TextPrimary" Color="#F8FAFC"/>
+        <SolidColorBrush x:Key="TextSecondary" Color="#CBD5E1"/>
+        <SolidColorBrush x:Key="TextMuted" Color="#94A3B8"/>
+        <SolidColorBrush x:Key="BorderStrong" Color="#E5E7EB"/>
+        <SolidColorBrush x:Key="BorderSoft" Color="#475569"/>
+        <SolidColorBrush x:Key="Accent" Color="#38BDF8"/>
+        <SolidColorBrush x:Key="AccentSoft" Color="#0F3040"/>
+        <DrawingBrush x:Key="GridBackground" TileMode="Tile" Viewport="0,0,24,24" ViewportUnits="Absolute">
+            <DrawingBrush.Drawing>
+                <DrawingGroup>
+                    <GeometryDrawing Brush="#0B0D0F">
+                        <GeometryDrawing.Geometry>
+                            <RectangleGeometry Rect="0,0,24,24"/>
+                        </GeometryDrawing.Geometry>
+                    </GeometryDrawing>
+                    <GeometryDrawing>
+                        <GeometryDrawing.Pen>
+                            <Pen Brush="#1E293B" Thickness="1"/>
+                        </GeometryDrawing.Pen>
+                        <GeometryDrawing.Geometry>
+                            <GeometryGroup>
+                                <LineGeometry StartPoint="0,0" EndPoint="24,0"/>
+                                <LineGeometry StartPoint="0,0" EndPoint="0,24"/>
+                            </GeometryGroup>
+                        </GeometryDrawing.Geometry>
+                    </GeometryDrawing>
+                    <GeometryDrawing>
+                        <GeometryDrawing.Pen>
+                            <Pen Brush="#111827" Thickness="1"/>
+                        </GeometryDrawing.Pen>
+                        <GeometryDrawing.Geometry>
+                            <GeometryGroup>
+                                <LineGeometry StartPoint="0,8" EndPoint="24,8"/>
+                                <LineGeometry StartPoint="0,16" EndPoint="24,16"/>
+                                <LineGeometry StartPoint="8,0" EndPoint="8,24"/>
+                                <LineGeometry StartPoint="16,0" EndPoint="16,24"/>
+                            </GeometryGroup>
+                        </GeometryDrawing.Geometry>
+                    </GeometryDrawing>
+                </DrawingGroup>
+            </DrawingBrush.Drawing>
+        </DrawingBrush>
         <Style TargetType="Button">
-            <Setter Property="MinHeight" Value="34"/>
+            <Setter Property="MinHeight" Value="38"/>
             <Setter Property="Margin" Value="0,0,0,8"/>
-            <Setter Property="Padding" Value="12,6"/>
+            <Setter Property="Padding" Value="14,8"/>
+            <Setter Property="Foreground" Value="{StaticResource TextPrimary}"/>
+            <Setter Property="Background" Value="{StaticResource PanelRaised}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource BorderStrong}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border x:Name="ButtonBorder" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="2" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="ButtonBorder" Property="Background" Value="#1F2937"/>
+                                <Setter TargetName="ButtonBorder" Property="BorderBrush" Value="{StaticResource Accent}"/>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="ButtonBorder" Property="Background" Value="{StaticResource AccentSoft}"/>
+                                <Setter TargetName="ButtonBorder" Property="BorderBrush" Value="{StaticResource Accent}"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Opacity" Value="0.38"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
         </Style>
         <Style TargetType="TextBox">
             <Setter Property="MinHeight" Value="28"/>
             <Setter Property="Margin" Value="0,2,0,8"/>
+            <Setter Property="Padding" Value="8,5"/>
+            <Setter Property="Foreground" Value="{StaticResource TextPrimary}"/>
+            <Setter Property="Background" Value="#0F1115"/>
+            <Setter Property="BorderBrush" Value="{StaticResource BorderSoft}"/>
+            <Setter Property="CaretBrush" Value="{StaticResource TextPrimary}"/>
+        </Style>
+        <Style TargetType="ComboBox">
+            <Setter Property="MinHeight" Value="30"/>
+            <Setter Property="Foreground" Value="#111827"/>
+            <Setter Property="Background" Value="#F8FAFC"/>
         </Style>
         <Style TargetType="CheckBox">
             <Setter Property="Margin" Value="0,4,0,8"/>
+            <Setter Property="Foreground" Value="{StaticResource TextPrimary}"/>
         </Style>
         <Style TargetType="TextBlock">
             <Setter Property="TextWrapping" Value="Wrap"/>
+            <Setter Property="Foreground" Value="{StaticResource TextPrimary}"/>
+        </Style>
+        <Style TargetType="RichTextBox">
+            <Setter Property="Foreground" Value="{StaticResource TextPrimary}"/>
+            <Setter Property="Background" Value="#0F1115"/>
+            <Setter Property="BorderBrush" Value="{StaticResource BorderSoft}"/>
+        </Style>
+        <Style TargetType="ScrollViewer">
+            <Setter Property="Padding" Value="0"/>
         </Style>
     </Window.Resources>
-    <Grid>
+    <Grid Background="{StaticResource GridBackground}">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
-        <Border Grid.Row="0" Background="#111827" Padding="18,14">
+        <Border Grid.Row="0" Background="#101214" BorderBrush="{StaticResource BorderSoft}" BorderThickness="0,0,0,1" Padding="22,18">
             <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
                 <StackPanel>
-                    <TextBlock x:Name="WPFAppTitle" Text="Entra Break Glass Configurator" Foreground="White" FontSize="24" FontWeight="SemiBold"/>
-                    <TextBlock x:Name="WPFAppSubtitle" Text="Simpel Microsoft Graph-baseret opsætning af break-glass konti og CA-exclude gruppe." Foreground="#CBD5E1" Margin="0,4,0,0"/>
+                    <TextBlock x:Name="WPFAppTitle" Text="Entra Break Glass Configurator" Foreground="{StaticResource TextPrimary}" FontSize="25" FontWeight="SemiBold"/>
+                    <TextBlock x:Name="WPFAppSubtitle" Text="Simpel Microsoft Graph-baseret opsætning af break-glass konti og CA-exclude gruppe." Foreground="{StaticResource TextSecondary}" Margin="0,5,0,0"/>
                 </StackPanel>
-                <Border Grid.Column="1" BorderBrush="#64748B" BorderThickness="1" Background="#1F2937" CornerRadius="4" Padding="10,5" VerticalAlignment="Top">
-                    <TextBlock x:Name="WPFVersionBadge" Foreground="#E5E7EB" FontWeight="SemiBold"/>
+                <Border Grid.Column="1" BorderBrush="{StaticResource BorderStrong}" BorderThickness="1" Background="#161A1F" CornerRadius="2" Padding="12,6" VerticalAlignment="Top">
+                    <TextBlock x:Name="WPFVersionBadge" Foreground="{StaticResource TextPrimary}" FontWeight="SemiBold"/>
                 </Border>
             </Grid>
         </Border>
 
-        <Grid Grid.Row="1">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="230"/>
-                <ColumnDefinition Width="*"/>
-            </Grid.ColumnDefinitions>
-            <Border Grid.Column="0" Background="#E5E7EB" BorderBrush="#CBD5E1" BorderThickness="0,0,1,0" Padding="14">
-                <StackPanel>
-                    <Button x:Name="WPFStepWelcome" Content="1. Velkommen"/>
-                    <Button x:Name="WPFStepConnect" Content="2. Forbind" IsEnabled="False"/>
-                    <Button x:Name="WPFStepDiscovery" Content="3. Discovery" IsEnabled="False"/>
-                    <Button x:Name="WPFStepConfig" Content="4. Konfiguration" IsEnabled="False"/>
-                    <Button x:Name="WPFStepPlan" Content="5. Plan" IsEnabled="False"/>
-                    <Button x:Name="WPFStepApply" Content="6. Udfør" IsEnabled="False"/>
-                    <Button x:Name="WPFStepHandoff" Content="7. Handoff" IsEnabled="False"/>
-                </StackPanel>
+        <Grid Grid.Row="1" Margin="18">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="*"/>
+            </Grid.RowDefinitions>
+            <Border Grid.Row="0" BorderBrush="{StaticResource BorderSoft}" BorderThickness="1" Background="#111316" Padding="12" Margin="0,0,0,14">
+                <UniformGrid Columns="7">
+                    <Button x:Name="WPFStepWelcome" Content="1. Velkommen" Margin="0,0,8,0"/>
+                    <Button x:Name="WPFStepConnect" Content="2. Forbind" IsEnabled="False" Margin="0,0,8,0"/>
+                    <Button x:Name="WPFStepDiscovery" Content="3. Discovery" IsEnabled="False" Margin="0,0,8,0"/>
+                    <Button x:Name="WPFStepConfig" Content="4. Konfiguration" IsEnabled="False" Margin="0,0,8,0"/>
+                    <Button x:Name="WPFStepPlan" Content="5. Plan" IsEnabled="False" Margin="0,0,8,0"/>
+                    <Button x:Name="WPFStepApply" Content="6. Udfør" IsEnabled="False" Margin="0,0,8,0"/>
+                    <Button x:Name="WPFStepHandoff" Content="7. Handoff" IsEnabled="False" Margin="0"/>
+                </UniformGrid>
             </Border>
 
-            <Grid Grid.Column="1" Margin="18">
+            <Border Grid.Row="1" BorderBrush="{StaticResource BorderStrong}" BorderThickness="1.2" Background="{StaticResource PanelBackground}" Padding="24">
+            <Grid>
                 <Grid x:Name="WPFPageWelcome">
                     <ScrollViewer VerticalScrollBarVisibility="Auto">
-                        <StackPanel MaxWidth="900">
+                        <StackPanel MaxWidth="940" HorizontalAlignment="Center">
                             <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,0,0,12">
                                 <TextBlock x:Name="WPFLanguageLabel" Text="Sprog" VerticalAlignment="Center" Margin="0,0,8,0"/>
                                 <ComboBox x:Name="WPFLanguageSelector" Width="150" SelectedIndex="0">
@@ -84,7 +177,7 @@
 
                 <Grid x:Name="WPFPageConnect" Visibility="Collapsed">
                     <ScrollViewer VerticalScrollBarVisibility="Auto">
-                        <StackPanel MaxWidth="900">
+                        <StackPanel MaxWidth="940" HorizontalAlignment="Center">
                             <TextBlock Text="Forbind" FontSize="22" FontWeight="SemiBold" Margin="0,0,0,12"/>
                             <TextBlock Text="Forbind én gang til Microsoft Graph. Samme session bruges til discovery, plan og udførsel."/>
                             <TextBlock Text="Requested Graph scopes:" FontWeight="SemiBold" Margin="0,16,0,4"/>
@@ -114,13 +207,13 @@
                             <Button x:Name="WPFRunDiscovery" Content="Kør discovery" Width="150" HorizontalAlignment="Left" Margin="0,14,0,8"/>
                             <TextBlock x:Name="WPFDiscoverySummary" FontWeight="SemiBold"/>
                         </StackPanel>
-                        <RichTextBox x:Name="WPFDiscoveryList" IsReadOnly="True" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" FontFamily="Consolas" BorderBrush="#CBD5E1" BorderThickness="1" Background="White"/>
+                        <RichTextBox x:Name="WPFDiscoveryList" IsReadOnly="True" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" FontFamily="Consolas" BorderBrush="{StaticResource BorderSoft}" BorderThickness="1" Background="#0F1115"/>
                     </DockPanel>
                 </Grid>
 
                 <Grid x:Name="WPFPageConfig" Visibility="Collapsed">
                     <ScrollViewer VerticalScrollBarVisibility="Auto">
-                        <Grid MaxWidth="920">
+                        <Grid MaxWidth="980" HorizontalAlignment="Center">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="220"/>
                                 <ColumnDefinition Width="*"/>
@@ -180,16 +273,16 @@
                                 <CheckBox x:Name="WPFCreateAuthenticationStrength" Content="Opret/opdater BreakGlass-FIDO2 authentication strength med AAGUID-restriction"/>
                                 <CheckBox x:Name="WPFCreateBreakGlassCAPolicy" Content="Opret dedikeret CA-policy der kræver BreakGlass-FIDO2 for CA-BreakGlass-Exclude"/>
                                 <CheckBox x:Name="WPFEnableBreakGlassCAPolicy" Content="Opret CA-policy som enabled i stedet for report-only"/>
-                                <TextBlock Foreground="#92400E" Text="Anbefaling: lad CA-politikken være report-only indtil begge konti har to registrerede og testede FIDO2 keys."/>
+                                <TextBlock Foreground="#FBBF24" Text="Anbefaling: lad CA-politikken være report-only indtil begge konti har to registrerede og testede FIDO2 keys."/>
                             </StackPanel>
                             <StackPanel Grid.Row="13" Grid.Column="0" Grid.ColumnSpan="4" Margin="0,10,0,0">
                                 <CheckBox x:Name="WPFCreateUsers" Content="Opret brugere hvis de ikke findes"/>
                                 <CheckBox x:Name="WPFCreateGroup" Content="Opret gruppen CA-BreakGlass-Exclude hvis den ikke findes"/>
                                 <CheckBox x:Name="WPFAddUsersToGroup" Content="Tilføj break-glass konti til CA-BreakGlass-Exclude"/>
                                 <CheckBox x:Name="WPFDisableAdminSSPR" Content="Deaktivér administrator-SSPR tenant-wide"/>
-                                <TextBlock Foreground="#92400E" Text="Admin SSPR kan ikke slås fra kun for de to konti. Hvis valgt, deaktiveres administrator-SSPR for alle administratorroller i tenant'en."/>
+                                <TextBlock Foreground="#FBBF24" Text="Admin SSPR kan ikke slås fra kun for de to konti. Hvis valgt, deaktiveres administrator-SSPR for alle administratorroller i tenant'en."/>
                                 <CheckBox x:Name="WPFPatchCAPolicies" Content="Ekskludér CA-BreakGlass-Exclude fra alle eksisterende Conditional Access-politikker"/>
-                                <TextBlock Foreground="#92400E" Text="Dette ændrer eksisterende Conditional Access-politikker. Der oprettes backup før ændringerne udføres."/>
+                                <TextBlock Foreground="#FBBF24" Text="Dette ændrer eksisterende Conditional Access-politikker. Der oprettes backup før ændringerne udføres."/>
                             </StackPanel>
                         </Grid>
                     </ScrollViewer>
@@ -217,7 +310,7 @@
                 </Grid>
 
                 <Grid x:Name="WPFPageHandoff" Visibility="Collapsed">
-                    <StackPanel MaxWidth="900">
+                    <StackPanel MaxWidth="940" HorizontalAlignment="Center">
                         <TextBlock Text="Handoff" FontSize="22" FontWeight="SemiBold" Margin="0,0,0,12"/>
                         <TextBlock Text="Handoff-dokumentet genereres efter udførsel. Det indeholder ikke passwords."/>
                         <TextBlock Text="Output folder" FontWeight="SemiBold" Margin="0,18,0,4"/>
@@ -231,16 +324,17 @@
                     </StackPanel>
                 </Grid>
             </Grid>
+            </Border>
         </Grid>
 
-        <Border Grid.Row="2" Background="#F1F5F9" BorderBrush="#CBD5E1" BorderThickness="0,1,0,0" Padding="12,8">
+        <Border Grid.Row="2" Background="#101214" BorderBrush="{StaticResource BorderSoft}" BorderThickness="0,1,0,0" Padding="14,9">
             <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="220"/>
                 </Grid.ColumnDefinitions>
-                <TextBlock x:Name="WPFStatusText" Text="Klar"/>
-                <ProgressBar x:Name="WPFProgressBar" Grid.Column="1" Height="14" IsIndeterminate="False"/>
+                <TextBlock x:Name="WPFStatusText" Text="Klar" Foreground="{StaticResource TextSecondary}"/>
+                <ProgressBar x:Name="WPFProgressBar" Grid.Column="1" Height="12" IsIndeterminate="False" Foreground="{StaticResource Accent}" Background="#1F2937"/>
             </Grid>
         </Border>
     </Grid>

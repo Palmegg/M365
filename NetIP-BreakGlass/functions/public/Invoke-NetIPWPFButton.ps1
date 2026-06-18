@@ -26,6 +26,7 @@ function Set-NetIPWPFStep {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string] $Step)
 
+    $sync.UI.CurrentStep = $Step
     if ($Step -eq 'Config') {
         $sync.UI.ConfigVisited = $true
     }
