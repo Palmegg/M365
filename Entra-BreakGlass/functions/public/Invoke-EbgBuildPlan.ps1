@@ -51,6 +51,7 @@ Tildel Global Administrator: $($plan.AssignGlobalAdministrator) / scope $($plan.
 Administrator-SSPR enabled nu: $($plan.CurrentAdminSSPREnabled)
 Administrator-SSPR plan: $($plan.PlannedAdminSSPRStatus)
 Temporary Access Pass: $($plan.TemporaryAccessPassStatus)
+FIDO2/passkey method policy: $($plan.Fido2AuthenticationMethodPolicyStatus)
 
 Authentication strength: $($plan.AuthenticationStrengthName) / $($plan.AuthenticationStrengthStatus)
 AAGUIDs: $(@($plan.AuthenticationStrengthAAGUIDs) -join ', ')

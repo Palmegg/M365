@@ -363,7 +363,7 @@
                                 </ComboBox>
                             </StackPanel>
                             <TextBlock Text="Velkommen" FontSize="22" FontWeight="SemiBold" Margin="0,0,0,12"/>
-                            <TextBlock Text="Værktøjet kører i to faser: Phase 1 opretter break-glass konti, Global Administrator rolle, TAP, CA-exclude gruppe og CA-exclusions. Derefter logger konsulenten manuelt på kontiene og registrerer FIDO2 keys."/>
+                            <TextBlock Text="Værktøjet kører i to faser: Phase 1 opretter break-glass konti, Global Administrator rolle, TAP, CA-exclude gruppe, FIDO2/passkey method policy og CA-exclusions. Derefter logger konsulenten manuelt på kontiene og registrerer FIDO2 keys."/>
                             <TextBlock Margin="0,12,0,0" Text="Phase 2 refresher kontiene, læser FIDO2 AAGUIDs, kan slette TAP, opretter BreakGlass-FIDO2 authentication strength og opretter en dedikeret CA-policy som disabled."/>
                             <TextBlock Margin="0,12,0,0" Text="Værktøjet forbinder kun til Microsoft Graph. Det bruger ikke Azure, PIM, RMAU, Log Analytics eller Sentinel."/>
                             <TextBlock Margin="0,12,0,0" Text="Discovery og Plan foretager ingen ændringer. Ændringer udføres først i Phase 1 og Phase 2."/>
@@ -510,7 +510,7 @@
                     <DockPanel>
                         <StackPanel DockPanel.Dock="Top">
                             <TextBlock Text="Phase 1a - Grundopsætning" FontSize="22" FontWeight="SemiBold" Margin="0,0,0,12"/>
-                            <TextBlock Text="Dette trin opretter/genbruger CA-BreakGlass-Exclude, de to konti, Global Administrator assignments, Admin SSPR, TAP, gruppemedlemskab og CA exclusions."/>
+                            <TextBlock Text="Dette trin opretter/genbruger CA-BreakGlass-Exclude, de to konti, Global Administrator assignments, Admin SSPR, TAP, gruppemedlemskab, FIDO2/passkey method policy og CA exclusions."/>
                             <TextBlock Foreground="#FBBF24" Margin="0,8,0,0" Text="Admin SSPR kan tage op til 60 minutter før ændringen slår igennem. TAP oprettes som genanvendelig i 2 timer."/>
                             <Button x:Name="WPFApplyConfiguration" Content="Kør Phase 1a" Width="180" HorizontalAlignment="Left" Margin="0,14,0,8"/>
                         </StackPanel>

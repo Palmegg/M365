@@ -493,6 +493,112 @@ function Ensure-EbgBreakGlassCAPolicy {
     $created | Add-Member -MemberType NoteProperty -Name Status -Value 'Created' -Force
     return $created
 }
+function Ensure-EbgFido2AuthenticationMethodPolicy {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] $Group,
+        [Parameter(Mandatory)][bool] $Apply
+    )
+
+    $groupId = [string](Get-EbgObjectPropertyValue -InputObject $Group -Name 'id')
+    $groupName = [string](Get-EbgObjectPropertyValue -InputObject $Group -Name 'displayName')
+    if ([string]::IsNullOrWhiteSpace($groupId)) {
+        throw 'Kan ikke konfigurere FIDO2/passkey policy, fordi CA-BreakGlass-Exclude gruppen mangler Object ID.'
+    }
+
+    if (-not $Apply -or $sync.App.Mock) {
+        return [pscustomobject]@{
+            id = 'Fido2'
+            displayName = 'FIDO2/passkey authentication method policy'
+            state = 'enabled'
+            TargetGroupId = $groupId
+            TargetGroupName = $groupName
+            Status = if ($Apply) { 'Updated' } else { 'PlannedUpdate' }
+            Detail = "FIDO2/passkey enabled for group $groupName."
+        }
+    }
+
+    $policy = Get-EbgFido2AuthenticationMethodPolicy
+    $includeTargets = @(Get-EbgObjectPropertyValue -InputObject $policy -Name 'includeTargets')
+    $passkeyProfiles = @(Get-EbgObjectPropertyValue -InputObject $policy -Name 'passkeyProfiles')
+    $defaultProfileId = [string](($passkeyProfiles | ForEach-Object {
+        [string](Get-EbgObjectPropertyValue -InputObject $_ -Name 'id')
+    } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) } | Select-Object -First 1))
+    if ([string]::IsNullOrWhiteSpace($defaultProfileId)) {
+        $defaultProfileId = '00000000-0000-0000-0000-000000000001'
+    }
+
+    $state = [string](Get-EbgObjectPropertyValue -InputObject $policy -Name 'state')
+    $selfService = [bool](Get-EbgObjectPropertyValue -InputObject $policy -Name 'isSelfServiceRegistrationAllowed')
+    $hasAllUsers = $false
+    $hasTargetGroup = $false
+    $normalizedTargets = @()
+
+    foreach ($target in $includeTargets) {
+        $targetId = [string](Get-EbgObjectPropertyValue -InputObject $target -Name 'id')
+        if ([string]::IsNullOrWhiteSpace($targetId)) { continue }
+
+        if ([string]::Equals($targetId, 'all_users', [System.StringComparison]::OrdinalIgnoreCase)) { $hasAllUsers = $true }
+        if ([string]::Equals($targetId, $groupId, [System.StringComparison]::OrdinalIgnoreCase)) { $hasTargetGroup = $true }
+
+        $targetType = [string](Get-EbgObjectPropertyValue -InputObject $target -Name 'targetType')
+        if ([string]::IsNullOrWhiteSpace($targetType)) { $targetType = 'group' }
+
+        $allowedProfiles = @(Get-EbgObjectPropertyValue -InputObject $target -Name 'allowedPasskeyProfiles') | Where-Object {
+            -not [string]::IsNullOrWhiteSpace([string]$_)
+        } | ForEach-Object { [string]$_ }
+        if ($allowedProfiles.Count -lt 1) { $allowedProfiles = @($defaultProfileId) }
+
+        $normalizedTargets += @{
+            targetType = $targetType
+            id = $targetId
+            isRegistrationRequired = [bool](Get-EbgObjectPropertyValue -InputObject $target -Name 'isRegistrationRequired')
+            allowedPasskeyProfiles = @($allowedProfiles)
+        }
+    }
+
+    if ($state -eq 'enabled' -and $selfService -and ($hasAllUsers -or $hasTargetGroup)) {
+        return [pscustomobject]@{
+            id = 'Fido2'
+            displayName = 'FIDO2/passkey authentication method policy'
+            state = $state
+            TargetGroupId = $groupId
+            TargetGroupName = $groupName
+            Status = 'AlreadyConfigured'
+            Detail = if ($hasAllUsers) { 'FIDO2/passkey is enabled for all users.' } else { "FIDO2/passkey is already enabled for group $groupName." }
+        }
+    }
+
+    if (-not $hasAllUsers -and -not $hasTargetGroup) {
+        $normalizedTargets += @{
+            targetType = 'group'
+            id = $groupId
+            isRegistrationRequired = $false
+            allowedPasskeyProfiles = @($defaultProfileId)
+        }
+    }
+
+    Write-EbgLog -Message "Opdaterer FIDO2/passkey Authentication Method policy, så $groupName kan registrere security keys."
+    $body = @{
+        '@odata.type' = '#microsoft.graph.fido2AuthenticationMethodConfiguration'
+        id = 'Fido2'
+        state = 'enabled'
+        isSelfServiceRegistrationAllowed = $true
+        includeTargets = @($normalizedTargets)
+    }
+    Invoke-EbgGraphRequest -Method PATCH -Uri 'https://graph.microsoft.com/v1.0/policies/authenticationMethodsPolicy/authenticationMethodConfigurations/fido2' -Body $body | Out-Null
+
+    return [pscustomobject]@{
+        id = 'Fido2'
+        displayName = 'FIDO2/passkey authentication method policy'
+        state = 'enabled'
+        TargetGroupId = $groupId
+        TargetGroupName = $groupName
+        Status = 'Updated'
+        Detail = "FIDO2/passkey enabled for group $groupName."
+    }
+}
+
 function Ensure-EbgGlobalAdministratorAssignment {
     [CmdletBinding()]
     param(
@@ -813,6 +919,29 @@ function Get-EbgConfigFromUI {
         }
     })
 }
+function Get-EbgFido2AuthenticationMethodPolicy {
+    [CmdletBinding()]
+    param()
+
+    if ($sync.App.Mock) {
+        return [pscustomobject]@{
+            '@odata.type' = '#microsoft.graph.fido2AuthenticationMethodConfiguration'
+            id = 'Fido2'
+            state = 'disabled'
+            isSelfServiceRegistrationAllowed = $false
+            includeTargets = @()
+            passkeyProfiles = @(
+                [pscustomobject]@{
+                    id = '00000000-0000-0000-0000-000000000001'
+                    name = 'Default passkey profile'
+                }
+            )
+        }
+    }
+
+    return Invoke-EbgGraphRequest -Method GET -Uri 'https://graph.microsoft.com/v1.0/policies/authenticationMethodsPolicy/authenticationMethodConfigurations/fido2'
+}
+
 function Get-EbgFido2MethodsForUser {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string] $UserPrincipalName)
@@ -1156,6 +1285,7 @@ function New-EbgHandoffHtml {
     $account1 = Get-EbgObjectPropertyValue -InputObject $Result -Name 'Account1'
     $account2 = Get-EbgObjectPropertyValue -InputObject $Result -Name 'Account2'
     $group = Get-EbgObjectPropertyValue -InputObject $Result -Name 'Group'
+    $fido2MethodPolicy = Get-EbgObjectPropertyValue -InputObject $Result -Name 'Fido2AuthenticationMethodPolicy'
     $changed = @(Get-EbgObjectPropertyValue -InputObject $Result -Name 'CAPoliciesChanged')
     $already = @(Get-EbgObjectPropertyValue -InputObject $Result -Name 'CAPoliciesAlreadyExcluded')
     $failed = @(Get-EbgObjectPropertyValue -InputObject $Result -Name 'CAPoliciesFailed')
@@ -1234,6 +1364,14 @@ function New-EbgHandoffHtml {
   </table>
   <h2>Gruppemedlemskab</h2>
   $membershipTable
+  <h2>FIDO2/passkey Authentication Method policy</h2>
+  <table>
+    <tr><th>Policy</th><td>$(ConvertTo-EbgHtmlValue (Get-EbgObjectPropertyValue -InputObject $fido2MethodPolicy -Name 'displayName'))</td></tr>
+    <tr><th>State</th><td>$(ConvertTo-EbgHtmlValue (Get-EbgObjectPropertyValue -InputObject $fido2MethodPolicy -Name 'state'))</td></tr>
+    <tr><th>Target group</th><td>$(ConvertTo-EbgHtmlValue (Get-EbgObjectPropertyValue -InputObject $fido2MethodPolicy -Name 'TargetGroupName'))</td></tr>
+    <tr><th>Status</th><td>$(ConvertTo-EbgHtmlValue (Get-EbgObjectPropertyValue -InputObject $fido2MethodPolicy -Name 'Status'))</td></tr>
+    <tr><th>Detail</th><td>$(ConvertTo-EbgHtmlValue (Get-EbgObjectPropertyValue -InputObject $fido2MethodPolicy -Name 'Detail'))</td></tr>
+  </table>
   <h2>Administratorrolle</h2>
   <p>Begge break-glass konti tildeles direkte Global Administrator på tenant scope (/).</p>
   $roleAssignmentTable
@@ -1344,6 +1482,7 @@ function New-EbgPlanObject {
     $warnings += 'Begge break-glass konti får direkte Global Administrator rolle på tenant scope (/).'
     if ($Config.DisableAdminSSPR) { $warnings += 'Administrator-SSPR deaktiveres tenant-wide og kan tage op til 60 minutter at slå igennem.' }
     $warnings += 'Phase 1 opretter Temporary Access Pass for begge konti: one-time use = No, duration = 2 hours.'
+    $warnings += 'Phase 1 sikrer at FIDO2/passkey Authentication Method policy er enabled for CA-BreakGlass-Exclude, så kontiene kan registrere security keys.'
     $warnings += 'Phase 1b kræver manuel registrering af to FIDO2 security keys pr. konto.'
     $warnings += 'Phase 2 opretter/opdaterer BreakGlass-FIDO2 authentication strength og en dedikeret CA-policy som disabled.'
     if ($Config.PatchCAPolicies) { $warnings += 'Eksisterende Conditional Access-politikker ændres. Backup oprettes før ændringer.' }
@@ -1371,6 +1510,7 @@ function New-EbgPlanObject {
         AuthenticationStrengthName = $Config.AuthenticationStrengthName
         AuthenticationStrengthAAGUIDs = @($Config.AAGUIDs)
         TemporaryAccessPassStatus    = 'Phase 1: oprettes for begge konti, genanvendelig i 2 timer'
+        Fido2AuthenticationMethodPolicyStatus = 'Phase 1: enables FIDO2/passkey for CA-BreakGlass-Exclude'
         AuthenticationStrengthStatus = if (@($Config.AAGUIDs).Count -gt 0) { 'Phase 2: oprettes/opdateres med angivne + fundne AAGUIDs' } else { 'Phase 2: oprettes/opdateres efter automatisk AAGUID refresh' }
         BreakGlassCAPolicyName    = $Config.BreakGlassCAPolicyName
         BreakGlassCAPolicyStatus  = 'Phase 2: oprettes disabled og tildeles direkte til de 2 konti'
@@ -1470,7 +1610,7 @@ function New-EbgTemporaryAccessPass {
     $lastError = $null
     for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
         try {
-            Write-EbgStatus -Busy -Message "Phase 1a step 5/10: opretter TAP for $upn (forsøg $attempt/$maxAttempts)..."
+            Write-EbgStatus -Busy -Message "Phase 1a step 5/11: opretter TAP for $upn (forsøg $attempt/$maxAttempts)..."
             [System.Windows.Forms.Application]::DoEvents()
             if ($attempt -gt 1 -and -not [string]::IsNullOrWhiteSpace($upn)) {
                 $refreshedUser = Get-EbgUserByUpn -UserPrincipalName $upn
@@ -1500,7 +1640,7 @@ function New-EbgTemporaryAccessPass {
 
             $reason = if ($isBackendDelay) { '404/resourceNotFound' } else { '403/accessDenied' }
             Write-EbgLog -Level WARN -Message "TAP for $upn blev afvist med $reason på forsøg $attempt/$maxAttempts. Venter $delaySeconds sekunder og prøver igen; nye brugere kan være forsinket i authentication methods backend."
-            Write-EbgStatus -Busy -Message "Phase 1a step 5/10: venter på TAP backend for $upn ($attempt/$maxAttempts)..."
+            Write-EbgStatus -Busy -Message "Phase 1a step 5/11: venter på TAP backend for $upn ($attempt/$maxAttempts)..."
             $until = (Get-Date).AddSeconds($delaySeconds)
             while ((Get-Date) -lt $until) {
                 Start-Sleep -Milliseconds 250
@@ -1626,7 +1766,7 @@ function Set-EbgLanguage {
         @{ Da = 'Sprog'; En = 'Language' }
         @{ Da = 'Velkommen'; En = 'Welcome' }
         @{ Da = 'Dette værktøj opretter to break-glass konti på tenantens .onmicrosoft.com domæne, opretter gruppen CA-BreakGlass-Exclude og kan valgfrit ekskludere gruppen fra eksisterende Conditional Access-politikker.'; En = 'This tool creates two break-glass accounts on the tenant .onmicrosoft.com domain, creates the CA-BreakGlass-Exclude group, and can optionally exclude the group from existing Conditional Access policies.' }
-        @{ Da = 'Værktøjet forbinder kun til Microsoft Graph. Det bruger ikke Azure, PIM, RMAU, FIDO2, Log Analytics eller Sentinel.'; En = 'The tool connects only to Microsoft Graph. It does not use Azure, PIM, RMAU, FIDO2, Log Analytics, or Sentinel.' }
+        @{ Da = 'Værktøjet forbinder kun til Microsoft Graph. Det bruger ikke Azure, PIM, RMAU, Log Analytics eller Sentinel.'; En = 'The tool connects only to Microsoft Graph. It does not use Azure, PIM, RMAU, Log Analytics, or Sentinel.' }
         @{ Da = 'Discovery og Plan foretager ingen ændringer. Ændringer udføres først i trinnet Udfør.'; En = 'Discovery and Plan make no changes. Changes are performed only in the Apply step.' }
         @{ Da = 'Midlertidige adgangskoder vises kun én gang og gemmes ikke i log, JSON eller handoff dokument.'; En = 'Temporary passwords are shown only once and are not saved to logs, JSON, or the handoff document.' }
         @{ Da = 'Jeg forstår at dette script ændrer sikkerhedskritisk tenant-konfiguration.'; En = 'I understand that this script changes security-critical tenant configuration.' }
@@ -2336,7 +2476,8 @@ Phase 1a udfører:
 4. Opretter Temporary Access Pass: one-time use = No, duration = 2 hours
 5. Tildeler direkte Global Administrator rolle
 6. Melder konti ind i exclude-gruppen
-7. Ekskluderer gruppen fra eksisterende CA policies: $($config.PatchCAPolicies)
+7. Aktiverer FIDO2/passkey for exclude-gruppen
+8. Ekskluderer gruppen fra eksisterende CA policies: $($config.PatchCAPolicies)
 
 Admin SSPR kan tage op til 60 minutter før ændringen slår igennem.
 Initial passwords og TAP-koder skrives ikke til almindelig log.
@@ -2372,8 +2513,8 @@ Vil du fortsætte?
             throw "Phase 1a stoppet før ændringer: $account mangler Entra rollen $roles. Microsoft Graph kræver en af disse roller for at oprette Temporary Access Pass på andre brugere. Tildel rollen, log ud/ind i konfiguratoren, og kør Phase 1a igen."
         }
 
-        Write-EbgLog -Message 'Phase 1a step 1/10: Henter tenant og klargør outputmappe...'
-        Write-EbgStatus -Busy -Message 'Phase 1a step 1/10: henter tenant og klargør outputmappe...'
+        Write-EbgLog -Message 'Phase 1a step 1/11: Henter tenant og klargør outputmappe...'
+        Write-EbgStatus -Busy -Message 'Phase 1a step 1/11: henter tenant og klargør outputmappe...'
         [System.Windows.Forms.Application]::DoEvents()
         $tenant = Get-EbgTenantInfo
         $output = if ($sync.State.OutputFolder) { $sync.State.OutputFolder } else { New-EbgOutputFolder -TenantId $tenant.TenantId }
@@ -2383,8 +2524,8 @@ Vil du fortsætte?
         $upn1 = ConvertTo-BreakGlassUpn -Prefix $config.UserPrefix1 -OnMicrosoftDomain $tenant.OnMicrosoftDomain
         $upn2 = ConvertTo-BreakGlassUpn -Prefix $config.UserPrefix2 -OnMicrosoftDomain $tenant.OnMicrosoftDomain
 
-        Write-EbgLog -Message 'Phase 1a step 2/10: Sikrer CA-BreakGlass-Exclude security group...'
-        Write-EbgStatus -Busy -Message 'Phase 1a step 2/10: sikrer CA-BreakGlass-Exclude security group...'
+        Write-EbgLog -Message 'Phase 1a step 2/11: Sikrer CA-BreakGlass-Exclude security group...'
+        Write-EbgStatus -Busy -Message 'Phase 1a step 2/11: sikrer CA-BreakGlass-Exclude security group...'
         [System.Windows.Forms.Application]::DoEvents()
         $group = Ensure-EbgSecurityGroup -DisplayName $config.GroupName -Description $config.GroupDescription -CreateIfMissing ([bool]$config.CreateGroup) -Apply $true
         Write-EbgLog -Level PASS -Message "Gruppe håndteret: $($config.GroupName)"
@@ -2392,8 +2533,8 @@ Vil du fortsætte?
         $groupDisplayName = [string](Get-EbgObjectPropertyValue -InputObject $group -Name 'displayName')
         $groupStatus = [string](Get-EbgObjectPropertyValue -InputObject $group -Name 'EnsureStatus')
 
-        Write-EbgLog -Message 'Phase 1a step 3/10: Sikrer de to break-glass konti...'
-        Write-EbgStatus -Busy -Message 'Phase 1a step 3/10: sikrer de to break-glass konti...'
+        Write-EbgLog -Message 'Phase 1a step 3/11: Sikrer de to break-glass konti...'
+        Write-EbgStatus -Busy -Message 'Phase 1a step 3/11: sikrer de to break-glass konti...'
         [System.Windows.Forms.Application]::DoEvents()
         $createdPasswords = @()
         $users = [System.Collections.Generic.List[object]]::new()
@@ -2422,8 +2563,8 @@ Vil du fortsætte?
 
         $roleAssignments = @()
 
-        Write-EbgLog -Message 'Phase 1a step 4/10: Håndterer administrator-SSPR...'
-        Write-EbgStatus -Busy -Message 'Phase 1a step 4/10: håndterer administrator-SSPR...'
+        Write-EbgLog -Message 'Phase 1a step 4/11: Håndterer administrator-SSPR...'
+        Write-EbgStatus -Busy -Message 'Phase 1a step 4/11: håndterer administrator-SSPR...'
         [System.Windows.Forms.Application]::DoEvents()
         $adminSSPRResult = if ($config.DisableAdminSSPR) {
             $result = Set-EbgAdminSSPRDisabled -Apply $true
@@ -2441,24 +2582,24 @@ Vil du fortsætte?
             }
         }
 
-        Write-EbgLog -Message 'Phase 1a step 5/10: Opretter Temporary Access Pass for begge konti før Global Administrator rollen tildeles...'
-        Write-EbgStatus -Busy -Message 'Phase 1a step 5/10: opretter Temporary Access Pass for begge konti...'
+        Write-EbgLog -Message 'Phase 1a step 5/11: Opretter Temporary Access Pass for begge konti før Global Administrator rollen tildeles...'
+        Write-EbgStatus -Busy -Message 'Phase 1a step 5/11: opretter Temporary Access Pass for begge konti...'
         [System.Windows.Forms.Application]::DoEvents()
         $temporaryAccessPasses = @()
         foreach ($user in $users | Where-Object { Get-EbgObjectPropertyValue -InputObject $_ -Name 'id' }) {
             $temporaryAccessPasses += New-EbgTemporaryAccessPass -User $user -LifetimeInMinutes 120 -IsUsableOnce $false -Apply $true
         }
 
-        Write-EbgLog -Message 'Phase 1a step 6/10: Tildeler direkte Global Administrator rolle...'
-        Write-EbgStatus -Busy -Message 'Phase 1a step 6/10: tildeler direkte Global Administrator rolle...'
+        Write-EbgLog -Message 'Phase 1a step 6/11: Tildeler direkte Global Administrator rolle...'
+        Write-EbgStatus -Busy -Message 'Phase 1a step 6/11: tildeler direkte Global Administrator rolle...'
         [System.Windows.Forms.Application]::DoEvents()
         $roleDefinition = Get-EbgGlobalAdministratorRoleDefinition
         foreach ($user in $users | Where-Object { Get-EbgObjectPropertyValue -InputObject $_ -Name 'id' }) {
             $roleAssignments += Ensure-EbgGlobalAdministratorAssignment -User $user -RoleDefinition $roleDefinition -Apply $true
         }
 
-        Write-EbgLog -Message 'Phase 1a step 7/10: Sikrer gruppemedlemskab...'
-        Write-EbgStatus -Busy -Message 'Phase 1a step 7/10: sikrer gruppemedlemskab...'
+        Write-EbgLog -Message 'Phase 1a step 7/11: Sikrer gruppemedlemskab...'
+        Write-EbgStatus -Busy -Message 'Phase 1a step 7/11: sikrer gruppemedlemskab...'
         [System.Windows.Forms.Application]::DoEvents()
         $membership = @()
         if ($config.AddUsersToGroup) {
@@ -2470,8 +2611,14 @@ Vil du fortsætte?
             $membership += [pscustomobject]@{ Status='Skipped'; Detail='Gruppemedlemskab er fravalgt.' }
         }
 
-        Write-EbgLog -Message 'Phase 1a step 8/10: Henter eksisterende Conditional Access policies...'
-        Write-EbgStatus -Busy -Message 'Phase 1a step 8/10: henter eksisterende Conditional Access policies...'
+        Write-EbgLog -Message 'Phase 1a step 8/11: Sikrer FIDO2/passkey Authentication Method policy for exclude-gruppen...'
+        Write-EbgStatus -Busy -Message 'Phase 1a step 8/11: aktiverer FIDO2/passkey for exclude-gruppen...'
+        [System.Windows.Forms.Application]::DoEvents()
+        $fido2MethodPolicy = Ensure-EbgFido2AuthenticationMethodPolicy -Group $group -Apply $true
+        Write-EbgLog -Level PASS -Message "FIDO2/passkey policy håndteret: $($fido2MethodPolicy.Status)"
+
+        Write-EbgLog -Message 'Phase 1a step 9/11: Henter eksisterende Conditional Access policies...'
+        Write-EbgStatus -Busy -Message 'Phase 1a step 9/11: henter eksisterende Conditional Access policies...'
         [System.Windows.Forms.Application]::DoEvents()
         $policies = @(Get-EbgConditionalAccessPolicies)
         $backupPath = ''
@@ -2491,22 +2638,22 @@ Vil du fortsætte?
         }
 
         if ($config.PatchCAPolicies -and $group -and $groupId) {
-            Write-EbgLog -Message 'Phase 1a step 9/10: Backupper og ekskluderer CA-BreakGlass-Exclude fra eksisterende CA policies...'
-            Write-EbgStatus -Busy -Message "Phase 1a step 9/10: backupper $(@($policies).Count) CA policies..."
+            Write-EbgLog -Message 'Phase 1a step 10/11: Backupper og ekskluderer CA-BreakGlass-Exclude fra eksisterende CA policies...'
+            Write-EbgStatus -Busy -Message "Phase 1a step 10/11: backupper $(@($policies).Count) CA policies..."
             [System.Windows.Forms.Application]::DoEvents()
             $backupPath = Backup-EbgConditionalAccessPolicies -Policies $policies -OutputFolder $output
-            Write-EbgStatus -Busy -Message "Phase 1a step 9/10: ekskluderer gruppen fra $(@($policies).Count) CA policies..."
+            Write-EbgStatus -Busy -Message "Phase 1a step 10/11: ekskluderer gruppen fra $(@($policies).Count) CA policies..."
             [System.Windows.Forms.Application]::DoEvents()
             $caResults = Add-EbgGroupExclusionToCAPolicies -Policies $policies -GroupId $groupId -Apply $true
         }
         else {
-            Write-EbgLog -Message 'Phase 1a step 9/10: Conditional Access patching er fravalgt.'
-            Write-EbgStatus -Busy -Message 'Phase 1a step 9/10: Conditional Access patching er fravalgt.'
+            Write-EbgLog -Message 'Phase 1a step 10/11: Conditional Access patching er fravalgt.'
+            Write-EbgStatus -Busy -Message 'Phase 1a step 10/11: Conditional Access patching er fravalgt.'
             [System.Windows.Forms.Application]::DoEvents()
         }
 
-        Write-EbgLog -Message 'Phase 1a step 10/10: Gemmer Phase 1-resultat og genererer handoff...'
-        Write-EbgStatus -Busy -Message 'Phase 1a step 10/10: gemmer resultat og genererer handoff...'
+        Write-EbgLog -Message 'Phase 1a step 11/11: Gemmer Phase 1-resultat og genererer handoff...'
+        Write-EbgStatus -Busy -Message 'Phase 1a step 11/11: gemmer resultat og genererer handoff...'
         [System.Windows.Forms.Application]::DoEvents()
         $changed = @($caResults | Where-Object Status -eq 'Patched')
         $failed = @($caResults | Where-Object Status -eq 'Failed')
@@ -2533,6 +2680,7 @@ Vil du fortsætte?
             }
             Group = [pscustomobject]@{ DisplayName=$groupDisplayName; Id=$groupId; Status=$groupStatus }
             GroupMembership = $membership
+            Fido2AuthenticationMethodPolicy = $fido2MethodPolicy
             RoleAssignments = $roleAssignments
             AdminSSPR = $adminSSPRResult
             TemporaryAccessPassSummary = @($temporaryAccessPasses | ForEach-Object {
@@ -2553,6 +2701,7 @@ Vil du fortsætte?
             CABackupPath = $backupPath
             Warnings = @(
                 'Phase 1b: Log ind på begge break-glass konti med TAP og registrer to FIDO2 security keys pr. konto.'
+                'FIDO2/passkey Authentication Method policy er enabled for CA-BreakGlass-Exclude, så kontiene kan registrere security keys.'
                 'Admin SSPR ændringer kan tage op til 60 minutter før de slår igennem.'
             )
         }
@@ -2747,6 +2896,7 @@ Tildel Global Administrator: $($plan.AssignGlobalAdministrator) / scope $($plan.
 Administrator-SSPR enabled nu: $($plan.CurrentAdminSSPREnabled)
 Administrator-SSPR plan: $($plan.PlannedAdminSSPRStatus)
 Temporary Access Pass: $($plan.TemporaryAccessPassStatus)
+FIDO2/passkey method policy: $($plan.Fido2AuthenticationMethodPolicyStatus)
 
 Authentication strength: $($plan.AuthenticationStrengthName) / $($plan.AuthenticationStrengthStatus)
 AAGUIDs: $(@($plan.AuthenticationStrengthAAGUIDs) -join ', ')
@@ -3270,7 +3420,7 @@ function Stop-EbgCurrentTask {
 $sync.configs.appsettings = @'
 {
   "name": "Entra Break Glass Configurator",
-  "version": "2.4.16",
+  "version": "2.4.17",
   "outputRoot": ".\\Output",
   "groupName": "CA-BreakGlass-Exclude",
   "groupDescription": "Security group used to exclude dedicated break-glass accounts from existing Conditional Access policies.",
@@ -3706,7 +3856,7 @@ $inputXML = @'
                                 </ComboBox>
                             </StackPanel>
                             <TextBlock Text="Velkommen" FontSize="22" FontWeight="SemiBold" Margin="0,0,0,12"/>
-                            <TextBlock Text="Værktøjet kører i to faser: Phase 1 opretter break-glass konti, Global Administrator rolle, TAP, CA-exclude gruppe og CA-exclusions. Derefter logger konsulenten manuelt på kontiene og registrerer FIDO2 keys."/>
+                            <TextBlock Text="Værktøjet kører i to faser: Phase 1 opretter break-glass konti, Global Administrator rolle, TAP, CA-exclude gruppe, FIDO2/passkey method policy og CA-exclusions. Derefter logger konsulenten manuelt på kontiene og registrerer FIDO2 keys."/>
                             <TextBlock Margin="0,12,0,0" Text="Phase 2 refresher kontiene, læser FIDO2 AAGUIDs, kan slette TAP, opretter BreakGlass-FIDO2 authentication strength og opretter en dedikeret CA-policy som disabled."/>
                             <TextBlock Margin="0,12,0,0" Text="Værktøjet forbinder kun til Microsoft Graph. Det bruger ikke Azure, PIM, RMAU, Log Analytics eller Sentinel."/>
                             <TextBlock Margin="0,12,0,0" Text="Discovery og Plan foretager ingen ændringer. Ændringer udføres først i Phase 1 og Phase 2."/>
@@ -3853,7 +4003,7 @@ $inputXML = @'
                     <DockPanel>
                         <StackPanel DockPanel.Dock="Top">
                             <TextBlock Text="Phase 1a - Grundopsætning" FontSize="22" FontWeight="SemiBold" Margin="0,0,0,12"/>
-                            <TextBlock Text="Dette trin opretter/genbruger CA-BreakGlass-Exclude, de to konti, Global Administrator assignments, Admin SSPR, TAP, gruppemedlemskab og CA exclusions."/>
+                            <TextBlock Text="Dette trin opretter/genbruger CA-BreakGlass-Exclude, de to konti, Global Administrator assignments, Admin SSPR, TAP, gruppemedlemskab, FIDO2/passkey method policy og CA exclusions."/>
                             <TextBlock Foreground="#FBBF24" Margin="0,8,0,0" Text="Admin SSPR kan tage op til 60 minutter før ændringen slår igennem. TAP oprettes som genanvendelig i 2 timer."/>
                             <Button x:Name="WPFApplyConfiguration" Content="Kør Phase 1a" Width="180" HorizontalAlignment="Left" Margin="0,14,0,8"/>
                         </StackPanel>

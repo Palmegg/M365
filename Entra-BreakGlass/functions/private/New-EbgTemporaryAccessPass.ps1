@@ -34,7 +34,7 @@ function New-EbgTemporaryAccessPass {
     $lastError = $null
     for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
         try {
-            Write-EbgStatus -Busy -Message "Phase 1a step 5/10: opretter TAP for $upn (forsøg $attempt/$maxAttempts)..."
+            Write-EbgStatus -Busy -Message "Phase 1a step 5/11: opretter TAP for $upn (forsøg $attempt/$maxAttempts)..."
             [System.Windows.Forms.Application]::DoEvents()
             if ($attempt -gt 1 -and -not [string]::IsNullOrWhiteSpace($upn)) {
                 $refreshedUser = Get-EbgUserByUpn -UserPrincipalName $upn
@@ -64,7 +64,7 @@ function New-EbgTemporaryAccessPass {
 
             $reason = if ($isBackendDelay) { '404/resourceNotFound' } else { '403/accessDenied' }
             Write-EbgLog -Level WARN -Message "TAP for $upn blev afvist med $reason på forsøg $attempt/$maxAttempts. Venter $delaySeconds sekunder og prøver igen; nye brugere kan være forsinket i authentication methods backend."
-            Write-EbgStatus -Busy -Message "Phase 1a step 5/10: venter på TAP backend for $upn ($attempt/$maxAttempts)..."
+            Write-EbgStatus -Busy -Message "Phase 1a step 5/11: venter på TAP backend for $upn ($attempt/$maxAttempts)..."
             $until = (Get-Date).AddSeconds($delaySeconds)
             while ((Get-Date) -lt $until) {
                 Start-Sleep -Milliseconds 250

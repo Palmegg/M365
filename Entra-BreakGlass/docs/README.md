@@ -19,6 +19,7 @@ PowerShell 7/WPF værktøj til en simpel Microsoft Graph-baseret v1 opsætning a
 - Tilføjer kontiene til gruppen, hvis valgt.
 - Kan deaktivere administrator-SSPR tenant-wide, hvis valgt. Ændringen kan tage op til 60 minutter.
 - Phase 1a opretter Temporary Access Pass for begge konti med `one-time use = No` og `duration = 2 hours` før Global Administrator rollen tildeles.
+- Phase 1a sikrer at FIDO2/passkey Authentication Method policy er enabled og inkluderer `CA-BreakGlass-Exclude`, så kontiene kan registrere security keys under Phase 1b.
 - Tildeler begge break-glass konti direkte `Global Administrator` på tenant scope (`/`).
 - Phase 1a kan ekskludere gruppen fra eksisterende Conditional Access-politikker.
 - Phase 1b er manuel: konsulenten logger ind med TAP og registrerer to FIDO2 security keys pr. konto.

@@ -22,7 +22,7 @@ function Set-EbgLanguage {
         @{ Da = 'Sprog'; En = 'Language' }
         @{ Da = 'Velkommen'; En = 'Welcome' }
         @{ Da = 'Dette værktøj opretter to break-glass konti på tenantens .onmicrosoft.com domæne, opretter gruppen CA-BreakGlass-Exclude og kan valgfrit ekskludere gruppen fra eksisterende Conditional Access-politikker.'; En = 'This tool creates two break-glass accounts on the tenant .onmicrosoft.com domain, creates the CA-BreakGlass-Exclude group, and can optionally exclude the group from existing Conditional Access policies.' }
-        @{ Da = 'Værktøjet forbinder kun til Microsoft Graph. Det bruger ikke Azure, PIM, RMAU, FIDO2, Log Analytics eller Sentinel.'; En = 'The tool connects only to Microsoft Graph. It does not use Azure, PIM, RMAU, FIDO2, Log Analytics, or Sentinel.' }
+        @{ Da = 'Værktøjet forbinder kun til Microsoft Graph. Det bruger ikke Azure, PIM, RMAU, Log Analytics eller Sentinel.'; En = 'The tool connects only to Microsoft Graph. It does not use Azure, PIM, RMAU, Log Analytics, or Sentinel.' }
         @{ Da = 'Discovery og Plan foretager ingen ændringer. Ændringer udføres først i trinnet Udfør.'; En = 'Discovery and Plan make no changes. Changes are performed only in the Apply step.' }
         @{ Da = 'Midlertidige adgangskoder vises kun én gang og gemmes ikke i log, JSON eller handoff dokument.'; En = 'Temporary passwords are shown only once and are not saved to logs, JSON, or the handoff document.' }
         @{ Da = 'Jeg forstår at dette script ændrer sikkerhedskritisk tenant-konfiguration.'; En = 'I understand that this script changes security-critical tenant configuration.' }
