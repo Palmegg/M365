@@ -2298,6 +2298,12 @@ function Invoke-EbgConnectTenant {
             $sync.State.GraphAccount = 'mock.consultant@contoso.onmicrosoft.com'
             Get-EbgTenantInfo | Out-Null
             Write-EbgStatus -Message 'Mock tenant er forbundet.'
+            [void]$sync.Form.Dispatcher.Invoke([System.Action]{
+                Update-EbgUIState | Out-Null
+                if ($sync.WPFGraphStatus) { $sync.WPFGraphStatus.Text = if ([string]$sync.State.Language -eq 'en-US') { 'Yes' } else { 'Ja' } }
+                if ($sync.WPFStepDiscovery) { $sync.WPFStepDiscovery.IsEnabled = $true }
+                if ($sync.WPFNextStep -and [string]$sync.UI.CurrentStep -eq 'Connect') { $sync.WPFNextStep.IsEnabled = $true }
+            })
             return
         }
 
@@ -2399,6 +2405,17 @@ finally {
         $sync.State.GraphScopes = @($context.Scopes)
         Get-EbgTenantInfo | Out-Null
         Write-EbgStatus -Message 'Microsoft Graph er forbundet.'
+        $isEnglish = ([string]$sync.State.Language -eq 'en-US')
+        [void]$sync.Form.Dispatcher.Invoke([System.Action]{
+            Update-EbgUIState | Out-Null
+            if ($sync.WPFGraphStatus) { $sync.WPFGraphStatus.Text = if ($isEnglish) { 'Yes' } else { 'Ja' } }
+            if ($sync.WPFGraphAccount) { $sync.WPFGraphAccount.Text = [string]$sync.State.GraphAccount }
+            if ($sync.WPFTenantId) { $sync.WPFTenantId.Text = [string]$sync.State.TenantId }
+            if ($sync.WPFTenantName) { $sync.WPFTenantName.Text = [string]$sync.State.TenantDisplayName }
+            if ($sync.WPFOnMicrosoftDomain) { $sync.WPFOnMicrosoftDomain.Text = [string]$sync.State.OnMicrosoftDomain }
+            if ($sync.WPFStepDiscovery) { $sync.WPFStepDiscovery.IsEnabled = $true }
+            if ($sync.WPFNextStep -and [string]$sync.UI.CurrentStep -eq 'Connect') { $sync.WPFNextStep.IsEnabled = $true }
+        })
         Remove-Item -LiteralPath $workerRoot -Recurse -Force -ErrorAction SilentlyContinue
     }
 }
