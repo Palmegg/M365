@@ -33,15 +33,18 @@ Vil du fortsætte?
     Invoke-NetIPRunspace -ArgumentList @($config) -ScriptBlock {
         param($config)
         Write-NetIPStatus -Busy -Message 'Anvender konfiguration...'
+        Write-NetIPLog -Message 'Step 1/8: Henter tenant og klargør outputmappe...'
         $tenant = Get-NetIPTenantInfo
         $output = if ($sync.State.OutputFolder) { $sync.State.OutputFolder } else { New-NetIPOutputFolder -TenantId $tenant.TenantId }
         New-Item -ItemType Directory -Force -Path $output | Out-Null
 
         $upn1 = ConvertTo-BreakGlassUpn -Prefix $config.UserPrefix1 -OnMicrosoftDomain $tenant.OnMicrosoftDomain
         $upn2 = ConvertTo-BreakGlassUpn -Prefix $config.UserPrefix2 -OnMicrosoftDomain $tenant.OnMicrosoftDomain
+        Write-NetIPLog -Message 'Step 2/8: Sikrer CA-exclude gruppe...'
         $group = Ensure-NetIPSecurityGroup -DisplayName $config.GroupName -Description $config.GroupDescription -CreateIfMissing ([bool]$config.CreateGroup) -Apply $true
         Write-NetIPLog -Level PASS -Message "Gruppe håndteret: $($config.GroupName)"
 
+        Write-NetIPLog -Message 'Step 3/8: Sikrer break-glass brugere...'
         $createdPasswords = @()
         $users = [System.Collections.Generic.List[object]]::new()
         foreach ($item in @(
@@ -67,6 +70,7 @@ Vil du fortsætte?
             Write-NetIPLog -Level PASS -Message "Bruger oprettet: $($item.Upn)"
         }
 
+        Write-NetIPLog -Message 'Step 4/8: Sikrer gruppemedlemskab...'
         $membership = @()
         if ($config.AddUsersToGroup) {
             foreach ($user in $users | Where-Object { Get-NetIPObjectPropertyValue -InputObject $_ -Name 'id' }) {
@@ -77,12 +81,14 @@ Vil du fortsætte?
             $membership += [pscustomobject]@{ Status='Skipped'; Detail='Gruppemedlemskab er fravalgt.' }
         }
 
+        Write-NetIPLog -Message 'Step 5/8: Sikrer direkte Global Administrator rolle...'
         $roleDefinition = Get-NetIPGlobalAdministratorRoleDefinition
         $roleAssignments = @()
         foreach ($user in $users | Where-Object { Get-NetIPObjectPropertyValue -InputObject $_ -Name 'id' }) {
             $roleAssignments += Ensure-NetIPGlobalAdministratorAssignment -User $user -RoleDefinition $roleDefinition -Apply $true
         }
 
+        Write-NetIPLog -Message 'Step 6/8: Henter Conditional Access policies...'
         $policies = @(Get-NetIPConditionalAccessPolicies)
         $backupPath = ''
         $caResults = @()
@@ -103,10 +109,15 @@ Vil du fortsætte?
             }
         }
         if ($config.PatchCAPolicies -and $group -and $groupId) {
+            Write-NetIPLog -Message 'Step 7/8: Backupper og opdaterer Conditional Access policies...'
             $backupPath = Backup-NetIPConditionalAccessPolicies -Policies $policies -OutputFolder $output
             $caResults = Add-NetIPGroupExclusionToCAPolicies -Policies $policies -GroupId $groupId -Apply $true
         }
+        else {
+            Write-NetIPLog -Message 'Step 7/8: Conditional Access patching er fravalgt.'
+        }
 
+        Write-NetIPLog -Message 'Step 8/8: Gemmer resultat og genererer handoff...'
         $changed = @($caResults | Where-Object Status -eq 'Patched')
         $failed = @($caResults | Where-Object Status -eq 'Failed')
         $account1Status = [string](Get-NetIPObjectPropertyValue -InputObject $users[0] -Name 'EnsureStatus')
@@ -136,6 +147,7 @@ Vil du fortsætte?
         $sync.State.HandoffPath = $handoff
         if ($createdPasswords.Count -gt 0) {
             $sync.State.CreatedPasswords = $createdPasswords
+            Write-NetIPLog -Message 'Viser midlertidige adgangskoder i separat vindue. Gem dem sikkert; de bliver ikke skrevet til log eller rapport.'
             Show-NetIPCreatedPasswordsOnce -CreatedPasswords $createdPasswords
         }
         $sync.Form.Dispatcher.Invoke([System.Action]{

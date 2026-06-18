@@ -22,23 +22,12 @@ function Ensure-NetIPGlobalAdministratorAssignment {
     }
 
     if ($sync.App.Mock -or $userId -like 'mock-*') {
+        Write-NetIPLog -Level PASS -Message "Administratorrolle håndteret: $upn -> $roleName"
         return [pscustomobject]@{
             UserPrincipalName = $upn
             Role = $roleName
             Scope = '/'
             Status = if ($Apply) { 'Assigned' } else { 'Planned' }
-            Detail = ''
-        }
-    }
-
-    $filter = [uri]::EscapeDataString("principalId eq '$userId' and roleDefinitionId eq '$roleDefinitionId' and directoryScopeId eq '/'")
-    $existing = @(Get-NetIPGraphCollection -Uri "https://graph.microsoft.com/v1.0/roleManagement/directory/roleAssignments?`$filter=$filter&`$select=id,principalId,roleDefinitionId,directoryScopeId")
-    if ($existing.Count -gt 0) {
-        return [pscustomobject]@{
-            UserPrincipalName = $upn
-            Role = $roleName
-            Scope = '/'
-            Status = 'AlreadyAssigned'
             Detail = ''
         }
     }
@@ -58,12 +47,30 @@ function Ensure-NetIPGlobalAdministratorAssignment {
         roleDefinitionId = $roleDefinitionId
         directoryScopeId = '/'
     }
-    Invoke-NetIPGraphRequest -Method POST -Uri 'https://graph.microsoft.com/v1.0/roleManagement/directory/roleAssignments' -Body $body | Out-Null
-    return [pscustomobject]@{
-        UserPrincipalName = $upn
-        Role = $roleName
-        Scope = '/'
-        Status = 'Assigned'
-        Detail = ''
+    Write-NetIPLog -Message "Tildeler $roleName til $upn..."
+    try {
+        Invoke-NetIPGraphRequest -Method POST -Uri 'https://graph.microsoft.com/v1.0/roleManagement/directory/roleAssignments' -Body $body | Out-Null
+        Write-NetIPLog -Level PASS -Message "Administratorrolle tildelt: $upn -> $roleName"
+        return [pscustomobject]@{
+            UserPrincipalName = $upn
+            Role = $roleName
+            Scope = '/'
+            Status = 'Assigned'
+            Detail = ''
+        }
+    }
+    catch {
+        $message = [string]$_
+        if ($message -match 'already exist|already exists|conflicting object|RoleAssignmentExists|role assignment already') {
+            Write-NetIPLog -Level PASS -Message "Administratorrolle findes allerede: $upn -> $roleName"
+            return [pscustomobject]@{
+                UserPrincipalName = $upn
+                Role = $roleName
+                Scope = '/'
+                Status = 'AlreadyAssigned'
+                Detail = ''
+            }
+        }
+        throw
     }
 }

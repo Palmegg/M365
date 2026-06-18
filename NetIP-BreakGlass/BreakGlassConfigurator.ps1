@@ -194,23 +194,12 @@ function Ensure-NetIPGlobalAdministratorAssignment {
     }
 
     if ($sync.App.Mock -or $userId -like 'mock-*') {
+        Write-NetIPLog -Level PASS -Message "Administratorrolle håndteret: $upn -> $roleName"
         return [pscustomobject]@{
             UserPrincipalName = $upn
             Role = $roleName
             Scope = '/'
             Status = if ($Apply) { 'Assigned' } else { 'Planned' }
-            Detail = ''
-        }
-    }
-
-    $filter = [uri]::EscapeDataString("principalId eq '$userId' and roleDefinitionId eq '$roleDefinitionId' and directoryScopeId eq '/'")
-    $existing = @(Get-NetIPGraphCollection -Uri "https://graph.microsoft.com/v1.0/roleManagement/directory/roleAssignments?`$filter=$filter&`$select=id,principalId,roleDefinitionId,directoryScopeId")
-    if ($existing.Count -gt 0) {
-        return [pscustomobject]@{
-            UserPrincipalName = $upn
-            Role = $roleName
-            Scope = '/'
-            Status = 'AlreadyAssigned'
             Detail = ''
         }
     }
@@ -230,13 +219,31 @@ function Ensure-NetIPGlobalAdministratorAssignment {
         roleDefinitionId = $roleDefinitionId
         directoryScopeId = '/'
     }
-    Invoke-NetIPGraphRequest -Method POST -Uri 'https://graph.microsoft.com/v1.0/roleManagement/directory/roleAssignments' -Body $body | Out-Null
-    return [pscustomobject]@{
-        UserPrincipalName = $upn
-        Role = $roleName
-        Scope = '/'
-        Status = 'Assigned'
-        Detail = ''
+    Write-NetIPLog -Message "Tildeler $roleName til $upn..."
+    try {
+        Invoke-NetIPGraphRequest -Method POST -Uri 'https://graph.microsoft.com/v1.0/roleManagement/directory/roleAssignments' -Body $body | Out-Null
+        Write-NetIPLog -Level PASS -Message "Administratorrolle tildelt: $upn -> $roleName"
+        return [pscustomobject]@{
+            UserPrincipalName = $upn
+            Role = $roleName
+            Scope = '/'
+            Status = 'Assigned'
+            Detail = ''
+        }
+    }
+    catch {
+        $message = [string]$_
+        if ($message -match 'already exist|already exists|conflicting object|RoleAssignmentExists|role assignment already') {
+            Write-NetIPLog -Level PASS -Message "Administratorrolle findes allerede: $upn -> $roleName"
+            return [pscustomobject]@{
+                UserPrincipalName = $upn
+                Role = $roleName
+                Scope = '/'
+                Status = 'AlreadyAssigned'
+                Detail = ''
+            }
+        }
+        throw
     }
 }
 
@@ -256,17 +263,26 @@ function Ensure-NetIPGroupMember {
         return [pscustomobject]@{ UserPrincipalName = $upn; Group = $groupName; Status = 'Skipped'; Detail = 'Group or user missing.' }
     }
     if ($sync.App.Mock -or $groupId -like 'planned-*' -or $userId -like 'mock-*') {
+        Write-NetIPLog -Level PASS -Message "Gruppemedlemskab håndteret: $upn -> $groupName"
         return [pscustomobject]@{ UserPrincipalName = $upn; Group = $groupName; Status = if ($Apply) { 'Added' } else { 'Planned' } }
-    }
-    $members = Get-NetIPGraphCollection -Uri "https://graph.microsoft.com/v1.0/groups/$groupId/members?`$select=id"
-    if (@($members | Where-Object { [string](Get-NetIPObjectPropertyValue -InputObject $_ -Name 'id') -eq $userId }).Count -gt 0) {
-        return [pscustomobject]@{ UserPrincipalName = $upn; Group = $groupName; Status = 'AlreadyMember' }
     }
     if (-not $Apply) {
         return [pscustomobject]@{ UserPrincipalName = $upn; Group = $groupName; Status = 'Planned' }
     }
-    Invoke-NetIPGraphRequest -Method POST -Uri "https://graph.microsoft.com/v1.0/groups/$groupId/members/`$ref" -Body @{ '@odata.id' = "https://graph.microsoft.com/v1.0/directoryObjects/$userId" } | Out-Null
-    return [pscustomobject]@{ UserPrincipalName = $upn; Group = $groupName; Status = 'Added' }
+    Write-NetIPLog -Message "Tilføjer $upn til gruppen $groupName..."
+    try {
+        Invoke-NetIPGraphRequest -Method POST -Uri "https://graph.microsoft.com/v1.0/groups/$groupId/members/`$ref" -Body @{ '@odata.id' = "https://graph.microsoft.com/v1.0/directoryObjects/$userId" } | Out-Null
+        Write-NetIPLog -Level PASS -Message "Gruppemedlemskab tilføjet: $upn -> $groupName"
+        return [pscustomobject]@{ UserPrincipalName = $upn; Group = $groupName; Status = 'Added' }
+    }
+    catch {
+        $message = [string]$_
+        if ($message -match 'already exist|already exists|added object references already exist|object references already exist') {
+            Write-NetIPLog -Level PASS -Message "Gruppemedlemskab findes allerede: $upn -> $groupName"
+            return [pscustomobject]@{ UserPrincipalName = $upn; Group = $groupName; Status = 'AlreadyMember' }
+        }
+        throw
+    }
 }
 
 function Ensure-NetIPSecurityGroup {
@@ -364,12 +380,14 @@ function Get-NetIPGlobalAdministratorRoleDefinition {
         }
     }
 
+    Write-NetIPLog -Message 'Henter role definition: Global Administrator...'
     $filter = [uri]::EscapeDataString("displayName eq 'Global Administrator'")
     $roles = @(Get-NetIPGraphCollection -Uri "https://graph.microsoft.com/v1.0/roleManagement/directory/roleDefinitions?`$filter=$filter&`$select=id,displayName")
     $role = $roles | Select-Object -First 1
     if (-not $role) {
         throw 'Kunne ikke finde role definition for Global Administrator via Microsoft Graph.'
     }
+    Write-NetIPLog -Level PASS -Message 'Role definition fundet: Global Administrator'
     return $role
 }
 
@@ -1192,15 +1210,18 @@ Vil du fortsætte?
     Invoke-NetIPRunspace -ArgumentList @($config) -ScriptBlock {
         param($config)
         Write-NetIPStatus -Busy -Message 'Anvender konfiguration...'
+        Write-NetIPLog -Message 'Step 1/8: Henter tenant og klargør outputmappe...'
         $tenant = Get-NetIPTenantInfo
         $output = if ($sync.State.OutputFolder) { $sync.State.OutputFolder } else { New-NetIPOutputFolder -TenantId $tenant.TenantId }
         New-Item -ItemType Directory -Force -Path $output | Out-Null
 
         $upn1 = ConvertTo-BreakGlassUpn -Prefix $config.UserPrefix1 -OnMicrosoftDomain $tenant.OnMicrosoftDomain
         $upn2 = ConvertTo-BreakGlassUpn -Prefix $config.UserPrefix2 -OnMicrosoftDomain $tenant.OnMicrosoftDomain
+        Write-NetIPLog -Message 'Step 2/8: Sikrer CA-exclude gruppe...'
         $group = Ensure-NetIPSecurityGroup -DisplayName $config.GroupName -Description $config.GroupDescription -CreateIfMissing ([bool]$config.CreateGroup) -Apply $true
         Write-NetIPLog -Level PASS -Message "Gruppe håndteret: $($config.GroupName)"
 
+        Write-NetIPLog -Message 'Step 3/8: Sikrer break-glass brugere...'
         $createdPasswords = @()
         $users = [System.Collections.Generic.List[object]]::new()
         foreach ($item in @(
@@ -1226,6 +1247,7 @@ Vil du fortsætte?
             Write-NetIPLog -Level PASS -Message "Bruger oprettet: $($item.Upn)"
         }
 
+        Write-NetIPLog -Message 'Step 4/8: Sikrer gruppemedlemskab...'
         $membership = @()
         if ($config.AddUsersToGroup) {
             foreach ($user in $users | Where-Object { Get-NetIPObjectPropertyValue -InputObject $_ -Name 'id' }) {
@@ -1236,12 +1258,14 @@ Vil du fortsætte?
             $membership += [pscustomobject]@{ Status='Skipped'; Detail='Gruppemedlemskab er fravalgt.' }
         }
 
+        Write-NetIPLog -Message 'Step 5/8: Sikrer direkte Global Administrator rolle...'
         $roleDefinition = Get-NetIPGlobalAdministratorRoleDefinition
         $roleAssignments = @()
         foreach ($user in $users | Where-Object { Get-NetIPObjectPropertyValue -InputObject $_ -Name 'id' }) {
             $roleAssignments += Ensure-NetIPGlobalAdministratorAssignment -User $user -RoleDefinition $roleDefinition -Apply $true
         }
 
+        Write-NetIPLog -Message 'Step 6/8: Henter Conditional Access policies...'
         $policies = @(Get-NetIPConditionalAccessPolicies)
         $backupPath = ''
         $caResults = @()
@@ -1262,10 +1286,15 @@ Vil du fortsætte?
             }
         }
         if ($config.PatchCAPolicies -and $group -and $groupId) {
+            Write-NetIPLog -Message 'Step 7/8: Backupper og opdaterer Conditional Access policies...'
             $backupPath = Backup-NetIPConditionalAccessPolicies -Policies $policies -OutputFolder $output
             $caResults = Add-NetIPGroupExclusionToCAPolicies -Policies $policies -GroupId $groupId -Apply $true
         }
+        else {
+            Write-NetIPLog -Message 'Step 7/8: Conditional Access patching er fravalgt.'
+        }
 
+        Write-NetIPLog -Message 'Step 8/8: Gemmer resultat og genererer handoff...'
         $changed = @($caResults | Where-Object Status -eq 'Patched')
         $failed = @($caResults | Where-Object Status -eq 'Failed')
         $account1Status = [string](Get-NetIPObjectPropertyValue -InputObject $users[0] -Name 'EnsureStatus')
@@ -1295,6 +1324,7 @@ Vil du fortsætte?
         $sync.State.HandoffPath = $handoff
         if ($createdPasswords.Count -gt 0) {
             $sync.State.CreatedPasswords = $createdPasswords
+            Write-NetIPLog -Message 'Viser midlertidige adgangskoder i separat vindue. Gem dem sikkert; de bliver ikke skrevet til log eller rapport.'
             Show-NetIPCreatedPasswordsOnce -CreatedPasswords $createdPasswords
         }
         $sync.Form.Dispatcher.Invoke([System.Action]{

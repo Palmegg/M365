@@ -9,11 +9,13 @@ function Get-NetIPGlobalAdministratorRoleDefinition {
         }
     }
 
+    Write-NetIPLog -Message 'Henter role definition: Global Administrator...'
     $filter = [uri]::EscapeDataString("displayName eq 'Global Administrator'")
     $roles = @(Get-NetIPGraphCollection -Uri "https://graph.microsoft.com/v1.0/roleManagement/directory/roleDefinitions?`$filter=$filter&`$select=id,displayName")
     $role = $roles | Select-Object -First 1
     if (-not $role) {
         throw 'Kunne ikke finde role definition for Global Administrator via Microsoft Graph.'
     }
+    Write-NetIPLog -Level PASS -Message 'Role definition fundet: Global Administrator'
     return $role
 }
