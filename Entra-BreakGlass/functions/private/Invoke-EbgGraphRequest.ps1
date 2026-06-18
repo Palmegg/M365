@@ -21,7 +21,10 @@ function Invoke-EbgGraphRequest {
         $params.ContentType = 'application/json'
     }
     try {
-        return Invoke-MgGraphRequest @params
+        Write-EbgLog -Message "Graph request: $Method $Uri"
+        $response = Invoke-MgGraphRequest @params
+        Write-EbgLog -Message "Graph request completed: $Method $Uri"
+        return $response
     }
     catch {
         $message = [string]$_

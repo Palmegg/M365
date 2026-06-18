@@ -927,7 +927,10 @@ function Invoke-EbgGraphRequest {
         $params.ContentType = 'application/json'
     }
     try {
-        return Invoke-MgGraphRequest @params
+        Write-EbgLog -Message "Graph request: $Method $Uri"
+        $response = Invoke-MgGraphRequest @params
+        Write-EbgLog -Message "Graph request completed: $Method $Uri"
+        return $response
     }
     catch {
         $message = [string]$_
@@ -2803,7 +2806,7 @@ function Move-EbgWPFStep {
 $sync.configs.appsettings = @'
 {
   "name": "Entra Break Glass Configurator",
-  "version": "2.4.0",
+  "version": "2.4.1",
   "outputRoot": ".\\Output",
   "groupName": "CA-BreakGlass-Exclude",
   "groupDescription": "Security group used to exclude dedicated break-glass accounts from existing Conditional Access policies.",
@@ -3499,7 +3502,7 @@ Get-ChildItem function:\ | Where-Object { $_.Name -like '*-Ebg*' -or $_.Name -li
 }
 
 $sync.Runspace = [runspacefactory]::CreateRunspacePool(1, $maxThreads, $initialSessionState, $Host)
-$sync.Runspace.ApartmentState = 'MTA'
+$sync.Runspace.ApartmentState = 'STA'
 $sync.Runspace.ThreadOptions = 'ReuseThread'
 $sync.Runspace.Open()
 
