@@ -130,9 +130,15 @@ function Add-EbgGroupExclusionToCAPolicies {
             [System.Windows.Forms.Application]::DoEvents()
             continue
         }
-        $updatedUsers = ConvertTo-EbgPlainHashtable -InputObject $users
-        if (-not $updatedUsers) { $updatedUsers = @{} }
-        $updatedUsers['excludeGroups'] = @($excludeGroups + $GroupId | Select-Object -Unique)
+        $updatedUsers = ConvertTo-EbgConditionalAccessUsersPatch -Users $users -GroupId $GroupId
+        if (-not $updatedUsers) {
+            $warning = "Conditional Access-politikken '$policyName' kunne ikke opdateres, fordi users condition ikke kunne normaliseres til Graph schema."
+            $sync.State.Warnings += $warning
+            Write-EbgLog -Level WARN -Message $warning
+            $results += [pscustomobject]@{ Policy = $policyName; PolicyId = $policyId; Status = 'Failed'; Warning = $warning }
+            [System.Windows.Forms.Application]::DoEvents()
+            continue
+        }
         $body = @{ conditions = @{ users = $updatedUsers } }
         if (-not $Apply) {
             $results += [pscustomobject]@{ Policy = $policyName; PolicyId = $policyId; Status = 'PlannedPatch'; Warning = '' }
@@ -146,14 +152,15 @@ function Add-EbgGroupExclusionToCAPolicies {
             continue
         }
         try {
-            Invoke-EbgGraphRequest -Method PATCH -Uri "https://graph.microsoft.com/v1.0/identity/conditionalAccess/policies/$policyId" -Body $body | Out-Null
+            Invoke-EbgGraphRequest -Method PATCH -Uri "https://graph.microsoft.com/v1.0/identity/conditionalAccess/policies/$policyId" -Body $body -SuppressErrorLog | Out-Null
             Write-EbgLog -Level PASS -Message "CA policy patched: $policyName"
             $results += [pscustomobject]@{ Policy = $policyName; PolicyId = $policyId; Status = 'Patched'; Warning = '' }
         }
         catch {
             $warning = "Conditional Access-politikken '$policyName' kunne ikke opdateres."
             $sync.State.Warnings += $warning
-            Write-EbgLog -Level WARN -Message "$warning $(ConvertTo-EbgRedactedError -ErrorRecord $_)"
+            $errorSummary = @((ConvertTo-EbgRedactedError -ErrorRecord $_) -split "`r?`n" | Where-Object { $_ } | Select-Object -First 1)
+            Write-EbgLog -Level WARN -Message "$warning $errorSummary"
             $results += [pscustomobject]@{ Policy = $policyName; PolicyId = $policyId; Status = 'Failed'; Warning = $warning }
         }
         [System.Windows.Forms.Application]::DoEvents()
@@ -245,6 +252,54 @@ function ConvertTo-BreakGlassUpn {
     if ($cleanPrefix -notmatch '^[A-Za-z0-9._-]+$') { throw 'UPN prefix må kun indeholde bogstaver, tal, punktum, bindestreg og underscore.' }
     return ('{0}@{1}' -f $cleanPrefix, $OnMicrosoftDomain.ToLowerInvariant())
 }
+function ConvertTo-EbgConditionalAccessUsersPatch {
+    [CmdletBinding()]
+    param(
+        [AllowNull()] $Users,
+        [Parameter(Mandatory)][string] $GroupId
+    )
+
+    $patch = [ordered]@{}
+    $arrayProperties = @(
+        'includeUsers',
+        'excludeUsers',
+        'includeGroups',
+        'excludeGroups',
+        'includeRoles',
+        'excludeRoles'
+    )
+
+    foreach ($propertyName in $arrayProperties) {
+        $values = @(Get-EbgObjectPropertyValue -InputObject $Users -Name $propertyName | Where-Object { $null -ne $_ -and [string]$_ -ne '' })
+        if ($propertyName -eq 'excludeGroups') {
+            $values = @($values + $GroupId | Select-Object -Unique)
+        }
+        if ($values.Count -gt 0 -or $propertyName -eq 'excludeGroups') {
+            $patch[$propertyName] = @($values)
+        }
+    }
+
+    foreach ($propertyName in @('includeGuestsOrExternalUsers', 'excludeGuestsOrExternalUsers')) {
+        $value = Get-EbgObjectPropertyValue -InputObject $Users -Name $propertyName
+        if ($null -ne $value) {
+            $patch[$propertyName] = ConvertTo-EbgPlainHashtable -InputObject $value -MaxDepth 10
+        }
+    }
+
+    $hasIncludeTarget = @(
+        @($patch['includeUsers']).Count
+        @($patch['includeGroups']).Count
+        @($patch['includeRoles']).Count
+        if ($patch.Contains('includeGuestsOrExternalUsers')) { 1 } else { 0 }
+    ) | Where-Object { $_ -gt 0 }
+
+    if (@($hasIncludeTarget).Count -lt 1) {
+        return $null
+    }
+
+    return $patch
+}
+
 function ConvertTo-EbgNeutralUserPrefix {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string] $DisplayName)
@@ -3182,7 +3237,7 @@ function Stop-EbgCurrentTask {
 $sync.configs.appsettings = @'
 {
   "name": "Entra Break Glass Configurator",
-  "version": "2.4.11",
+  "version": "2.4.12",
   "outputRoot": ".\\Output",
   "groupName": "CA-BreakGlass-Exclude",
   "groupDescription": "Security group used to exclude dedicated break-glass accounts from existing Conditional Access policies.",

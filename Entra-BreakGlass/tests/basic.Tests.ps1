@@ -63,6 +63,22 @@ Describe 'Ebg-BreakGlass basic functions' {
         if ($count -ne 3) { throw "Expected 3 planned patches, got $count" }
     }
 
+    It 'normalizes Conditional Access users patch schema' {
+        $users = [pscustomobject]@{
+            includeUsers = @()
+            includeGroups = @('group-a')
+            excludeGroups = @('group-b')
+            includeGuestsOrExternalUsers = [pscustomobject]@{
+                guestOrExternalUserTypes = 'internalGuest,b2bCollaborationGuest'
+            }
+            '@odata.type' = '#microsoft.graph.conditionalAccessUsers'
+        }
+        $patch = ConvertTo-EbgConditionalAccessUsersPatch -Users $users -GroupId 'mock-ca-exclude-group'
+        if ($patch.Contains('@odata.type')) { throw 'Patch should not contain @odata.type.' }
+        if (-not (@($patch.excludeGroups) -contains 'mock-ca-exclude-group')) { throw 'Patch missing new exclude group.' }
+        if (-not $patch.Contains('includeGuestsOrExternalUsers')) { throw 'Patch should preserve guest/external users condition.' }
+    }
+
     It 'handles group membership with Graph hashtable objects' {
         $group = @{ id = 'mock-ca-exclude-group'; displayName = 'CA-BreakGlass-Exclude' }
         $user = @{ id = 'mock-user-2'; userPrincipalName = 'svc_ea_02@contoso.onmicrosoft.com' }
