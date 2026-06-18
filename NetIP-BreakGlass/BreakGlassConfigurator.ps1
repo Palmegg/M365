@@ -1374,6 +1374,16 @@ function Set-NetIPTheme {
             BorderSoft      = '#D6DEE8'
             Accent          = '#2563EB'
             AccentSoft      = '#E0ECFF'
+            ButtonBackground = '#FFFFFF'
+            ButtonHoverBackground = '#EEF4FF'
+            ButtonPressedBackground = '#2563EB'
+            ButtonCheckedBackground = '#DBEAFE'
+            ButtonDisabledBackground = '#E5E7EB'
+            ButtonForeground = '#0F172A'
+            ButtonPressedForeground = '#FFFFFF'
+            ControlBackground = '#FFFFFF'
+            ControlHoverBackground = '#EEF4FF'
+            ControlPopupBackground = '#FFFFFF'
             Header          = '#FFFFFF'
             HeaderBorder    = '#D6DEE8'
             Navigation      = '#FFFFFF'
@@ -1395,6 +1405,16 @@ function Set-NetIPTheme {
             BorderSoft      = '#3B3657'
             Accent          = '#38BDF8'
             AccentSoft      = '#0F3040'
+            ButtonBackground = '#221F33'
+            ButtonHoverBackground = '#2C2940'
+            ButtonPressedBackground = '#38BDF8'
+            ButtonCheckedBackground = '#0F3040'
+            ButtonDisabledBackground = '#1A1724'
+            ButtonForeground = '#F8FAFC'
+            ButtonPressedForeground = '#0B0D0F'
+            ControlBackground = '#221F33'
+            ControlHoverBackground = '#2C2940'
+            ControlPopupBackground = '#221F33'
             Header          = '#161423'
             HeaderBorder    = '#2F2B45'
             Navigation      = '#1D1A2E'
@@ -1413,7 +1433,12 @@ function Set-NetIPTheme {
         $sync.Form.Resources[$Key] = New-NetIPThemeBrush $Color
     }
 
-    foreach ($key in @('AppBackground','PanelBackground','PanelRaised','TextPrimary','TextSecondary','TextMuted','BorderStrong','BorderSoft','Accent','AccentSoft')) {
+    foreach ($key in @(
+            'AppBackground','PanelBackground','PanelRaised','TextPrimary','TextSecondary','TextMuted',
+            'BorderStrong','BorderSoft','Accent','AccentSoft','ButtonBackground','ButtonHoverBackground',
+            'ButtonPressedBackground','ButtonCheckedBackground','ButtonDisabledBackground','ButtonForeground',
+            'ButtonPressedForeground','ControlBackground','ControlHoverBackground','ControlPopupBackground'
+        )) {
         Set-NetIPThemeBrushResource -Key $key -Color $palette[$key]
     }
 
@@ -1428,8 +1453,8 @@ function Set-NetIPTheme {
     $progressBackBrush = New-NetIPThemeBrush $palette.ProgressBack
     $textBrush = $sync.Form.Resources['TextPrimary']
     $secondaryTextBrush = $sync.Form.Resources['TextSecondary']
-    $raisedBrush = $sync.Form.Resources['PanelRaised']
-    $accentSoftBrush = $sync.Form.Resources['AccentSoft']
+    $buttonBrush = $sync.Form.Resources['ButtonBackground']
+    $controlBrush = $sync.Form.Resources['ControlBackground']
 
     function Set-NetIPObjectTheme([AllowNull()] $Object) {
         if ($null -eq $Object -or -not ($Object -is [System.Windows.DependencyObject])) { return }
@@ -1438,7 +1463,7 @@ function Set-NetIPTheme {
             $Object.Foreground = $textBrush
         }
         elseif ($Object -is [System.Windows.Controls.TextBox]) {
-            $Object.Background = $logBrush
+            $Object.Background = $controlBrush
             $Object.Foreground = $textBrush
             $Object.BorderBrush = $borderBrush
             $Object.CaretBrush = $textBrush
@@ -1449,7 +1474,7 @@ function Set-NetIPTheme {
             $Object.BorderBrush = $borderBrush
         }
         elseif ($Object -is [System.Windows.Controls.ComboBox]) {
-            $Object.Background = $raisedBrush
+            $Object.Background = $controlBrush
             $Object.Foreground = $textBrush
             $Object.BorderBrush = $borderBrush
         }
@@ -1457,12 +1482,12 @@ function Set-NetIPTheme {
             $Object.Foreground = $textBrush
         }
         elseif ($Object -is [System.Windows.Controls.Primitives.ToggleButton]) {
-            $Object.Background = $raisedBrush
+            $Object.Background = $buttonBrush
             $Object.Foreground = $textBrush
             $Object.BorderBrush = $borderBrush
         }
         elseif ($Object -is [System.Windows.Controls.Button]) {
-            $Object.Background = $raisedBrush
+            $Object.Background = $buttonBrush
             $Object.Foreground = $textBrush
             $Object.BorderBrush = $borderBrush
         }
@@ -1528,8 +1553,8 @@ function Set-NetIPTheme {
 
     if ($sync.WPFThemeToggle) {
         $sync.WPFThemeToggle.IsChecked = ($Theme -eq 'Light')
-        $sync.WPFThemeToggle.Background = $accentSoftBrush
-        $sync.WPFThemeToggle.BorderBrush = $sync.Form.Resources['Accent']
+        $sync.WPFThemeToggle.Background = $sync.Form.Resources['ButtonBackground']
+        $sync.WPFThemeToggle.BorderBrush = $sync.Form.Resources['BorderSoft']
         if ([string]$sync.State.Language -eq 'en-US') {
             $sync.WPFThemeToggle.Content = if ($Theme -eq 'Light') { 'Light mode' } else { 'Dark mode' }
         }
@@ -2394,7 +2419,7 @@ function Move-NetIPWPFStep {
 $sync.configs.appsettings = @'
 {
   "name": "Entra Break Glass Configurator",
-  "version": "2.2.4",
+  "version": "2.2.5",
   "outputRoot": ".\\Output",
   "groupName": "CA-BreakGlass-Exclude",
   "groupDescription": "Security group used to exclude dedicated break-glass accounts from existing Conditional Access policies.",
@@ -2481,6 +2506,16 @@ $inputXML = @'
         <SolidColorBrush x:Key="BorderSoft" Color="#475569"/>
         <SolidColorBrush x:Key="Accent" Color="#38BDF8"/>
         <SolidColorBrush x:Key="AccentSoft" Color="#0F3040"/>
+        <SolidColorBrush x:Key="ButtonBackground" Color="#221F33"/>
+        <SolidColorBrush x:Key="ButtonHoverBackground" Color="#2C2940"/>
+        <SolidColorBrush x:Key="ButtonPressedBackground" Color="#38BDF8"/>
+        <SolidColorBrush x:Key="ButtonCheckedBackground" Color="#0F3040"/>
+        <SolidColorBrush x:Key="ButtonDisabledBackground" Color="#1A1724"/>
+        <SolidColorBrush x:Key="ButtonForeground" Color="#F8FAFC"/>
+        <SolidColorBrush x:Key="ButtonPressedForeground" Color="#0B0D0F"/>
+        <SolidColorBrush x:Key="ControlBackground" Color="#221F33"/>
+        <SolidColorBrush x:Key="ControlHoverBackground" Color="#2C2940"/>
+        <SolidColorBrush x:Key="ControlPopupBackground" Color="#221F33"/>
         <DrawingBrush x:Key="GridBackground" TileMode="Tile" Viewport="0,0,24,24" ViewportUnits="Absolute">
             <DrawingBrush.Drawing>
                 <DrawingGroup>
@@ -2520,27 +2555,55 @@ $inputXML = @'
             <Setter Property="MinHeight" Value="42"/>
             <Setter Property="Margin" Value="0,0,0,8"/>
             <Setter Property="Padding" Value="18,9"/>
-            <Setter Property="Foreground" Value="{StaticResource TextPrimary}"/>
-            <Setter Property="Background" Value="{StaticResource PanelRaised}"/>
-            <Setter Property="BorderBrush" Value="{StaticResource BorderSoft}"/>
+            <Setter Property="Foreground" Value="{DynamicResource ButtonForeground}"/>
+            <Setter Property="Background" Value="{DynamicResource ButtonBackground}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource BorderSoft}"/>
             <Setter Property="BorderThickness" Value="1"/>
             <Setter Property="FontWeight" Value="SemiBold"/>
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="Button">
-                        <Border x:Name="ButtonBorder" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="8" Padding="{TemplateBinding Padding}">
+                        <Border x:Name="ButtonBorder"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="{TemplateBinding BorderThickness}"
+                                CornerRadius="8"
+                                Padding="{TemplateBinding Padding}"
+                                RenderTransformOrigin="0.5,0.5">
+                            <Border.RenderTransform>
+                                <ScaleTransform ScaleX="1" ScaleY="1"/>
+                            </Border.RenderTransform>
                             <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" RecognizesAccessKey="True"/>
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="ButtonBorder" Property="Background" Value="{StaticResource AccentSoft}"/>
-                                <Setter TargetName="ButtonBorder" Property="BorderBrush" Value="{StaticResource Accent}"/>
+                                <Setter TargetName="ButtonBorder" Property="Background" Value="{DynamicResource ButtonHoverBackground}"/>
+                                <Setter TargetName="ButtonBorder" Property="BorderBrush" Value="{DynamicResource Accent}"/>
+                                <Setter Property="Cursor" Value="Hand"/>
                             </Trigger>
                             <Trigger Property="IsPressed" Value="True">
-                                <Setter TargetName="ButtonBorder" Property="Background" Value="{StaticResource AccentSoft}"/>
-                                <Setter TargetName="ButtonBorder" Property="BorderBrush" Value="{StaticResource Accent}"/>
+                                <Trigger.EnterActions>
+                                    <BeginStoryboard>
+                                        <Storyboard>
+                                            <DoubleAnimation Storyboard.TargetName="ButtonBorder" Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleX)" To="0.985" Duration="0:0:0.055"/>
+                                            <DoubleAnimation Storyboard.TargetName="ButtonBorder" Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleY)" To="0.965" Duration="0:0:0.055"/>
+                                        </Storyboard>
+                                    </BeginStoryboard>
+                                </Trigger.EnterActions>
+                                <Trigger.ExitActions>
+                                    <BeginStoryboard>
+                                        <Storyboard>
+                                            <DoubleAnimation Storyboard.TargetName="ButtonBorder" Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleX)" To="1" Duration="0:0:0.13"/>
+                                            <DoubleAnimation Storyboard.TargetName="ButtonBorder" Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleY)" To="1" Duration="0:0:0.13"/>
+                                        </Storyboard>
+                                    </BeginStoryboard>
+                                </Trigger.ExitActions>
+                                <Setter TargetName="ButtonBorder" Property="Background" Value="{DynamicResource ButtonPressedBackground}"/>
+                                <Setter TargetName="ButtonBorder" Property="BorderBrush" Value="{DynamicResource Accent}"/>
+                                <Setter Property="Foreground" Value="{DynamicResource ButtonPressedForeground}"/>
                             </Trigger>
                             <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="ButtonBorder" Property="Background" Value="{DynamicResource ButtonDisabledBackground}"/>
                                 <Setter Property="Opacity" Value="0.38"/>
                             </Trigger>
                         </ControlTemplate.Triggers>
@@ -2552,23 +2615,23 @@ $inputXML = @'
             <Setter Property="MinHeight" Value="28"/>
             <Setter Property="Margin" Value="0,2,0,8"/>
             <Setter Property="Padding" Value="10,6"/>
-            <Setter Property="Foreground" Value="{StaticResource TextPrimary}"/>
-            <Setter Property="Background" Value="{StaticResource PanelRaised}"/>
-            <Setter Property="BorderBrush" Value="{StaticResource BorderSoft}"/>
-            <Setter Property="CaretBrush" Value="{StaticResource TextPrimary}"/>
+            <Setter Property="Foreground" Value="{DynamicResource TextPrimary}"/>
+            <Setter Property="Background" Value="{DynamicResource ControlBackground}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource BorderSoft}"/>
+            <Setter Property="CaretBrush" Value="{DynamicResource TextPrimary}"/>
         </Style>
         <Style TargetType="ComboBox">
             <Setter Property="MinHeight" Value="36"/>
             <Setter Property="Padding" Value="10,5"/>
-            <Setter Property="Foreground" Value="{StaticResource TextPrimary}"/>
-            <Setter Property="Background" Value="{StaticResource PanelRaised}"/>
-            <Setter Property="BorderBrush" Value="{StaticResource BorderSoft}"/>
+            <Setter Property="Foreground" Value="{DynamicResource TextPrimary}"/>
+            <Setter Property="Background" Value="{DynamicResource ControlBackground}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource BorderSoft}"/>
             <Setter Property="SnapsToDevicePixels" Value="True"/>
             <Setter Property="ItemContainerStyle">
                 <Setter.Value>
                     <Style TargetType="ComboBoxItem">
-                        <Setter Property="Foreground" Value="{StaticResource TextPrimary}"/>
-                        <Setter Property="Background" Value="{StaticResource PanelRaised}"/>
+                        <Setter Property="Foreground" Value="{DynamicResource TextPrimary}"/>
+                        <Setter Property="Background" Value="{DynamicResource ControlPopupBackground}"/>
                         <Setter Property="Padding" Value="10,6"/>
                         <Setter Property="Template">
                             <Setter.Value>
@@ -2578,11 +2641,11 @@ $inputXML = @'
                                     </Border>
                                     <ControlTemplate.Triggers>
                                         <Trigger Property="IsHighlighted" Value="True">
-                                            <Setter TargetName="ItemBorder" Property="Background" Value="{StaticResource AccentSoft}"/>
+                                            <Setter TargetName="ItemBorder" Property="Background" Value="{DynamicResource ButtonHoverBackground}"/>
                                         </Trigger>
                                         <Trigger Property="IsSelected" Value="True">
-                                            <Setter TargetName="ItemBorder" Property="Background" Value="{StaticResource Accent}"/>
-                                            <Setter Property="Foreground" Value="#0B0D0F"/>
+                                            <Setter TargetName="ItemBorder" Property="Background" Value="{DynamicResource ButtonPressedBackground}"/>
+                                            <Setter Property="Foreground" Value="{DynamicResource ButtonPressedForeground}"/>
                                         </Trigger>
                                     </ControlTemplate.Triggers>
                                 </ControlTemplate>
@@ -2606,15 +2669,17 @@ $inputXML = @'
                                         <Border x:Name="ComboBorder" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="8">
                                             <Grid>
                                                 <ContentPresenter Margin="10,0,34,0" VerticalAlignment="Center" HorizontalAlignment="Left"/>
-                                                <Path HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,12,0" Fill="{StaticResource TextSecondary}" Data="M 0 0 L 4 4 L 8 0 Z"/>
+                                                <Path HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,12,0" Fill="{DynamicResource TextSecondary}" Data="M 0 0 L 4 4 L 8 0 Z"/>
                                             </Grid>
                                         </Border>
                                         <ControlTemplate.Triggers>
                                             <Trigger Property="IsMouseOver" Value="True">
-                                                <Setter TargetName="ComboBorder" Property="BorderBrush" Value="{StaticResource Accent}"/>
+                                                <Setter TargetName="ComboBorder" Property="BorderBrush" Value="{DynamicResource Accent}"/>
+                                                <Setter TargetName="ComboBorder" Property="Background" Value="{DynamicResource ControlHoverBackground}"/>
                                             </Trigger>
                                             <Trigger Property="IsChecked" Value="True">
-                                                <Setter TargetName="ComboBorder" Property="BorderBrush" Value="{StaticResource Accent}"/>
+                                                <Setter TargetName="ComboBorder" Property="BorderBrush" Value="{DynamicResource Accent}"/>
+                                                <Setter TargetName="ComboBorder" Property="Background" Value="{DynamicResource ControlHoverBackground}"/>
                                             </Trigger>
                                         </ControlTemplate.Triggers>
                                     </ControlTemplate>
@@ -2634,8 +2699,8 @@ $inputXML = @'
                                    AllowsTransparency="True"
                                    Focusable="False"
                                    PopupAnimation="Fade">
-                                <Border Background="{StaticResource PanelRaised}"
-                                        BorderBrush="{StaticResource BorderSoft}"
+                                <Border Background="{DynamicResource ControlPopupBackground}"
+                                        BorderBrush="{DynamicResource BorderSoft}"
                                         BorderThickness="1"
                                         CornerRadius="8"
                                         MinWidth="{Binding ActualWidth, RelativeSource={RelativeSource TemplatedParent}}">
@@ -2662,29 +2727,67 @@ $inputXML = @'
         </Style>
         <Style TargetType="CheckBox">
             <Setter Property="Margin" Value="0,4,0,8"/>
-            <Setter Property="Foreground" Value="{StaticResource TextPrimary}"/>
+            <Setter Property="Foreground" Value="{DynamicResource TextPrimary}"/>
         </Style>
         <Style TargetType="ToggleButton">
             <Setter Property="MinHeight" Value="34"/>
             <Setter Property="Padding" Value="14,6"/>
-            <Setter Property="Foreground" Value="{StaticResource TextPrimary}"/>
-            <Setter Property="Background" Value="{StaticResource PanelRaised}"/>
-            <Setter Property="BorderBrush" Value="{StaticResource BorderSoft}"/>
+            <Setter Property="Foreground" Value="{DynamicResource ButtonForeground}"/>
+            <Setter Property="Background" Value="{DynamicResource ButtonBackground}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource BorderSoft}"/>
             <Setter Property="FontWeight" Value="SemiBold"/>
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="ToggleButton">
-                        <Border x:Name="ToggleBorder" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1" CornerRadius="17" Padding="{TemplateBinding Padding}">
-                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        <Border x:Name="ToggleBorder"
+                                Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="1"
+                                CornerRadius="17"
+                                Padding="{TemplateBinding Padding}"
+                                RenderTransformOrigin="0.5,0.5">
+                            <Border.RenderTransform>
+                                <ScaleTransform ScaleX="1" ScaleY="1"/>
+                            </Border.RenderTransform>
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="14"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <Ellipse x:Name="ToggleDot" Grid.Column="0" Width="8" Height="8" Fill="{DynamicResource Accent}" VerticalAlignment="Center" HorizontalAlignment="Left"/>
+                                <ContentPresenter Grid.Column="1" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="8,0,0,0"/>
+                            </Grid>
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="ToggleBorder" Property="BorderBrush" Value="{StaticResource Accent}"/>
-                                <Setter TargetName="ToggleBorder" Property="Background" Value="{StaticResource AccentSoft}"/>
+                                <Setter TargetName="ToggleBorder" Property="BorderBrush" Value="{DynamicResource Accent}"/>
+                                <Setter TargetName="ToggleBorder" Property="Background" Value="{DynamicResource ButtonHoverBackground}"/>
+                                <Setter Property="Cursor" Value="Hand"/>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Trigger.EnterActions>
+                                    <BeginStoryboard>
+                                        <Storyboard>
+                                            <DoubleAnimation Storyboard.TargetName="ToggleBorder" Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleX)" To="0.97" Duration="0:0:0.055"/>
+                                            <DoubleAnimation Storyboard.TargetName="ToggleBorder" Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleY)" To="0.94" Duration="0:0:0.055"/>
+                                        </Storyboard>
+                                    </BeginStoryboard>
+                                </Trigger.EnterActions>
+                                <Trigger.ExitActions>
+                                    <BeginStoryboard>
+                                        <Storyboard>
+                                            <DoubleAnimation Storyboard.TargetName="ToggleBorder" Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleX)" To="1" Duration="0:0:0.13"/>
+                                            <DoubleAnimation Storyboard.TargetName="ToggleBorder" Storyboard.TargetProperty="(UIElement.RenderTransform).(ScaleTransform.ScaleY)" To="1" Duration="0:0:0.13"/>
+                                        </Storyboard>
+                                    </BeginStoryboard>
+                                </Trigger.ExitActions>
+                                <Setter TargetName="ToggleBorder" Property="Background" Value="{DynamicResource ButtonPressedBackground}"/>
+                                <Setter Property="Foreground" Value="{DynamicResource ButtonPressedForeground}"/>
                             </Trigger>
                             <Trigger Property="IsChecked" Value="True">
-                                <Setter TargetName="ToggleBorder" Property="BorderBrush" Value="{StaticResource Accent}"/>
-                                <Setter TargetName="ToggleBorder" Property="Background" Value="{StaticResource AccentSoft}"/>
+                                <Setter TargetName="ToggleBorder" Property="BorderBrush" Value="{DynamicResource Accent}"/>
+                                <Setter TargetName="ToggleBorder" Property="Background" Value="{DynamicResource ButtonCheckedBackground}"/>
+                                <Setter TargetName="ToggleDot" Property="Fill" Value="{DynamicResource ButtonPressedBackground}"/>
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -2693,12 +2796,12 @@ $inputXML = @'
         </Style>
         <Style TargetType="TextBlock">
             <Setter Property="TextWrapping" Value="Wrap"/>
-            <Setter Property="Foreground" Value="{StaticResource TextPrimary}"/>
+            <Setter Property="Foreground" Value="{DynamicResource TextPrimary}"/>
         </Style>
         <Style TargetType="RichTextBox">
-            <Setter Property="Foreground" Value="{StaticResource TextPrimary}"/>
-            <Setter Property="Background" Value="#0F1115"/>
-            <Setter Property="BorderBrush" Value="{StaticResource BorderSoft}"/>
+            <Setter Property="Foreground" Value="{DynamicResource TextPrimary}"/>
+            <Setter Property="Background" Value="{DynamicResource ControlBackground}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource BorderSoft}"/>
         </Style>
         <Style TargetType="ScrollViewer">
             <Setter Property="Padding" Value="0"/>

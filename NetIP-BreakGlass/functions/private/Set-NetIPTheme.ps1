@@ -22,6 +22,16 @@ function Set-NetIPTheme {
             BorderSoft      = '#D6DEE8'
             Accent          = '#2563EB'
             AccentSoft      = '#E0ECFF'
+            ButtonBackground = '#FFFFFF'
+            ButtonHoverBackground = '#EEF4FF'
+            ButtonPressedBackground = '#2563EB'
+            ButtonCheckedBackground = '#DBEAFE'
+            ButtonDisabledBackground = '#E5E7EB'
+            ButtonForeground = '#0F172A'
+            ButtonPressedForeground = '#FFFFFF'
+            ControlBackground = '#FFFFFF'
+            ControlHoverBackground = '#EEF4FF'
+            ControlPopupBackground = '#FFFFFF'
             Header          = '#FFFFFF'
             HeaderBorder    = '#D6DEE8'
             Navigation      = '#FFFFFF'
@@ -43,6 +53,16 @@ function Set-NetIPTheme {
             BorderSoft      = '#3B3657'
             Accent          = '#38BDF8'
             AccentSoft      = '#0F3040'
+            ButtonBackground = '#221F33'
+            ButtonHoverBackground = '#2C2940'
+            ButtonPressedBackground = '#38BDF8'
+            ButtonCheckedBackground = '#0F3040'
+            ButtonDisabledBackground = '#1A1724'
+            ButtonForeground = '#F8FAFC'
+            ButtonPressedForeground = '#0B0D0F'
+            ControlBackground = '#221F33'
+            ControlHoverBackground = '#2C2940'
+            ControlPopupBackground = '#221F33'
             Header          = '#161423'
             HeaderBorder    = '#2F2B45'
             Navigation      = '#1D1A2E'
@@ -61,7 +81,12 @@ function Set-NetIPTheme {
         $sync.Form.Resources[$Key] = New-NetIPThemeBrush $Color
     }
 
-    foreach ($key in @('AppBackground','PanelBackground','PanelRaised','TextPrimary','TextSecondary','TextMuted','BorderStrong','BorderSoft','Accent','AccentSoft')) {
+    foreach ($key in @(
+            'AppBackground','PanelBackground','PanelRaised','TextPrimary','TextSecondary','TextMuted',
+            'BorderStrong','BorderSoft','Accent','AccentSoft','ButtonBackground','ButtonHoverBackground',
+            'ButtonPressedBackground','ButtonCheckedBackground','ButtonDisabledBackground','ButtonForeground',
+            'ButtonPressedForeground','ControlBackground','ControlHoverBackground','ControlPopupBackground'
+        )) {
         Set-NetIPThemeBrushResource -Key $key -Color $palette[$key]
     }
 
@@ -76,8 +101,8 @@ function Set-NetIPTheme {
     $progressBackBrush = New-NetIPThemeBrush $palette.ProgressBack
     $textBrush = $sync.Form.Resources['TextPrimary']
     $secondaryTextBrush = $sync.Form.Resources['TextSecondary']
-    $raisedBrush = $sync.Form.Resources['PanelRaised']
-    $accentSoftBrush = $sync.Form.Resources['AccentSoft']
+    $buttonBrush = $sync.Form.Resources['ButtonBackground']
+    $controlBrush = $sync.Form.Resources['ControlBackground']
 
     function Set-NetIPObjectTheme([AllowNull()] $Object) {
         if ($null -eq $Object -or -not ($Object -is [System.Windows.DependencyObject])) { return }
@@ -86,7 +111,7 @@ function Set-NetIPTheme {
             $Object.Foreground = $textBrush
         }
         elseif ($Object -is [System.Windows.Controls.TextBox]) {
-            $Object.Background = $logBrush
+            $Object.Background = $controlBrush
             $Object.Foreground = $textBrush
             $Object.BorderBrush = $borderBrush
             $Object.CaretBrush = $textBrush
@@ -97,7 +122,7 @@ function Set-NetIPTheme {
             $Object.BorderBrush = $borderBrush
         }
         elseif ($Object -is [System.Windows.Controls.ComboBox]) {
-            $Object.Background = $raisedBrush
+            $Object.Background = $controlBrush
             $Object.Foreground = $textBrush
             $Object.BorderBrush = $borderBrush
         }
@@ -105,12 +130,12 @@ function Set-NetIPTheme {
             $Object.Foreground = $textBrush
         }
         elseif ($Object -is [System.Windows.Controls.Primitives.ToggleButton]) {
-            $Object.Background = $raisedBrush
+            $Object.Background = $buttonBrush
             $Object.Foreground = $textBrush
             $Object.BorderBrush = $borderBrush
         }
         elseif ($Object -is [System.Windows.Controls.Button]) {
-            $Object.Background = $raisedBrush
+            $Object.Background = $buttonBrush
             $Object.Foreground = $textBrush
             $Object.BorderBrush = $borderBrush
         }
@@ -176,8 +201,8 @@ function Set-NetIPTheme {
 
     if ($sync.WPFThemeToggle) {
         $sync.WPFThemeToggle.IsChecked = ($Theme -eq 'Light')
-        $sync.WPFThemeToggle.Background = $accentSoftBrush
-        $sync.WPFThemeToggle.BorderBrush = $sync.Form.Resources['Accent']
+        $sync.WPFThemeToggle.Background = $sync.Form.Resources['ButtonBackground']
+        $sync.WPFThemeToggle.BorderBrush = $sync.Form.Resources['BorderSoft']
         if ([string]$sync.State.Language -eq 'en-US') {
             $sync.WPFThemeToggle.Content = if ($Theme -eq 'Light') { 'Light mode' } else { 'Dark mode' }
         }
