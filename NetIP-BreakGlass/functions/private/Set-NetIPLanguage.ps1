@@ -20,6 +20,8 @@ function Set-NetIPLanguage {
         @{ Da = '6. Udfør'; En = '6. Apply' }
         @{ Da = '7. Handoff'; En = '7. Handoff' }
         @{ Da = 'Sprog'; En = 'Language' }
+        @{ Da = 'Lys tilstand'; En = 'Light mode' }
+        @{ Da = 'Mørk tilstand'; En = 'Dark mode' }
         @{ Da = 'Velkommen'; En = 'Welcome' }
         @{ Da = 'Dette værktøj opretter to break-glass konti på tenantens .onmicrosoft.com domæne, opretter gruppen CA-BreakGlass-Exclude og kan valgfrit ekskludere gruppen fra eksisterende Conditional Access-politikker.'; En = 'This tool creates two break-glass accounts on the tenant .onmicrosoft.com domain, creates the CA-BreakGlass-Exclude group, and can optionally exclude the group from existing Conditional Access policies.' }
         @{ Da = 'Værktøjet forbinder kun til Microsoft Graph. Det bruger ikke Azure, PIM, RMAU, FIDO2, Log Analytics eller Sentinel.'; En = 'The tool connects only to Microsoft Graph. It does not use Azure, PIM, RMAU, FIDO2, Log Analytics, or Sentinel.' }
@@ -95,7 +97,7 @@ function Set-NetIPLanguage {
         if ($Object -is [System.Windows.Controls.TextBlock]) {
             $Object.Text = Convert-AppText $Object.Text
         }
-        elseif ($Object -is [System.Windows.Controls.Button] -or $Object -is [System.Windows.Controls.CheckBox]) {
+        elseif ($Object -is [System.Windows.Controls.Button] -or $Object -is [System.Windows.Controls.CheckBox] -or $Object -is [System.Windows.Controls.Primitives.ToggleButton]) {
             if ($Object.Content -is [string]) { $Object.Content = Convert-AppText ([string]$Object.Content) }
         }
         elseif ($Object -is [System.Windows.Controls.TextBox]) {
@@ -111,6 +113,14 @@ function Set-NetIPLanguage {
 
     $sync.Form.Title = "$($sync.App.Name) v$($sync.App.Version)"
     Update-TextObject $sync.Form
+    if ($sync.WPFThemeToggle) {
+        if ([string]$sync.State.Theme -eq 'Light') {
+            $sync.WPFThemeToggle.Content = if ($Language -eq 'en-US') { 'Light mode' } else { 'Lys tilstand' }
+        }
+        else {
+            $sync.WPFThemeToggle.Content = if ($Language -eq 'en-US') { 'Dark mode' } else { 'Mørk tilstand' }
+        }
+    }
     if ($sync.WPFAppTitle) { $sync.WPFAppTitle.Text = $sync.App.Name }
     if ($sync.WPFVersionBadge) { $sync.WPFVersionBadge.Text = "v$($sync.App.Version)" }
 }

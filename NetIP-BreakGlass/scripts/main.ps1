@@ -51,6 +51,15 @@ if ($sync.WPFLanguageSelector) {
     })
 }
 
+if ($sync.WPFThemeToggle) {
+    $sync.WPFThemeToggle.Add_Checked({
+        Set-NetIPTheme -Theme 'Light'
+    })
+    $sync.WPFThemeToggle.Add_Unchecked({
+        Set-NetIPTheme -Theme 'Dark'
+    })
+}
+
 $sync.Form.Add_Closing({
     if ($sync.Runspace) {
         $sync.Runspace.Close()

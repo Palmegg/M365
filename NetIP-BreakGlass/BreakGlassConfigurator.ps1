@@ -43,6 +43,7 @@ $sync.State = [Hashtable]::Synchronized(@{
     Errors             = @()
     Language           = 'da-DK'
     NeutralNameIndex   = 0
+    Theme              = 'Dark'
 })
 
 $sync.UI = [Hashtable]::Synchronized(@{
@@ -1216,6 +1217,8 @@ function Set-NetIPLanguage {
         @{ Da = '6. Udfør'; En = '6. Apply' }
         @{ Da = '7. Handoff'; En = '7. Handoff' }
         @{ Da = 'Sprog'; En = 'Language' }
+        @{ Da = 'Lys tilstand'; En = 'Light mode' }
+        @{ Da = 'Mørk tilstand'; En = 'Dark mode' }
         @{ Da = 'Velkommen'; En = 'Welcome' }
         @{ Da = 'Dette værktøj opretter to break-glass konti på tenantens .onmicrosoft.com domæne, opretter gruppen CA-BreakGlass-Exclude og kan valgfrit ekskludere gruppen fra eksisterende Conditional Access-politikker.'; En = 'This tool creates two break-glass accounts on the tenant .onmicrosoft.com domain, creates the CA-BreakGlass-Exclude group, and can optionally exclude the group from existing Conditional Access policies.' }
         @{ Da = 'Værktøjet forbinder kun til Microsoft Graph. Det bruger ikke Azure, PIM, RMAU, FIDO2, Log Analytics eller Sentinel.'; En = 'The tool connects only to Microsoft Graph. It does not use Azure, PIM, RMAU, FIDO2, Log Analytics, or Sentinel.' }
@@ -1291,7 +1294,7 @@ function Set-NetIPLanguage {
         if ($Object -is [System.Windows.Controls.TextBlock]) {
             $Object.Text = Convert-AppText $Object.Text
         }
-        elseif ($Object -is [System.Windows.Controls.Button] -or $Object -is [System.Windows.Controls.CheckBox]) {
+        elseif ($Object -is [System.Windows.Controls.Button] -or $Object -is [System.Windows.Controls.CheckBox] -or $Object -is [System.Windows.Controls.Primitives.ToggleButton]) {
             if ($Object.Content -is [string]) { $Object.Content = Convert-AppText ([string]$Object.Content) }
         }
         elseif ($Object -is [System.Windows.Controls.TextBox]) {
@@ -1307,6 +1310,14 @@ function Set-NetIPLanguage {
 
     $sync.Form.Title = "$($sync.App.Name) v$($sync.App.Version)"
     Update-TextObject $sync.Form
+    if ($sync.WPFThemeToggle) {
+        if ([string]$sync.State.Theme -eq 'Light') {
+            $sync.WPFThemeToggle.Content = if ($Language -eq 'en-US') { 'Light mode' } else { 'Lys tilstand' }
+        }
+        else {
+            $sync.WPFThemeToggle.Content = if ($Language -eq 'en-US') { 'Dark mode' } else { 'Mørk tilstand' }
+        }
+    }
     if ($sync.WPFAppTitle) { $sync.WPFAppTitle.Text = $sync.App.Name }
     if ($sync.WPFVersionBadge) { $sync.WPFVersionBadge.Text = "v$($sync.App.Version)" }
 }
@@ -1336,6 +1347,197 @@ function Set-NetIPNeutralAccountNamePair {
     $sync.WPFUserPrefix2.Text = ConvertTo-NetIPNeutralUserPrefix -DisplayName $account2
 
     Write-NetIPLog -Message "Skiftede neutrale kontonavne til: $account1 / $account2"
+    Update-NetIPUIState
+}
+
+function Set-NetIPTheme {
+    [CmdletBinding()]
+    param([ValidateSet('Dark','Light')][string] $Theme = 'Dark')
+
+    if (-not $sync.Form) { return }
+    if (-not $sync.Form.Dispatcher.CheckAccess()) {
+        $sync.Form.Dispatcher.Invoke([System.Action]{ Set-NetIPTheme -Theme $Theme })
+        return
+    }
+
+    $sync.State.Theme = $Theme
+
+    $palette = if ($Theme -eq 'Light') {
+        @{
+            AppBackground   = '#F5F7FB'
+            PanelBackground = '#FFFFFF'
+            PanelRaised     = '#F8FAFC'
+            TextPrimary     = '#0F172A'
+            TextSecondary   = '#334155'
+            TextMuted       = '#64748B'
+            BorderStrong    = '#CBD5E1'
+            BorderSoft      = '#D6DEE8'
+            Accent          = '#2563EB'
+            AccentSoft      = '#E0ECFF'
+            Header          = '#FFFFFF'
+            HeaderBorder    = '#D6DEE8'
+            Navigation      = '#FFFFFF'
+            Status          = '#FFFFFF'
+            Version         = '#EEF4FF'
+            LogBackground   = '#FFFFFF'
+            ProgressBack    = '#E2E8F0'
+        }
+    }
+    else {
+        @{
+            AppBackground   = '#12101C'
+            PanelBackground = '#171522'
+            PanelRaised     = '#221F33'
+            TextPrimary     = '#F8FAFC'
+            TextSecondary   = '#CBD5E1'
+            TextMuted       = '#94A3B8'
+            BorderStrong    = '#94A3B8'
+            BorderSoft      = '#3B3657'
+            Accent          = '#38BDF8'
+            AccentSoft      = '#0F3040'
+            Header          = '#161423'
+            HeaderBorder    = '#2F2B45'
+            Navigation      = '#1D1A2E'
+            Status          = '#161423'
+            Version         = '#252138'
+            LogBackground   = '#0F1115'
+            ProgressBack    = '#1F2937'
+        }
+    }
+
+    function New-NetIPThemeBrush([string] $Color) {
+        return [System.Windows.Media.BrushConverter]::new().ConvertFromString($Color)
+    }
+
+    function Set-NetIPThemeBrushResource([string] $Key, [string] $Color) {
+        $sync.Form.Resources[$Key] = New-NetIPThemeBrush $Color
+    }
+
+    foreach ($key in @('AppBackground','PanelBackground','PanelRaised','TextPrimary','TextSecondary','TextMuted','BorderStrong','BorderSoft','Accent','AccentSoft')) {
+        Set-NetIPThemeBrushResource -Key $key -Color $palette[$key]
+    }
+
+    $backgroundBrush = New-NetIPThemeBrush $palette.AppBackground
+    $headerBrush = New-NetIPThemeBrush $palette.Header
+    $headerBorderBrush = New-NetIPThemeBrush $palette.HeaderBorder
+    $navigationBrush = New-NetIPThemeBrush $palette.Navigation
+    $statusBrush = New-NetIPThemeBrush $palette.Status
+    $versionBrush = New-NetIPThemeBrush $palette.Version
+    $borderBrush = New-NetIPThemeBrush $palette.BorderSoft
+    $logBrush = New-NetIPThemeBrush $palette.LogBackground
+    $progressBackBrush = New-NetIPThemeBrush $palette.ProgressBack
+    $textBrush = $sync.Form.Resources['TextPrimary']
+    $secondaryTextBrush = $sync.Form.Resources['TextSecondary']
+    $raisedBrush = $sync.Form.Resources['PanelRaised']
+    $accentSoftBrush = $sync.Form.Resources['AccentSoft']
+
+    function Set-NetIPObjectTheme([AllowNull()] $Object) {
+        if ($null -eq $Object -or -not ($Object -is [System.Windows.DependencyObject])) { return }
+
+        if ($Object -is [System.Windows.Controls.TextBlock]) {
+            $Object.Foreground = $textBrush
+        }
+        elseif ($Object -is [System.Windows.Controls.TextBox]) {
+            $Object.Background = $logBrush
+            $Object.Foreground = $textBrush
+            $Object.BorderBrush = $borderBrush
+            $Object.CaretBrush = $textBrush
+        }
+        elseif ($Object -is [System.Windows.Controls.RichTextBox]) {
+            $Object.Background = $logBrush
+            $Object.Foreground = $textBrush
+            $Object.BorderBrush = $borderBrush
+        }
+        elseif ($Object -is [System.Windows.Controls.ComboBox]) {
+            $Object.Background = $raisedBrush
+            $Object.Foreground = $textBrush
+            $Object.BorderBrush = $borderBrush
+        }
+        elseif ($Object -is [System.Windows.Controls.CheckBox]) {
+            $Object.Foreground = $textBrush
+        }
+        elseif ($Object -is [System.Windows.Controls.Primitives.ToggleButton]) {
+            $Object.Background = $raisedBrush
+            $Object.Foreground = $textBrush
+            $Object.BorderBrush = $borderBrush
+        }
+        elseif ($Object -is [System.Windows.Controls.Button]) {
+            $Object.Background = $raisedBrush
+            $Object.Foreground = $textBrush
+            $Object.BorderBrush = $borderBrush
+        }
+
+        foreach ($child in [System.Windows.LogicalTreeHelper]::GetChildren($Object)) {
+            Set-NetIPObjectTheme $child
+        }
+        try {
+            $count = [System.Windows.Media.VisualTreeHelper]::GetChildrenCount($Object)
+            for ($i = 0; $i -lt $count; $i++) {
+                Set-NetIPObjectTheme ([System.Windows.Media.VisualTreeHelper]::GetChild($Object, $i))
+            }
+        }
+        catch {
+            return
+        }
+    }
+
+    $sync.Form.Background = $backgroundBrush
+    Set-NetIPObjectTheme $sync.Form
+
+    if ($sync.WPFRootGrid) { $sync.WPFRootGrid.Background = $backgroundBrush }
+    if ($sync.WPFHeader) {
+        $sync.WPFHeader.Background = $headerBrush
+        $sync.WPFHeader.BorderBrush = $headerBorderBrush
+    }
+    if ($sync.WPFNavigationBar) {
+        $sync.WPFNavigationBar.Background = $navigationBrush
+        $sync.WPFNavigationBar.BorderBrush = $borderBrush
+    }
+    if ($sync.WPFStatusBar) {
+        $sync.WPFStatusBar.Background = $statusBrush
+        $sync.WPFStatusBar.BorderBrush = $headerBorderBrush
+    }
+    if ($sync.WPFVersionBadge -and $sync.WPFVersionBadge.Parent -is [System.Windows.Controls.Border]) {
+        $sync.WPFVersionBadge.Parent.Background = $versionBrush
+        $sync.WPFVersionBadge.Parent.BorderBrush = $borderBrush
+    }
+    if ($sync.WPFStatusText) { $sync.WPFStatusText.Foreground = $secondaryTextBrush }
+    if ($sync.WPFCurrentStepText) { $sync.WPFCurrentStepText.Foreground = $secondaryTextBrush }
+    if ($sync.WPFAppSubtitle) { $sync.WPFAppSubtitle.Foreground = $secondaryTextBrush }
+    if ($sync.WPFProgressBar) { $sync.WPFProgressBar.Background = $progressBackBrush }
+    if ($sync.WPFDiscoveryList) {
+        $sync.WPFDiscoveryList.Background = $logBrush
+        $sync.WPFDiscoveryList.Foreground = $textBrush
+        $sync.WPFDiscoveryList.BorderBrush = $borderBrush
+    }
+    if ($sync.WPFExecutionLog) {
+        $sync.WPFExecutionLog.Background = $logBrush
+        $sync.WPFExecutionLog.Foreground = $textBrush
+        $sync.WPFExecutionLog.BorderBrush = $borderBrush
+    }
+    if ($sync.WPFPlanText) {
+        $sync.WPFPlanText.Background = $logBrush
+        $sync.WPFPlanText.Foreground = $textBrush
+        $sync.WPFPlanText.BorderBrush = $borderBrush
+    }
+    if ($sync.WPFGraphScopes) {
+        $sync.WPFGraphScopes.Background = $logBrush
+        $sync.WPFGraphScopes.Foreground = $textBrush
+        $sync.WPFGraphScopes.BorderBrush = $borderBrush
+    }
+
+    if ($sync.WPFThemeToggle) {
+        $sync.WPFThemeToggle.IsChecked = ($Theme -eq 'Light')
+        $sync.WPFThemeToggle.Background = $accentSoftBrush
+        $sync.WPFThemeToggle.BorderBrush = $sync.Form.Resources['Accent']
+        if ([string]$sync.State.Language -eq 'en-US') {
+            $sync.WPFThemeToggle.Content = if ($Theme -eq 'Light') { 'Light mode' } else { 'Dark mode' }
+        }
+        else {
+            $sync.WPFThemeToggle.Content = if ($Theme -eq 'Light') { 'Lys tilstand' } else { 'Mørk tilstand' }
+        }
+    }
+
     Update-NetIPUIState
 }
 
@@ -1459,10 +1661,10 @@ function Update-NetIPUIState {
         Apply = 'WPFStepApply'
         Handoff = 'WPFStepHandoff'
     }
-    $activeBrush = [System.Windows.Media.BrushConverter]::new().ConvertFromString('#0F3040')
-    $inactiveBrush = [System.Windows.Media.BrushConverter]::new().ConvertFromString('#181B1F')
-    $activeBorderBrush = [System.Windows.Media.BrushConverter]::new().ConvertFromString('#38BDF8')
-    $inactiveBorderBrush = [System.Windows.Media.BrushConverter]::new().ConvertFromString('#E5E7EB')
+    $activeBrush = $sync.Form.Resources['AccentSoft']
+    $inactiveBrush = $sync.Form.Resources['PanelRaised']
+    $activeBorderBrush = $sync.Form.Resources['Accent']
+    $inactiveBorderBrush = $sync.Form.Resources['BorderSoft']
     foreach ($entry in $stepMap.GetEnumerator()) {
         $button = $sync[$entry.Value]
         if (-not $button) { continue }
@@ -1599,6 +1801,7 @@ function Initialize-NetIPWPFUI {
     $sync.WPFCreateBreakGlassCAPolicy.IsChecked = [bool]$defaults.createBreakGlassCAPolicy
     $sync.WPFEnableBreakGlassCAPolicy.IsChecked = [bool]$defaults.enableBreakGlassCAPolicy
     if ($sync.WPFLanguageSelector) { $sync.WPFLanguageSelector.SelectedIndex = 0 }
+    Set-NetIPTheme -Theme $sync.State.Theme
     Set-NetIPLanguage -Language $sync.State.Language
 
     if ($sync.App.Mock) {
@@ -2191,7 +2394,7 @@ function Move-NetIPWPFStep {
 $sync.configs.appsettings = @'
 {
   "name": "Entra Break Glass Configurator",
-  "version": "2.2.3",
+  "version": "2.2.4",
   "outputRoot": ".\\Output",
   "groupName": "CA-BreakGlass-Exclude",
   "groupDescription": "Security group used to exclude dedicated break-glass accounts from existing Conditional Access policies.",
@@ -2314,23 +2517,23 @@ $inputXML = @'
             </DrawingBrush.Drawing>
         </DrawingBrush>
         <Style TargetType="Button">
-            <Setter Property="MinHeight" Value="38"/>
+            <Setter Property="MinHeight" Value="42"/>
             <Setter Property="Margin" Value="0,0,0,8"/>
-            <Setter Property="Padding" Value="14,8"/>
+            <Setter Property="Padding" Value="18,9"/>
             <Setter Property="Foreground" Value="{StaticResource TextPrimary}"/>
             <Setter Property="Background" Value="{StaticResource PanelRaised}"/>
-            <Setter Property="BorderBrush" Value="{StaticResource BorderStrong}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource BorderSoft}"/>
             <Setter Property="BorderThickness" Value="1"/>
             <Setter Property="FontWeight" Value="SemiBold"/>
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="Button">
-                        <Border x:Name="ButtonBorder" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="2" Padding="{TemplateBinding Padding}">
-                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        <Border x:Name="ButtonBorder" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="8" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center" RecognizesAccessKey="True"/>
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="ButtonBorder" Property="Background" Value="#1F2937"/>
+                                <Setter TargetName="ButtonBorder" Property="Background" Value="{StaticResource AccentSoft}"/>
                                 <Setter TargetName="ButtonBorder" Property="BorderBrush" Value="{StaticResource Accent}"/>
                             </Trigger>
                             <Trigger Property="IsPressed" Value="True">
@@ -2348,20 +2551,145 @@ $inputXML = @'
         <Style TargetType="TextBox">
             <Setter Property="MinHeight" Value="28"/>
             <Setter Property="Margin" Value="0,2,0,8"/>
-            <Setter Property="Padding" Value="8,5"/>
+            <Setter Property="Padding" Value="10,6"/>
             <Setter Property="Foreground" Value="{StaticResource TextPrimary}"/>
-            <Setter Property="Background" Value="#0F1115"/>
+            <Setter Property="Background" Value="{StaticResource PanelRaised}"/>
             <Setter Property="BorderBrush" Value="{StaticResource BorderSoft}"/>
             <Setter Property="CaretBrush" Value="{StaticResource TextPrimary}"/>
         </Style>
         <Style TargetType="ComboBox">
-            <Setter Property="MinHeight" Value="30"/>
-            <Setter Property="Foreground" Value="#111827"/>
-            <Setter Property="Background" Value="#F8FAFC"/>
+            <Setter Property="MinHeight" Value="36"/>
+            <Setter Property="Padding" Value="10,5"/>
+            <Setter Property="Foreground" Value="{StaticResource TextPrimary}"/>
+            <Setter Property="Background" Value="{StaticResource PanelRaised}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource BorderSoft}"/>
+            <Setter Property="SnapsToDevicePixels" Value="True"/>
+            <Setter Property="ItemContainerStyle">
+                <Setter.Value>
+                    <Style TargetType="ComboBoxItem">
+                        <Setter Property="Foreground" Value="{StaticResource TextPrimary}"/>
+                        <Setter Property="Background" Value="{StaticResource PanelRaised}"/>
+                        <Setter Property="Padding" Value="10,6"/>
+                        <Setter Property="Template">
+                            <Setter.Value>
+                                <ControlTemplate TargetType="ComboBoxItem">
+                                    <Border x:Name="ItemBorder" Background="{TemplateBinding Background}" Padding="{TemplateBinding Padding}">
+                                        <ContentPresenter/>
+                                    </Border>
+                                    <ControlTemplate.Triggers>
+                                        <Trigger Property="IsHighlighted" Value="True">
+                                            <Setter TargetName="ItemBorder" Property="Background" Value="{StaticResource AccentSoft}"/>
+                                        </Trigger>
+                                        <Trigger Property="IsSelected" Value="True">
+                                            <Setter TargetName="ItemBorder" Property="Background" Value="{StaticResource Accent}"/>
+                                            <Setter Property="Foreground" Value="#0B0D0F"/>
+                                        </Trigger>
+                                    </ControlTemplate.Triggers>
+                                </ControlTemplate>
+                            </Setter.Value>
+                        </Setter>
+                    </Style>
+                </Setter.Value>
+            </Setter>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ComboBox">
+                        <Grid>
+                            <ToggleButton x:Name="DropDownToggle"
+                                          Background="{TemplateBinding Background}"
+                                          BorderBrush="{TemplateBinding BorderBrush}"
+                                          BorderThickness="1"
+                                          Focusable="False"
+                                          IsChecked="{Binding IsDropDownOpen, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}">
+                                <ToggleButton.Template>
+                                    <ControlTemplate TargetType="ToggleButton">
+                                        <Border x:Name="ComboBorder" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="{TemplateBinding BorderThickness}" CornerRadius="8">
+                                            <Grid>
+                                                <ContentPresenter Margin="10,0,34,0" VerticalAlignment="Center" HorizontalAlignment="Left"/>
+                                                <Path HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,12,0" Fill="{StaticResource TextSecondary}" Data="M 0 0 L 4 4 L 8 0 Z"/>
+                                            </Grid>
+                                        </Border>
+                                        <ControlTemplate.Triggers>
+                                            <Trigger Property="IsMouseOver" Value="True">
+                                                <Setter TargetName="ComboBorder" Property="BorderBrush" Value="{StaticResource Accent}"/>
+                                            </Trigger>
+                                            <Trigger Property="IsChecked" Value="True">
+                                                <Setter TargetName="ComboBorder" Property="BorderBrush" Value="{StaticResource Accent}"/>
+                                            </Trigger>
+                                        </ControlTemplate.Triggers>
+                                    </ControlTemplate>
+                                </ToggleButton.Template>
+                            </ToggleButton>
+                            <ContentPresenter x:Name="ContentSite"
+                                              IsHitTestVisible="False"
+                                              Content="{TemplateBinding SelectionBoxItem}"
+                                              ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}"
+                                              ContentStringFormat="{TemplateBinding SelectionBoxItemStringFormat}"
+                                              Margin="10,0,34,0"
+                                              VerticalAlignment="Center"
+                                              HorizontalAlignment="Left"/>
+                            <Popup x:Name="Popup"
+                                   Placement="Bottom"
+                                   IsOpen="{TemplateBinding IsDropDownOpen}"
+                                   AllowsTransparency="True"
+                                   Focusable="False"
+                                   PopupAnimation="Fade">
+                                <Border Background="{StaticResource PanelRaised}"
+                                        BorderBrush="{StaticResource BorderSoft}"
+                                        BorderThickness="1"
+                                        CornerRadius="8"
+                                        MinWidth="{Binding ActualWidth, RelativeSource={RelativeSource TemplatedParent}}">
+                                    <ScrollViewer MaxHeight="240" CanContentScroll="True">
+                                        <ItemsPresenter/>
+                                    </ScrollViewer>
+                                </Border>
+                            </Popup>
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Opacity" Value="0.45"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+            <Style.Resources>
+                <SolidColorBrush x:Key="{x:Static SystemColors.WindowBrushKey}" Color="#181B1F"/>
+                <SolidColorBrush x:Key="{x:Static SystemColors.ControlBrushKey}" Color="#181B1F"/>
+                <SolidColorBrush x:Key="{x:Static SystemColors.HighlightBrushKey}" Color="#38BDF8"/>
+                <SolidColorBrush x:Key="{x:Static SystemColors.HighlightTextBrushKey}" Color="#0B0D0F"/>
+            </Style.Resources>
         </Style>
         <Style TargetType="CheckBox">
             <Setter Property="Margin" Value="0,4,0,8"/>
             <Setter Property="Foreground" Value="{StaticResource TextPrimary}"/>
+        </Style>
+        <Style TargetType="ToggleButton">
+            <Setter Property="MinHeight" Value="34"/>
+            <Setter Property="Padding" Value="14,6"/>
+            <Setter Property="Foreground" Value="{StaticResource TextPrimary}"/>
+            <Setter Property="Background" Value="{StaticResource PanelRaised}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource BorderSoft}"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ToggleButton">
+                        <Border x:Name="ToggleBorder" Background="{TemplateBinding Background}" BorderBrush="{TemplateBinding BorderBrush}" BorderThickness="1" CornerRadius="17" Padding="{TemplateBinding Padding}">
+                            <ContentPresenter HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="ToggleBorder" Property="BorderBrush" Value="{StaticResource Accent}"/>
+                                <Setter TargetName="ToggleBorder" Property="Background" Value="{StaticResource AccentSoft}"/>
+                            </Trigger>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="ToggleBorder" Property="BorderBrush" Value="{StaticResource Accent}"/>
+                                <Setter TargetName="ToggleBorder" Property="Background" Value="{StaticResource AccentSoft}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
         </Style>
         <Style TargetType="TextBlock">
             <Setter Property="TextWrapping" Value="Wrap"/>
@@ -2376,24 +2704,26 @@ $inputXML = @'
             <Setter Property="Padding" Value="0"/>
         </Style>
     </Window.Resources>
-    <Grid Background="{StaticResource GridBackground}">
+    <Grid x:Name="WPFRootGrid" Background="{StaticResource GridBackground}">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
             <RowDefinition Height="Auto"/>
         </Grid.RowDefinitions>
 
-        <Border Grid.Row="0" Background="#101214" BorderBrush="{StaticResource BorderSoft}" BorderThickness="0,0,0,1" Padding="22,18">
+        <Border x:Name="WPFHeader" Grid.Row="0" Background="#161423" BorderBrush="#2F2B45" BorderThickness="0,0,0,1" Padding="24,18">
             <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
                 <StackPanel>
                     <TextBlock x:Name="WPFAppTitle" Text="Entra Break Glass Configurator" Foreground="{StaticResource TextPrimary}" FontSize="25" FontWeight="SemiBold"/>
                     <TextBlock x:Name="WPFAppSubtitle" Text="Simpel Microsoft Graph-baseret opsætning af break-glass konti og CA-exclude gruppe." Foreground="{StaticResource TextSecondary}" Margin="0,5,0,0"/>
                 </StackPanel>
-                <Border Grid.Column="1" BorderBrush="{StaticResource BorderStrong}" BorderThickness="1" Background="#161A1F" CornerRadius="2" Padding="12,6" VerticalAlignment="Top">
+                <ToggleButton x:Name="WPFThemeToggle" Grid.Column="1" Content="Light mode" VerticalAlignment="Top" MinWidth="112" Margin="0,6,14,0"/>
+                <Border Grid.Column="2" BorderBrush="#4B5563" BorderThickness="1" Background="#252138" CornerRadius="8" Padding="12,6" VerticalAlignment="Top">
                     <TextBlock x:Name="WPFVersionBadge" Foreground="{StaticResource TextPrimary}" FontWeight="SemiBold"/>
                 </Border>
             </Grid>
@@ -2417,8 +2747,7 @@ $inputXML = @'
                 </StackPanel>
             </Border>
 
-            <Border Grid.Row="1" BorderBrush="{StaticResource BorderStrong}" BorderThickness="1.2" Background="{StaticResource PanelBackground}" Padding="24">
-            <Grid>
+            <Grid Grid.Row="1" Margin="34,20">
                 <Grid x:Name="WPFPageWelcome">
                     <ScrollViewer VerticalScrollBarVisibility="Auto">
                         <StackPanel MaxWidth="940" HorizontalAlignment="Center">
@@ -2588,23 +2917,22 @@ $inputXML = @'
                     </StackPanel>
                 </Grid>
             </Grid>
-            </Border>
 
-            <Border Grid.Row="2" Background="#0F1115" BorderBrush="{StaticResource BorderStrong}" BorderThickness="1" Padding="22,16" Margin="0,16,0,0">
+            <Border x:Name="WPFNavigationBar" Grid.Row="2" Background="#1D1A2E" BorderBrush="#3B3657" BorderThickness="1" CornerRadius="8" Padding="22,16" Margin="34,16,34,0">
                 <Grid>
                     <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="180"/>
+                        <ColumnDefinition Width="270"/>
                         <ColumnDefinition Width="*"/>
-                        <ColumnDefinition Width="180"/>
+                        <ColumnDefinition Width="270"/>
                     </Grid.ColumnDefinitions>
-                    <Button x:Name="WPFBackStep" Grid.Column="0" Content="Tilbage" Width="150" HorizontalAlignment="Left"/>
+                    <Button x:Name="WPFBackStep" Grid.Column="0" Content="Tilbage" MinWidth="240" HorizontalAlignment="Left"/>
                     <TextBlock x:Name="WPFCurrentStepText" Grid.Column="1" HorizontalAlignment="Center" VerticalAlignment="Center" FontWeight="SemiBold" Foreground="{StaticResource TextSecondary}"/>
-                    <Button x:Name="WPFNextStep" Grid.Column="2" Content="Videre" Width="150" HorizontalAlignment="Right"/>
+                    <Button x:Name="WPFNextStep" Grid.Column="2" Content="Videre" MinWidth="240" HorizontalAlignment="Right"/>
                 </Grid>
             </Border>
         </Grid>
 
-        <Border Grid.Row="2" Background="#101214" BorderBrush="{StaticResource BorderSoft}" BorderThickness="0,1,0,0" Padding="14,9">
+        <Border x:Name="WPFStatusBar" Grid.Row="2" Background="#161423" BorderBrush="#2F2B45" BorderThickness="0,1,0,0" Padding="14,9">
             <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*"/>
@@ -2668,6 +2996,15 @@ if ($sync.WPFLanguageSelector) {
         $language = if ($selected -and $selected.Tag) { [string]$selected.Tag } else { 'da-DK' }
         Set-NetIPLanguage -Language $language
         Update-NetIPUIState
+    })
+}
+
+if ($sync.WPFThemeToggle) {
+    $sync.WPFThemeToggle.Add_Checked({
+        Set-NetIPTheme -Theme 'Light'
+    })
+    $sync.WPFThemeToggle.Add_Unchecked({
+        Set-NetIPTheme -Theme 'Dark'
     })
 }
 
