@@ -418,27 +418,7 @@
                             <TextBox x:Name="WPFGroupName" Grid.Row="6" Grid.Column="1" Grid.ColumnSpan="3" IsReadOnly="True"/>
                             <TextBlock Grid.Row="7" Grid.Column="0" Text="Security group description"/>
                             <TextBox x:Name="WPFGroupDescription" Grid.Row="7" Grid.Column="1" Grid.ColumnSpan="3" IsReadOnly="True" TextWrapping="Wrap" Height="58"/>
-                            <TextBlock Grid.Row="8" Grid.ColumnSpan="4" Text="Phase 2 - FIDO2 authentication strength" FontSize="16" FontWeight="SemiBold" Margin="0,14,0,8"/>
-                            <TextBlock Grid.Row="9" Grid.Column="0" Text="AAGUID kildebruger"/>
-                            <StackPanel Grid.Row="9" Grid.Column="1" Grid.ColumnSpan="3" Orientation="Horizontal">
-                                <ComboBox x:Name="WPFAAGUIDSourceUser" Width="170" SelectedIndex="0" Margin="0,2,8,8">
-                                    <ComboBoxItem Content="Account 1"/>
-                                    <ComboBoxItem Content="Account 2"/>
-                                    <ComboBoxItem Content="Custom UPN"/>
-                                </ComboBox>
-                                <TextBox x:Name="WPFAAGUIDCustomUser" Width="310" Margin="0,2,8,8"/>
-                                <Button x:Name="WPFFetchAAGUIDs" Content="Hent AAGUID" Width="130" Margin="0,0,0,8"/>
-                            </StackPanel>
-                            <TextBlock Grid.Row="10" Grid.Column="0" Text="Tilladte AAGUIDs"/>
-                            <TextBox x:Name="WPFAAGUIDs" Grid.Row="10" Grid.Column="1" Grid.ColumnSpan="3" AcceptsReturn="True" TextWrapping="Wrap" Height="62"/>
-                            <TextBlock Grid.Row="11" Grid.Column="0" Text="Auth strength navn"/>
-                            <TextBox x:Name="WPFAuthenticationStrengthName" Grid.Row="11" Grid.Column="1" IsReadOnly="True" Margin="0,2,16,8"/>
-                            <TextBlock Grid.Row="11" Grid.Column="2" Text="BG CA policy navn"/>
-                            <TextBox x:Name="WPFBreakGlassCAPolicyName" Grid.Row="11" Grid.Column="3" IsReadOnly="True"/>
-                            <StackPanel Grid.Row="12" Grid.Column="0" Grid.ColumnSpan="4">
-                                <TextBlock Foreground="#FBBF24" Text="Phase 2 opretter/opdaterer altid BreakGlass-FIDO2 authentication strength og opretter den dedikerede CA-policy som disabled. AAGUIDs kan udfyldes manuelt her eller hentes automatisk i Phase 2 efter FIDO2 keys er registreret."/>
-                            </StackPanel>
-                            <StackPanel Grid.Row="13" Grid.Column="0" Grid.ColumnSpan="4" Margin="0,10,0,0">
+                            <StackPanel Grid.Row="8" Grid.Column="0" Grid.ColumnSpan="4" Margin="0,18,0,0">
                                 <CheckBox x:Name="WPFCreateUsers" Content="Opret brugere hvis de ikke findes"/>
                                 <CheckBox x:Name="WPFCreateGroup" Content="Opret gruppen CA-BreakGlass-Exclude hvis den ikke findes"/>
                                 <CheckBox x:Name="WPFAddUsersToGroup" Content="Tilføj break-glass konti til CA-BreakGlass-Exclude"/>
@@ -488,6 +468,37 @@
                         <StackPanel DockPanel.Dock="Top">
                             <TextBlock Text="Phase 2 - FIDO2 og dedikeret CA-policy" FontSize="22" FontWeight="SemiBold" Margin="0,0,0,12"/>
                             <TextBlock Text="Dette trin refresher de to konti, henter AAGUIDs fra registrerede FIDO2 methods, kan slette TAP, opretter/opdaterer BreakGlass-FIDO2 authentication strength og opretter den dedikerede CA-policy som disabled."/>
+                            <Grid Margin="0,18,0,8">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="190"/>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="190"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                </Grid.RowDefinitions>
+                                <TextBlock Grid.Row="0" Grid.Column="0" Text="Auth strength navn"/>
+                                <TextBox x:Name="WPFAuthenticationStrengthName" Grid.Row="0" Grid.Column="1" IsReadOnly="True" Margin="0,2,16,8"/>
+                                <TextBlock Grid.Row="0" Grid.Column="2" Text="BG CA policy navn"/>
+                                <TextBox x:Name="WPFBreakGlassCAPolicyName" Grid.Row="0" Grid.Column="3" IsReadOnly="True"/>
+                                <TextBlock Grid.Row="1" Grid.Column="0" Text="AAGUID kildebruger"/>
+                                <StackPanel Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="3" Orientation="Horizontal">
+                                    <ComboBox x:Name="WPFAAGUIDSourceUser" Width="170" SelectedIndex="0" Margin="0,2,8,8">
+                                        <ComboBoxItem Content="Account 1"/>
+                                        <ComboBoxItem Content="Account 2"/>
+                                        <ComboBoxItem Content="Custom UPN"/>
+                                    </ComboBox>
+                                    <TextBox x:Name="WPFAAGUIDCustomUser" Width="310" Margin="0,2,8,8"/>
+                                    <Button x:Name="WPFFetchAAGUIDs" Content="Hent AAGUID" Width="130" Margin="0,0,0,8"/>
+                                </StackPanel>
+                                <TextBlock Grid.Row="2" Grid.Column="0" Text="Tilladte AAGUIDs"/>
+                                <TextBox x:Name="WPFAAGUIDs" Grid.Row="2" Grid.Column="1" Grid.ColumnSpan="3" AcceptsReturn="True" TextWrapping="Wrap" Height="72"/>
+                                <TextBlock Grid.Row="3" Grid.Column="0" Grid.ColumnSpan="4" Foreground="#FBBF24" Text="Phase 2 bliver først tilgængelig efter Phase 1a og manuel FIDO2-registrering. CA-politikken oprettes som disabled."/>
+                            </Grid>
                             <Button x:Name="WPFApplyPhase2" Content="Kør Phase 2" Width="160" HorizontalAlignment="Left" Margin="0,14,0,8"/>
                         </StackPanel>
                         <TextBox x:Name="WPFPhase2Log" IsReadOnly="True" AcceptsReturn="True" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" FontFamily="Consolas"/>
