@@ -438,6 +438,7 @@
                                     <RowDefinition Height="Auto"/>
                                     <RowDefinition Height="Auto"/>
                                     <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
                                 </Grid.RowDefinitions>
                                 <TextBlock Grid.Row="0" Grid.ColumnSpan="2" Text="Forbindelsesstatus" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,12"/>
                                 <TextBlock Grid.Row="1" Grid.Column="0" Text="Forbundet:" FontWeight="SemiBold"/>
@@ -646,23 +647,37 @@
                                     <RowDefinition Height="Auto"/>
                                     <RowDefinition Height="Auto"/>
                                     <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
                                 </Grid.RowDefinitions>
                                 <TextBlock Grid.Row="0" Grid.Column="0" Text="Auth strength navn"/>
                                 <TextBox x:Name="WPFAuthenticationStrengthName" Grid.Row="0" Grid.Column="1" IsReadOnly="True" Margin="0,2,16,8"/>
                                 <TextBlock Grid.Row="0" Grid.Column="2" Text="BG CA policy navn"/>
                                 <TextBox x:Name="WPFBreakGlassCAPolicyName" Grid.Row="0" Grid.Column="3" IsReadOnly="True"/>
-                                <TextBlock Grid.Row="1" Grid.Column="0" Text="AAGUID source UPN"/>
-                                <StackPanel Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="3" Orientation="Horizontal">
+                                <Border Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="4" Background="#0F172A" BorderBrush="{StaticResource BorderSoft}" BorderThickness="1" CornerRadius="8" Padding="12" Margin="0,4,0,12">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="190"/>
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel Grid.Column="0">
+                                            <TextBlock Text="FIDO2 pre-provision source" FontWeight="SemiBold"/>
+                                            <TextBlock Foreground="{StaticResource TextSecondary}" TextWrapping="Wrap" Text="Microsoft understøtter ikke at en allerede pre-registreret FIDO2/passkey bare attach'es til en anden bruger via Graph. Brug derfor en kildebruger til at registrere den fysiske key-model, hent AAGUID her, og brug AAGUID'en til BreakGlass-FIDO2 authentication strength."/>
+                                        </StackPanel>
+                                        <Button x:Name="WPFOpenPreProvisionMfaSetup" Grid.Column="1" Content="Åbn MFA setup" Width="160" HorizontalAlignment="Right" VerticalAlignment="Center"/>
+                                    </Grid>
+                                </Border>
+                                <TextBlock Grid.Row="2" Grid.Column="0" Text="AAGUID source UPN"/>
+                                <StackPanel Grid.Row="2" Grid.Column="1" Grid.ColumnSpan="3" Orientation="Horizontal">
                                     <TextBox x:Name="WPFAAGUIDCustomUser" Width="520" Margin="0,2,8,8" ToolTip="Enter the UPN for the pre-provision/source user that already has the FIDO2/passkey registered."/>
                                     <Button x:Name="WPFFetchAAGUIDs" Content="Fetch FIDO2 AAGUIDs" Width="170" Margin="0,0,0,8"/>
                                 </StackPanel>
-                                <TextBlock Grid.Row="2" Grid.Column="0" Text="Allowed key AAGUIDs"/>
-                                <StackPanel Grid.Row="2" Grid.Column="1" Grid.ColumnSpan="3">
+                                <TextBlock Grid.Row="3" Grid.Column="0" Text="Allowed key AAGUIDs"/>
+                                <StackPanel Grid.Row="3" Grid.Column="1" Grid.ColumnSpan="3">
                                     <TextBlock Text="One AAGUID per line. Use a pre-provision/source user that already has the correct FIDO2/passkey registered, then fetch its AAGUID here." Foreground="{StaticResource TextMuted}" Margin="0,0,0,4" TextWrapping="Wrap"/>
                                     <TextBox x:Name="WPFAAGUIDs" AcceptsReturn="True" TextWrapping="NoWrap" Height="72" FontFamily="Consolas" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"/>
                                 </StackPanel>
-                                <TextBlock x:Name="WPFPhase2ActionHint" Grid.Row="3" Grid.Column="0" Grid.ColumnSpan="3" Foreground="#FBBF24" Text="Hent AAGUID fra en konto med registreret FIDO2/passkey, og tryk derefter 'Kør Phase 2'." TextWrapping="Wrap" Margin="0,12,12,0"/>
-                                <Button x:Name="WPFApplyPhase2" Grid.Row="3" Grid.Column="3" Content="Kør Phase 2" Width="160" HorizontalAlignment="Right" Margin="0,8,0,0"/>
+                                <TextBlock x:Name="WPFPhase2ActionHint" Grid.Row="4" Grid.Column="0" Grid.ColumnSpan="3" Foreground="#FBBF24" Text="Hent AAGUID fra en konto med registreret FIDO2/passkey, og tryk derefter 'Kør Phase 2'." TextWrapping="Wrap" Margin="0,12,12,0"/>
+                                <Button x:Name="WPFApplyPhase2" Grid.Row="4" Grid.Column="3" Content="Kør Phase 2" Width="160" HorizontalAlignment="Right" Margin="0,8,0,0"/>
                             </Grid>
                             </Border>
                             <TextBox x:Name="WPFPhase2Log" IsReadOnly="True" AcceptsReturn="True" Height="92" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" FontFamily="Consolas"/>

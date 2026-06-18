@@ -24,6 +24,7 @@ function Invoke-EbgWPFButton {
         'WPFCycleNeutralNames' { Set-EbgNeutralAccountNamePair }
         'WPFFetchAAGUIDs' { Invoke-EbgFetchAAGUIDs }
         'WPFOpenMfaSetup' { Invoke-EbgOpenUrl -Url 'https://aka.ms/mfasetup' }
+        'WPFOpenPreProvisionMfaSetup' { Invoke-EbgOpenUrl -Url 'https://aka.ms/mfasetup' }
         'WPFOpenOutputFolder' { Invoke-EbgOpenOutputFolder }
         'WPFOpenHandoff' { Invoke-EbgOpenHandoff }
         default { Write-EbgLog -Level WARN -Message "Ukendt UI handling: $Name" }

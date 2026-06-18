@@ -24,7 +24,8 @@ PowerShell 7/WPF værktøj til en simpel Microsoft Graph-baseret v1 opsætning a
 - Tildeler begge break-glass konti direkte `Global Administrator` på tenant scope (`/`).
 - Phase 1a kan ekskludere gruppen fra eksisterende Conditional Access-politikker.
 - Phase 1b er manuel: konsulenten logger ind med TAP og registrerer to FIDO2 security keys pr. konto.
-- Phase 2 refresher kontiene, henter AAGUIDs fra de registrerede FIDO2/passkey methods og kan slette TAP.
+- Phase 2 understøtter et FIDO2 pre-provision source-flow: indtast UPN på en kildebruger, der allerede har registreret den fysiske FIDO2/passkey model, hent AAGUID fra den bruger, og brug AAGUID'en i `BreakGlass-FIDO2` authentication strength.
+- Phase 2 refresher også break-glass kontiene, henter eventuelle AAGUIDs fra deres registrerede FIDO2/passkey methods og kan slette TAP.
 - Phase 2 opretter/opdaterer custom authentication strength `BreakGlass-FIDO2` med FIDO2 og tilladte AAGUIDs.
 - Phase 2 opretter en dedikeret Conditional Access-politik, der kræver `BreakGlass-FIDO2` for de to break-glass konti. Politikken oprettes som `disabled`.
 - Backupper CA policies før valgfri patching.
@@ -33,6 +34,8 @@ PowerShell 7/WPF værktøj til en simpel Microsoft Graph-baseret v1 opsætning a
 ## Hvad værktøjet ikke gør
 
 Det bruger ikke Azure login, Az-moduler, PIM, RMAU, Log Analytics, Azure Monitor, Sentinel, Intune, app registrations, service principals eller cleanup/delete workflows.
+
+Værktøjet kan ikke attach'e en allerede pre-registreret fysisk FIDO2/passkey direkte til en anden bruger. Microsoft Graph FIDO2 create-flow kræver en WebAuthn registration ceremony og Microsoft dokumenterer, at provisioning af pre-registered passkeys ikke er understøttet. Det understøttede flow i dette værktøj er derfor at bruge en pre-provision/kildebruger til at hente AAGUID, som derefter enforce'es via authentication strength.
 
 ## Hvorfor kun Microsoft Graph
 
