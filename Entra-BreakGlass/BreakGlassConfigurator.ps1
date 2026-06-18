@@ -62,10 +62,6 @@ $sync.State = [Hashtable]::Synchronized(@{
     TenantDisplayName  = ''
     OnMicrosoftDomain  = ''
     GraphScopes        = @()
-    GraphAccessToken   = ''
-    GraphRefreshToken  = ''
-    GraphTokenExpires  = $null
-    GraphClientId      = ''
     Discovery          = $null
     Plan               = $null
     Phase1Result       = $null
@@ -155,134 +151,6 @@ function Backup-EbgConditionalAccessPolicies {
 
     return Export-EbgJsonSafe -InputObject $Policies -Path (Join-Path $OutputFolder 'ca-policies-before.json') -Depth 50
 }
-function Connect-EbgGraphBrowser {
-    [CmdletBinding()]
-    param([Parameter(Mandatory)][string[]] $Scopes)
-
-    $clientId = '14d82eec-204b-4c2f-b7e8-296a70dab67e'
-    $tenant = 'organizations'
-    $pkce = New-EbgPkcePair
-    $state = [guid]::NewGuid().ToString('N')
-    $listener = [System.Net.HttpListener]::new()
-    $port = $null
-
-    foreach ($candidate in (Get-Random -InputObject (49152..65535) -Count 40)) {
-        $prefix = "http://localhost:$candidate/"
-        try {
-            $listener.Prefixes.Clear()
-            $listener.Prefixes.Add($prefix)
-            $listener.Start()
-            $port = $candidate
-            break
-        }
-        catch {
-            try { $listener.Close() } catch {}
-            $listener = [System.Net.HttpListener]::new()
-        }
-    }
-    if (-not $port) {
-        throw 'Kunne ikke starte lokal login-listener på localhost.'
-    }
-
-    $redirectUri = "http://localhost:$port/"
-    $scope = (@($Scopes) + @('offline_access','openid','profile') | Select-Object -Unique) -join ' '
-    $authorizeUri = 'https://login.microsoftonline.com/{0}/oauth2/v2.0/authorize?client_id={1}&response_type=code&redirect_uri={2}&response_mode=query&scope={3}&code_challenge={4}&code_challenge_method=S256&prompt=login&state={5}' -f @(
-        [Uri]::EscapeDataString($tenant),
-        [Uri]::EscapeDataString($clientId),
-        [Uri]::EscapeDataString($redirectUri),
-        [Uri]::EscapeDataString($scope),
-        [Uri]::EscapeDataString($pkce.Challenge),
-        [Uri]::EscapeDataString($state)
-    )
-
-    try {
-        Start-Process $authorizeUri | Out-Null
-        $async = $listener.BeginGetContext($null, $null)
-        $started = Get-Date
-        while (-not $async.AsyncWaitHandle.WaitOne(250)) {
-            if (((Get-Date) - $started).TotalMinutes -ge 5) {
-                throw 'Microsoft Graph login timed out efter 5 minutter. Prøv igen, og tjek browser-loginvinduet.'
-            }
-        }
-        $context = $listener.EndGetContext($async)
-        $request = $context.Request
-        $response = $context.Response
-        $code = [string]$request.QueryString['code']
-        $returnedState = [string]$request.QueryString['state']
-        $errorCode = [string]$request.QueryString['error']
-        $errorDescription = [string]$request.QueryString['error_description']
-
-        $html = '<html><body style="font-family:Segoe UI,Arial,sans-serif;margin:40px"><h2>Authentication complete.</h2><p>You can return to the Entra Break Glass Configurator.</p><p>Close this browser tab.</p></body></html>'
-        if ($errorCode) {
-            $html = '<html><body style="font-family:Segoe UI,Arial,sans-serif;margin:40px"><h2>Authentication failed.</h2><p>You can return to the Entra Break Glass Configurator.</p></body></html>'
-        }
-        $buffer = [System.Text.Encoding]::UTF8.GetBytes($html)
-        $response.ContentType = 'text/html; charset=utf-8'
-        $response.ContentLength64 = $buffer.Length
-        $response.OutputStream.Write($buffer, 0, $buffer.Length)
-        $response.OutputStream.Close()
-
-        if ($errorCode) {
-            throw "Microsoft login fejlede: $errorCode $errorDescription"
-        }
-        if ([string]::IsNullOrWhiteSpace($code)) {
-            throw 'Microsoft login returnerede ikke en authorization code.'
-        }
-        if ($returnedState -ne $state) {
-            throw 'Microsoft login state validering fejlede.'
-        }
-
-        $tokenUri = "https://login.microsoftonline.com/$tenant/oauth2/v2.0/token"
-        $body = @{
-            client_id     = $clientId
-            scope         = $scope
-            code          = $code
-            redirect_uri  = $redirectUri
-            grant_type    = 'authorization_code'
-            code_verifier = $pkce.Verifier
-        }
-        $token = Invoke-RestMethod -Method POST -Uri $tokenUri -Body $body -ContentType 'application/x-www-form-urlencoded' -ErrorAction Stop
-        $idToken = [string](Get-EbgObjectPropertyValue -InputObject $token -Name 'id_token')
-        $accessToken = [string](Get-EbgObjectPropertyValue -InputObject $token -Name 'access_token')
-        $refreshToken = [string](Get-EbgObjectPropertyValue -InputObject $token -Name 'refresh_token')
-        $expiresIn = [int](Get-EbgObjectPropertyValue -InputObject $token -Name 'expires_in')
-        $claims = if ($idToken) { ConvertFrom-EbgJwt -Token $idToken } else { $null }
-        $preferredUsername = [string](Get-EbgObjectPropertyValue -InputObject $claims -Name 'preferred_username')
-        $upn = [string](Get-EbgObjectPropertyValue -InputObject $claims -Name 'upn')
-        $tenantId = [string](Get-EbgObjectPropertyValue -InputObject $claims -Name 'tid')
-        return [pscustomobject]@{
-            ClientId     = $clientId
-            AccessToken  = $accessToken
-            RefreshToken = $refreshToken
-            ExpiresOn    = (Get-Date).ToUniversalTime().AddSeconds($expiresIn - 120)
-            Account      = if ($preferredUsername) { $preferredUsername } elseif ($upn) { $upn } else { '' }
-            TenantId     = $tenantId
-            Scopes       = @($Scopes)
-        }
-    }
-    finally {
-        if ($listener) {
-            try { $listener.Stop() } catch {}
-            try { $listener.Close() } catch {}
-        }
-    }
-}
-
-function ConvertFrom-EbgJwt {
-    [CmdletBinding()]
-    param([Parameter(Mandatory)][string] $Token)
-
-    $parts = $Token.Split('.')
-    if ($parts.Count -lt 2) { return $null }
-    $payload = $parts[1].Replace('-', '+').Replace('_', '/')
-    switch ($payload.Length % 4) {
-        2 { $payload += '==' }
-        3 { $payload += '=' }
-    }
-    $json = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($payload))
-    return $json | ConvertFrom-Json
-}
-
 function ConvertFrom-EbgAAGUIDText {
     [CmdletBinding()]
     param([AllowNull()][string] $Text)
@@ -812,38 +680,6 @@ function Get-EbgGlobalAdministratorRoleDefinition {
     Write-EbgLog -Level PASS -Message 'Role definition fundet: Global Administrator'
     return $role
 }
-function Get-EbgGraphAccessToken {
-    [CmdletBinding()]
-    param()
-
-    if ([string]::IsNullOrWhiteSpace([string]$sync.State.GraphAccessToken)) {
-        throw 'Microsoft Graph er ikke forbundet. Forbind til Microsoft 365 tenant først.'
-    }
-    $expires = $sync.State.GraphTokenExpires
-    if ($expires -and ([datetime]$expires).ToUniversalTime() -gt (Get-Date).ToUniversalTime().AddMinutes(2)) {
-        return [string]$sync.State.GraphAccessToken
-    }
-    if ([string]::IsNullOrWhiteSpace([string]$sync.State.GraphRefreshToken)) {
-        throw 'Microsoft Graph token er udløbet. Forbind til Microsoft 365 tenant igen.'
-    }
-
-    $tenant = if ($sync.State.TenantId) { [string]$sync.State.TenantId } else { 'organizations' }
-    $scope = (@($sync.configs.graphScopes) + @('offline_access','openid','profile') | Select-Object -Unique) -join ' '
-    $body = @{
-        client_id     = [string]$sync.State.GraphClientId
-        scope         = $scope
-        refresh_token = [string]$sync.State.GraphRefreshToken
-        grant_type    = 'refresh_token'
-    }
-    $token = Invoke-RestMethod -Method POST -Uri "https://login.microsoftonline.com/$tenant/oauth2/v2.0/token" -Body $body -ContentType 'application/x-www-form-urlencoded' -ErrorAction Stop
-    $sync.State.GraphAccessToken = [string](Get-EbgObjectPropertyValue -InputObject $token -Name 'access_token')
-    $newRefreshToken = [string](Get-EbgObjectPropertyValue -InputObject $token -Name 'refresh_token')
-    if ($newRefreshToken) { $sync.State.GraphRefreshToken = $newRefreshToken }
-    $expiresIn = [int](Get-EbgObjectPropertyValue -InputObject $token -Name 'expires_in')
-    $sync.State.GraphTokenExpires = (Get-Date).ToUniversalTime().AddSeconds($expiresIn - 120)
-    return [string]$sync.State.GraphAccessToken
-}
-
 function Get-EbgGraphCollection {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string] $Uri)
@@ -1006,11 +842,9 @@ function Invoke-EbgGraphRequest {
     if ($sync.App.Mock) {
         throw 'Mock mode should not call Microsoft Graph.'
     }
-    $accessToken = Get-EbgGraphAccessToken
     $params = @{
         Method      = $Method
         Uri         = $Uri
-        Headers     = @{ Authorization = "Bearer $accessToken" }
         ErrorAction = 'Stop'
     }
     if ($null -ne $Body) {
@@ -1018,7 +852,7 @@ function Invoke-EbgGraphRequest {
         $params.ContentType = 'application/json'
     }
     try {
-        return Invoke-RestMethod @params
+        return Invoke-MgGraphRequest @params
     }
     catch {
         $message = [string]$_
@@ -1029,7 +863,6 @@ function Invoke-EbgGraphRequest {
         throw
     }
 }
-
 function Invoke-EbgRunspace {
     [CmdletBinding()]
     param(
@@ -1283,27 +1116,6 @@ function New-EbgOutputFolder {
     $sync.State.OutputFolder = $folder
     return $folder
 }
-function New-EbgPkcePair {
-    [CmdletBinding()]
-    param()
-
-    $bytes = [byte[]]::new(64)
-    [System.Security.Cryptography.RandomNumberGenerator]::Fill($bytes)
-    $verifier = [Convert]::ToBase64String($bytes).TrimEnd('=').Replace('+', '-').Replace('/', '_')
-    $sha = [System.Security.Cryptography.SHA256]::Create()
-    try {
-        $challengeBytes = $sha.ComputeHash([System.Text.Encoding]::ASCII.GetBytes($verifier))
-    }
-    finally {
-        $sha.Dispose()
-    }
-    $challenge = [Convert]::ToBase64String($challengeBytes).TrimEnd('=').Replace('+', '-').Replace('/', '_')
-    return [pscustomobject]@{
-        Verifier  = $verifier
-        Challenge = $challenge
-    }
-}
-
 function New-EbgPlanObject {
     [CmdletBinding()]
     param(
@@ -1762,13 +1574,13 @@ function Test-EbgGraphConnection {
 
     if ($sync.App.Mock) { return $true }
     try {
-        return -not [string]::IsNullOrWhiteSpace([string](Get-EbgGraphAccessToken))
+        $context = Get-MgContext -ErrorAction Stop
+        return ($null -ne $context -and -not [string]::IsNullOrWhiteSpace([string]$context.Account))
     }
     catch {
         return $false
     }
 }
-
 function Update-EbgUIState {
     [CmdletBinding()]
     param()
@@ -2496,28 +2308,110 @@ function Invoke-EbgConnectTenant {
         }
 
         Write-EbgStatus -Busy -Message 'Forbinder til Microsoft Graph...'
+        $module = Get-Module -ListAvailable -Name Microsoft.Graph.Authentication | Select-Object -First 1
+        if (-not $module) {
+            $install = $sync.Form.Dispatcher.Invoke([func[object]]{
+                [System.Windows.MessageBox]::Show('Microsoft.Graph.Authentication mangler. Vil du installere modulet for CurrentUser fra PSGallery?', $sync.App.Name, 'YesNo', 'Question')
+            })
+            if ($install -ne 'Yes') {
+                throw 'Microsoft Graph modulet mangler, og installation blev ikke godkendt.'
+            }
+            Install-Module -Name Microsoft.Graph.Authentication -Scope CurrentUser -Repository PSGallery -Force -AllowClobber -ErrorAction Stop
+        }
+        Import-Module Microsoft.Graph.Authentication -ErrorAction Stop
         $scopes = @($sync.configs.graphScopes)
+        try { Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null } catch {}
         $sync.State.GraphConnected = $false
         $sync.State.GraphAccount = ''
         $sync.State.TenantId = ''
         $sync.State.TenantDisplayName = ''
         $sync.State.OnMicrosoftDomain = ''
         $sync.State.GraphScopes = @()
-        $sync.State.GraphAccessToken = ''
-        $sync.State.GraphRefreshToken = ''
-        $sync.State.GraphTokenExpires = $null
-        $sync.State.GraphClientId = ''
         [void]$sync.Form.Dispatcher.Invoke([System.Action]{ Update-EbgUIState | Out-Null })
-        Write-EbgStatus -Busy -Message 'Åbner browser-login. Log ind med tenant-kontoen...'
-        $context = Connect-EbgGraphBrowser -Scopes $scopes
+        Write-EbgStatus -Busy -Message 'Åbner separat PowerShell-vindue til Microsoft Graph-login...'
+
+        $workerRoot = Join-Path ([System.IO.Path]::GetTempPath()) ("EbgGraphLogin-{0}" -f ([guid]::NewGuid().ToString('N')))
+        New-Item -ItemType Directory -Path $workerRoot -Force | Out-Null
+        $workerScript = Join-Path $workerRoot 'Connect-MgGraph-Login.ps1'
+        $resultPath = Join-Path $workerRoot 'result.json'
+        $scopeLiteral = (($scopes | ForEach-Object { "'$($_.Replace("'", "''"))'" }) -join ', ')
+        $workerCode = @"
+`$ErrorActionPreference = 'Stop'
+`$resultPath = '$($resultPath.Replace("'", "''"))'
+`$result = [ordered]@{
+    Success = `$false
+    Account = ''
+    TenantId = ''
+    Scopes = @()
+    Error = ''
+}
+try {
+    `$host.UI.RawUI.WindowTitle = 'Entra Break Glass Configurator - Microsoft Graph login'
+    Write-Host ''
+    Write-Host 'Entra Break Glass Configurator - Microsoft Graph login' -ForegroundColor Cyan
+    Write-Host 'Dette vindue bruges kun til Microsoft Graph login.' -ForegroundColor Cyan
+    Write-Host ''
+    Write-Host 'Log ind i Microsoft loginvinduet. Når login er gennemført, kan du lukke dette PowerShell-vindue for at fortsætte i WPF.' -ForegroundColor Yellow
+    Write-Host ''
+    Import-Module Microsoft.Graph.Authentication -ErrorAction Stop
+    try { Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null } catch {}
+    `$scopes = @($scopeLiteral)
+    Connect-MgGraph -Scopes `$scopes -ContextScope CurrentUser -NoWelcome -ErrorAction Stop | Out-Null
+    `$context = Get-MgContext -ErrorAction Stop
+    if (-not `$context -or [string]::IsNullOrWhiteSpace([string]`$context.Account)) {
+        throw 'Microsoft Graph login returnerede ingen aktiv konto.'
+    }
+    `$result.Success = `$true
+    `$result.Account = [string]`$context.Account
+    `$result.TenantId = [string]`$context.TenantId
+    `$result.Scopes = @(`$context.Scopes)
+    Write-Host ''
+    Write-Host "Login OK: `$(`$context.Account)" -ForegroundColor Green
+    Write-Host 'Luk dette PowerShell-vindue for at fortsætte i WPF.' -ForegroundColor Green
+}
+catch {
+    `$result.Error = [string]`$_.Exception.Message
+    Write-Host ''
+    Write-Host "Login fejlede: `$(`$_.Exception.Message)" -ForegroundColor Red
+    Write-Host 'Luk dette PowerShell-vindue for at vende tilbage til WPF.' -ForegroundColor Yellow
+}
+finally {
+    `$result | ConvertTo-Json -Depth 10 | Set-Content -LiteralPath `$resultPath -Encoding UTF8
+    while (`$true) { Start-Sleep -Seconds 1 }
+}
+"@
+        Set-Content -LiteralPath $workerScript -Value $workerCode -Encoding UTF8
+        $pwshPath = Join-Path $PSHOME 'pwsh.exe'
+        if (-not (Test-Path -LiteralPath $pwshPath)) {
+            $pwshPath = (Get-Command pwsh -ErrorAction Stop).Source
+        }
+        $process = Start-Process -FilePath $pwshPath -ArgumentList @(
+            '-NoProfile',
+            '-ExecutionPolicy',
+            'Bypass',
+            '-File',
+            $workerScript
+        ) -WindowStyle Normal -PassThru
+        Write-EbgStatus -Busy -Message 'Afventer Microsoft Graph-login. Luk login-PowerShell-vinduet når der står Login OK...'
+        while (-not $process.HasExited) {
+            Start-Sleep -Milliseconds 300
+        }
+        if (-not (Test-Path -LiteralPath $resultPath)) {
+            throw 'Login-vinduet blev lukket før Microsoft Graph returnerede et resultat.'
+        }
+        $workerResult = Get-Content -LiteralPath $resultPath -Raw | ConvertFrom-Json
+        if (-not [bool]$workerResult.Success) {
+            throw "Microsoft Graph login fejlede: $($workerResult.Error)"
+        }
+
+        Connect-MgGraph -ContextScope CurrentUser -NoWelcome -ErrorAction Stop | Out-Null
+        $context = Get-MgContext -ErrorAction Stop
+        if (-not $context -or [string]::IsNullOrWhiteSpace([string]$context.Account)) {
+            throw 'Microsoft Graph login returnerede ingen aktiv konto.'
+        }
         $sync.State.GraphConnected = $true
         $sync.State.GraphAccount = [string]$context.Account
-        $sync.State.TenantId = [string]$context.TenantId
         $sync.State.GraphScopes = @($context.Scopes)
-        $sync.State.GraphAccessToken = [string]$context.AccessToken
-        $sync.State.GraphRefreshToken = [string]$context.RefreshToken
-        $sync.State.GraphTokenExpires = $context.ExpiresOn
-        $sync.State.GraphClientId = [string]$context.ClientId
         Get-EbgTenantInfo | Out-Null
         Write-EbgStatus -Message 'Microsoft Graph er forbundet.'
         $isEnglish = ([string]$sync.State.Language -eq 'en-US')
@@ -2531,6 +2425,7 @@ function Invoke-EbgConnectTenant {
             if ($sync.WPFStepDiscovery) { $sync.WPFStepDiscovery.IsEnabled = $true }
             if ($sync.WPFNextStep -and [string]$sync.UI.CurrentStep -eq 'Connect') { $sync.WPFNextStep.IsEnabled = $true }
         })
+        Remove-Item -LiteralPath $workerRoot -Recurse -Force -ErrorAction SilentlyContinue
     }
 }
 

@@ -4,8 +4,9 @@ PowerShell 7/WPF værktøj til en simpel Microsoft Graph-baseret v1 opsætning a
 
 ## Hvad værktøjet gør
 
-- Forbinder til Microsoft Graph med delegated browser sign-in via OAuth PKCE.
-- Bruger ikke Microsoft Graph PowerShell session-cache; token holdes kun i memory for den aktuelle app-kørsel.
+- Forbinder til Microsoft Graph med standard Microsoft Graph PowerShell `Connect-MgGraph`.
+- Login køres i et separat PowerShell 7-vindue, så WPF-vinduet ikke låses under Microsoft login.
+- Det separate login-vindue rydder først eksisterende Graph-session med `Disconnect-MgGraph` og beder derefter om nyt login.
 - Finder tenantens `*.onmicrosoft.com` domæne.
 - Kontrollerer de eksakte target UPNs for to break-glass konti.
 - Phase 1a opretter manglende cloud-only brugere, hvis valgt.
@@ -26,7 +27,7 @@ PowerShell 7/WPF værktøj til en simpel Microsoft Graph-baseret v1 opsætning a
 
 ## Hvad værktøjet ikke gør
 
-Det bruger ikke Azure login, Az-moduler, PIM, RMAU, Log Analytics, Azure Monitor, Sentinel, Intune, kundeoprettede app registrations, service principals eller cleanup/delete workflows.
+Det bruger ikke Azure login, Az-moduler, PIM, RMAU, Log Analytics, Azure Monitor, Sentinel, Intune, app registrations, service principals eller cleanup/delete workflows.
 
 ## Hvorfor kun Microsoft Graph
 
