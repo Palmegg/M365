@@ -13,6 +13,7 @@ PowerShell 7/WPF værktøj til en simpel Microsoft Graph-baseret v1 opsætning a
 - Opretter eller genbruger security group `CA-BreakGlass-Exclude`.
 - Tilføjer kontiene til gruppen, hvis valgt.
 - Tildeler begge break-glass konti direkte `Global Administrator` på tenant scope (`/`).
+- Kan deaktivere administrator-SSPR tenant-wide, hvis valgt. Dette kan ikke begrænses til kun de to break-glass konti.
 - Kan valgfrit ekskludere gruppen fra eksisterende Conditional Access-politikker.
 - Backupper CA policies før valgfri patching.
 - Genererer `plan.json`, `result.json`, `handoff.html` og `app.log`.
@@ -62,13 +63,14 @@ Default scopes ligger i `config/graphScopes.json`:
 - `Organization.Read.All`
 - `RoleManagement.ReadWrite.Directory`
 - `Policy.Read.All`
+- `Policy.ReadWrite.Authorization`
 - `Policy.ReadWrite.ConditionalAccess`
 
 Admin consent kan være nødvendig i kundens tenant.
 
 ## Krævede roller
 
-Den indloggede konto skal have rettigheder til at oprette brugere/grupper, tildele directory roles og, hvis CA patching vælges, læse og opdatere Conditional Access-politikker. Typisk kræves Global Administrator eller en kombination med Privileged Role Administrator, User Administrator, Groups Administrator og Conditional Access Administrator.
+Den indloggede konto skal have rettigheder til at oprette brugere/grupper, tildele directory roles, læse/opdatere authorization policy hvis Admin SSPR deaktiveres og, hvis CA patching vælges, læse og opdatere Conditional Access-politikker. Typisk kræves Global Administrator eller en kombination med Privileged Role Administrator, User Administrator, Groups Administrator og Conditional Access Administrator.
 
 ## Password-håndtering
 
@@ -88,7 +90,7 @@ CA exclusion patching er valgfri og slået fra som standard. Hvis funktionen væ
 
 ## Handoff dokument
 
-`handoff.html` indeholder tenant, konti, Global Administrator rolle assignments, gruppemedlemskab, CA exclusion status, policy backup path, warnings/errors og manuelle næste steps. Det indeholder ikke passwords eller tokens.
+`handoff.html` indeholder tenant, konti, Global Administrator rolle assignments, Admin SSPR status, gruppemedlemskab, CA exclusion status, policy backup path, warnings/errors og manuelle næste steps. Det indeholder ikke passwords eller tokens.
 
 ## Arkitektur
 

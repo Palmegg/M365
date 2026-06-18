@@ -33,6 +33,7 @@ function New-NetIPHandoffHtml {
     $failed = @(Get-NetIPObjectPropertyValue -InputObject $Result -Name 'CAPoliciesFailed')
     $memberships = @(Get-NetIPObjectPropertyValue -InputObject $Result -Name 'GroupMembership')
     $roleAssignments = @(Get-NetIPObjectPropertyValue -InputObject $Result -Name 'RoleAssignments')
+    $adminSSPR = Get-NetIPObjectPropertyValue -InputObject $Result -Name 'AdminSSPR'
     $resultWarnings = @(Get-NetIPObjectPropertyValue -InputObject $Result -Name 'Warnings')
     $changedTable = Rows $changed
     $alreadyTable = Rows $already
@@ -87,6 +88,14 @@ function New-NetIPHandoffHtml {
   <h2>Administratorrolle</h2>
   <p>Begge break-glass konti tildeles direkte Global Administrator på tenant scope (/).</p>
   $roleAssignmentTable
+  <h2>Administrator-SSPR</h2>
+  <table>
+    <tr><th>Setting</th><td>$(ConvertTo-NetIPHtmlValue (Get-NetIPObjectPropertyValue -InputObject $adminSSPR -Name 'Setting'))</td></tr>
+    <tr><th>Previous value</th><td>$(ConvertTo-NetIPHtmlValue (Get-NetIPObjectPropertyValue -InputObject $adminSSPR -Name 'PreviousValue'))</td></tr>
+    <tr><th>Desired value</th><td>$(ConvertTo-NetIPHtmlValue (Get-NetIPObjectPropertyValue -InputObject $adminSSPR -Name 'DesiredValue'))</td></tr>
+    <tr><th>Status</th><td>$(ConvertTo-NetIPHtmlValue (Get-NetIPObjectPropertyValue -InputObject $adminSSPR -Name 'Status'))</td></tr>
+    <tr><th>Detail</th><td>$(ConvertTo-NetIPHtmlValue (Get-NetIPObjectPropertyValue -InputObject $adminSSPR -Name 'Detail'))</td></tr>
+  </table>
   <h2>Conditional Access</h2>
   <table>
     <tr><th>CA exclusions valgt</th><td>$(ConvertTo-NetIPHtmlValue (Get-NetIPObjectPropertyValue -InputObject $Result -Name 'CAExclusionsEnabled'))</td></tr>
@@ -106,6 +115,7 @@ function New-NetIPHandoffHtml {
     <li>Gem de genererede adgangskoder sikkert efter intern/kundeprocedure.</li>
     <li>Konfigurer MFA/FIDO2/passkey manuelt, hvis det indgår i kundens standard.</li>
     <li>Verificér at begge break-glass konti har direkte Global Administrator rolle.</li>
+    <li>Hvis administrator-SSPR blev deaktiveret, vent op til 60 minutter og test derefter FIDO2/TAP onboarding igen.</li>
     <li>Verificér at begge break-glass konti kan logge ind.</li>
     <li>Verificér at kontiene er medlem af CA-BreakGlass-Exclude.</li>
     <li>Verificér at gruppen er ekskluderet fra de ønskede Conditional Access-politikker, hvis funktionen blev valgt.</li>

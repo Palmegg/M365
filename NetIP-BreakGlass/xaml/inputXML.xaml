@@ -157,6 +157,8 @@
                                 <CheckBox x:Name="WPFCreateUsers" Content="Opret brugere hvis de ikke findes"/>
                                 <CheckBox x:Name="WPFCreateGroup" Content="Opret gruppen CA-BreakGlass-Exclude hvis den ikke findes"/>
                                 <CheckBox x:Name="WPFAddUsersToGroup" Content="Tilføj break-glass konti til CA-BreakGlass-Exclude"/>
+                                <CheckBox x:Name="WPFDisableAdminSSPR" Content="Deaktivér administrator-SSPR tenant-wide"/>
+                                <TextBlock Foreground="#92400E" Text="Admin SSPR kan ikke slås fra kun for de to konti. Hvis valgt, deaktiveres administrator-SSPR for alle administratorroller i tenant'en."/>
                                 <CheckBox x:Name="WPFPatchCAPolicies" Content="Ekskludér CA-BreakGlass-Exclude fra alle eksisterende Conditional Access-politikker"/>
                                 <TextBlock Foreground="#92400E" Text="Dette ændrer eksisterende Conditional Access-politikker. Der oprettes backup før ændringerne udføres."/>
                             </StackPanel>

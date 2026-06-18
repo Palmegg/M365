@@ -13,6 +13,7 @@ function Get-NetIPConfigFromUI {
             CreateUsers      = [bool]$sync.WPFCreateUsers.IsChecked
             CreateGroup      = [bool]$sync.WPFCreateGroup.IsChecked
             AddUsersToGroup  = [bool]$sync.WPFAddUsersToGroup.IsChecked
+            DisableAdminSSPR = [bool]$sync.WPFDisableAdminSSPR.IsChecked
             PatchCAPolicies  = [bool]$sync.WPFPatchCAPolicies.IsChecked
         }
     })

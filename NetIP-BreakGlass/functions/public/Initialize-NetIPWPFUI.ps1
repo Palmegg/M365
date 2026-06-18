@@ -21,6 +21,7 @@ function Initialize-NetIPWPFUI {
     $sync.WPFCreateUsers.IsChecked = [bool]$defaults.createUsers
     $sync.WPFCreateGroup.IsChecked = [bool]$defaults.createGroup
     $sync.WPFAddUsersToGroup.IsChecked = [bool]$defaults.addUsersToGroup
+    $sync.WPFDisableAdminSSPR.IsChecked = [bool]$defaults.disableAdminSSPR
     $sync.WPFPatchCAPolicies.IsChecked = [bool]$defaults.patchCAPolicies
     if ($sync.WPFLanguageSelector) { $sync.WPFLanguageSelector.SelectedIndex = 0 }
     Set-NetIPLanguage -Language $sync.State.Language

@@ -50,6 +50,8 @@ function Set-NetIPLanguage {
         @{ Da = 'Opret brugere hvis de ikke findes'; En = 'Create users if missing' }
         @{ Da = 'Opret gruppen CA-BreakGlass-Exclude hvis den ikke findes'; En = 'Create CA-BreakGlass-Exclude if missing' }
         @{ Da = 'Tilføj break-glass konti til CA-BreakGlass-Exclude'; En = 'Add break-glass accounts to CA-BreakGlass-Exclude' }
+        @{ Da = 'Deaktivér administrator-SSPR tenant-wide'; En = 'Disable administrator SSPR tenant-wide' }
+        @{ Da = "Admin SSPR kan ikke slås fra kun for de to konti. Hvis valgt, deaktiveres administrator-SSPR for alle administratorroller i tenant'en."; En = 'Admin SSPR cannot be disabled only for the two accounts. If selected, administrator SSPR is disabled for all administrator roles in the tenant.' }
         @{ Da = 'Ekskludér CA-BreakGlass-Exclude fra alle eksisterende Conditional Access-politikker'; En = 'Exclude CA-BreakGlass-Exclude from all existing Conditional Access policies' }
         @{ Da = 'Dette ændrer eksisterende Conditional Access-politikker. Der oprettes backup før ændringerne udføres.'; En = 'This changes existing Conditional Access policies. A backup is created before changes are applied.' }
         @{ Da = 'Generér plan'; En = 'Generate plan' }

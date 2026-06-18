@@ -6,5 +6,6 @@
   "createUsers": true,
   "createGroup": true,
   "addUsersToGroup": true,
+  "disableAdminSSPR": true,
   "patchCAPolicies": false
 }

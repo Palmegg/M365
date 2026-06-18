@@ -26,10 +26,11 @@ Describe 'NetIP-BreakGlass basic functions' {
             UserPrefix1 = 'BreakGlass01'; UserPrefix2 = 'BreakGlass02'
             DisplayName1 = 'BreakGlass 01'; DisplayName2 = 'BreakGlass 02'
             GroupName = 'CA-BreakGlass-Exclude'; CreateUsers = $true; CreateGroup = $true
-            AddUsersToGroup = $true; PatchCAPolicies = $false
+            AddUsersToGroup = $true; DisableAdminSSPR = $true; PatchCAPolicies = $false
         }
         $plan = New-NetIPPlanObject -Config $config
         if ($plan.Account1UPN -ne 'BreakGlass01@contoso.onmicrosoft.com') { throw "Unexpected planned UPN: $($plan.Account1UPN)" }
+        if ($plan.PlannedAdminSSPRStatus -ne 'Deaktiveres') { throw "Unexpected Admin SSPR plan: $($plan.PlannedAdminSSPRStatus)" }
     }
 
     It 'preserves existing CA exclusions in mock patch plan' {
@@ -52,7 +53,7 @@ Describe 'NetIP-BreakGlass basic functions' {
             UserPrefix1 = 'BreakGlass01'; UserPrefix2 = 'BreakGlass02'
             DisplayName1 = 'BreakGlass 01'; DisplayName2 = 'BreakGlass 02'
             GroupName = 'CA-BreakGlass-Exclude'; CreateUsers = $true; CreateGroup = $true
-            AddUsersToGroup = $true; PatchCAPolicies = $false
+            AddUsersToGroup = $true; DisableAdminSSPR = $true; PatchCAPolicies = $false
         }
         $plan = New-NetIPPlanObject -Config $config
         if (-not $plan.AssignGlobalAdministrator) { throw 'Plan does not include Global Administrator assignment.' }
@@ -65,6 +66,12 @@ Describe 'NetIP-BreakGlass basic functions' {
         $result = Ensure-NetIPGlobalAdministratorAssignment -User $user -RoleDefinition $role -Apply $true
         if ($result.Status -ne 'Assigned') { throw "Unexpected role assignment status: $($result.Status)" }
         if ($result.Role -ne 'Global Administrator') { throw "Unexpected role assignment role: $($result.Role)" }
+    }
+
+    It 'handles administrator SSPR disable in mock mode' {
+        $result = Set-NetIPAdminSSPRDisabled -Apply $true
+        if ($result.Status -ne 'Disabled') { throw "Unexpected Admin SSPR status: $($result.Status)" }
+        if ($result.DesiredValue -ne $false) { throw "Unexpected Admin SSPR desired value: $($result.DesiredValue)" }
     }
 
     It 'reads properties case-insensitively without numeric index binding' {
@@ -86,6 +93,7 @@ Describe 'NetIP-BreakGlass basic functions' {
             Group = @{ DisplayName = 'CA-BreakGlass-Exclude'; Id = 'group-id'; Status = 'Created' }
             GroupMembership = @(@{ UserPrincipalName = 'svc_ea_01@contoso.onmicrosoft.com'; Group = 'CA-BreakGlass-Exclude'; Status = 'Added' })
             RoleAssignments = @(@{ UserPrincipalName = 'svc_ea_01@contoso.onmicrosoft.com'; Role = 'Global Administrator'; Scope = '/'; Status = 'Assigned' })
+            AdminSSPR = @{ Setting = 'allowedToUseSSPR'; PreviousValue = $true; DesiredValue = $false; Status = 'Disabled'; Detail = 'Policy changes can take up to 60 minutes to take effect.' }
             CAExclusionsEnabled = $false
             CAPoliciesChangedCount = 0
             CABackupPath = ''
@@ -99,5 +107,6 @@ Describe 'NetIP-BreakGlass basic functions' {
         $html = Get-Content -LiteralPath $path -Raw
         if ($html -notmatch 'svc_ea_01@contoso.onmicrosoft.com') { throw 'Handoff missing account UPN.' }
         if ($html -notmatch 'Global Administrator') { throw 'Handoff missing Global Administrator assignment.' }
+        if ($html -notmatch 'allowedToUseSSPR') { throw 'Handoff missing Admin SSPR result.' }
     }
 }

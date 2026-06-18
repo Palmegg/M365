@@ -335,6 +335,25 @@ function Export-NetIPJsonSafe {
     return $Path
 }
 
+function Get-NetIPAuthorizationPolicy {
+    [CmdletBinding()]
+    param()
+
+    if ($sync.App.Mock) {
+        return [pscustomobject]@{
+            id = 'authorizationPolicy'
+            allowedToUseSSPR = $true
+        }
+    }
+
+    Write-NetIPLog -Message 'Henter authorization policy for administrator-SSPR...'
+    $policy = Invoke-NetIPGraphRequest -Method GET -Uri 'https://graph.microsoft.com/v1.0/policies/authorizationPolicy?$select=id,allowedToUseSSPR'
+    if (-not $policy) {
+        throw 'Kunne ikke hente authorization policy via Microsoft Graph.'
+    }
+    return $policy
+}
+
 function Get-NetIPConditionalAccessPolicies {
     [CmdletBinding()]
     param()
@@ -364,6 +383,7 @@ function Get-NetIPConfigFromUI {
             CreateUsers      = [bool]$sync.WPFCreateUsers.IsChecked
             CreateGroup      = [bool]$sync.WPFCreateGroup.IsChecked
             AddUsersToGroup  = [bool]$sync.WPFAddUsersToGroup.IsChecked
+            DisableAdminSSPR = [bool]$sync.WPFDisableAdminSSPR.IsChecked
             PatchCAPolicies  = [bool]$sync.WPFPatchCAPolicies.IsChecked
         }
     })
@@ -647,6 +667,7 @@ function New-NetIPHandoffHtml {
     $failed = @(Get-NetIPObjectPropertyValue -InputObject $Result -Name 'CAPoliciesFailed')
     $memberships = @(Get-NetIPObjectPropertyValue -InputObject $Result -Name 'GroupMembership')
     $roleAssignments = @(Get-NetIPObjectPropertyValue -InputObject $Result -Name 'RoleAssignments')
+    $adminSSPR = Get-NetIPObjectPropertyValue -InputObject $Result -Name 'AdminSSPR'
     $resultWarnings = @(Get-NetIPObjectPropertyValue -InputObject $Result -Name 'Warnings')
     $changedTable = Rows $changed
     $alreadyTable = Rows $already
@@ -701,6 +722,14 @@ function New-NetIPHandoffHtml {
   <h2>Administratorrolle</h2>
   <p>Begge break-glass konti tildeles direkte Global Administrator på tenant scope (/).</p>
   $roleAssignmentTable
+  <h2>Administrator-SSPR</h2>
+  <table>
+    <tr><th>Setting</th><td>$(ConvertTo-NetIPHtmlValue (Get-NetIPObjectPropertyValue -InputObject $adminSSPR -Name 'Setting'))</td></tr>
+    <tr><th>Previous value</th><td>$(ConvertTo-NetIPHtmlValue (Get-NetIPObjectPropertyValue -InputObject $adminSSPR -Name 'PreviousValue'))</td></tr>
+    <tr><th>Desired value</th><td>$(ConvertTo-NetIPHtmlValue (Get-NetIPObjectPropertyValue -InputObject $adminSSPR -Name 'DesiredValue'))</td></tr>
+    <tr><th>Status</th><td>$(ConvertTo-NetIPHtmlValue (Get-NetIPObjectPropertyValue -InputObject $adminSSPR -Name 'Status'))</td></tr>
+    <tr><th>Detail</th><td>$(ConvertTo-NetIPHtmlValue (Get-NetIPObjectPropertyValue -InputObject $adminSSPR -Name 'Detail'))</td></tr>
+  </table>
   <h2>Conditional Access</h2>
   <table>
     <tr><th>CA exclusions valgt</th><td>$(ConvertTo-NetIPHtmlValue (Get-NetIPObjectPropertyValue -InputObject $Result -Name 'CAExclusionsEnabled'))</td></tr>
@@ -720,6 +749,7 @@ function New-NetIPHandoffHtml {
     <li>Gem de genererede adgangskoder sikkert efter intern/kundeprocedure.</li>
     <li>Konfigurer MFA/FIDO2/passkey manuelt, hvis det indgår i kundens standard.</li>
     <li>Verificér at begge break-glass konti har direkte Global Administrator rolle.</li>
+    <li>Hvis administrator-SSPR blev deaktiveret, vent op til 60 minutter og test derefter FIDO2/TAP onboarding igen.</li>
     <li>Verificér at begge break-glass konti kan logge ind.</li>
     <li>Verificér at kontiene er medlem af CA-BreakGlass-Exclude.</li>
     <li>Verificér at gruppen er ekskluderet fra de ønskede Conditional Access-politikker, hvis funktionen blev valgt.</li>
@@ -759,6 +789,8 @@ function New-NetIPPlanObject {
     $user2 = if ($Discovery) { $Discovery.User2 } else { Get-NetIPUserByUpn -UserPrincipalName $upn2 }
     $group = if ($Discovery) { $Discovery.Group } else { Get-NetIPGroupByDisplayName -DisplayName $Config.GroupName }
     $policies = if ($Discovery) { @($Discovery.CAPolicies) } else { @(Get-NetIPConditionalAccessPolicies) }
+    $authorizationPolicy = Get-NetIPAuthorizationPolicy
+    $adminSSPREnabled = [bool](Get-NetIPObjectPropertyValue -InputObject $authorizationPolicy -Name 'allowedToUseSSPR')
 
     $alreadyExcluded = @()
     $toPatch = @()
@@ -777,6 +809,7 @@ function New-NetIPPlanObject {
     if ($user1) { $warnings += 'Konto 1 findes allerede. Password bliver ikke ændret automatisk.' }
     if ($user2) { $warnings += 'Konto 2 findes allerede. Password bliver ikke ændret automatisk.' }
     $warnings += 'Begge break-glass konti får direkte Global Administrator rolle på tenant scope (/).'
+    if ($Config.DisableAdminSSPR) { $warnings += 'Administrator-SSPR deaktiveres tenant-wide og kan tage op til 60 minutter at slå igennem.' }
     if ($Config.PatchCAPolicies) { $warnings += 'Eksisterende Conditional Access-politikker ændres. Backup oprettes før ændringer.' }
 
     $outputFolder = if ($sync.State.OutputFolder) { $sync.State.OutputFolder } else { Join-Path $sync.App.OutputRoot ('BreakGlass-{0}-<timestamp>' -f $tenant.TenantId) }
@@ -795,6 +828,9 @@ function New-NetIPPlanObject {
         AddAccountsToGroup        = [bool]$Config.AddUsersToGroup
         AssignGlobalAdministrator = $true
         RoleAssignmentScope       = '/'
+        DisableAdminSSPR          = [bool]$Config.DisableAdminSSPR
+        CurrentAdminSSPREnabled   = $adminSSPREnabled
+        PlannedAdminSSPRStatus    = if ($Config.DisableAdminSSPR) { if ($adminSSPREnabled) { 'Deaktiveres' } else { 'Allerede deaktiveret' } } else { 'Uændret' }
         ConditionalAccessCount    = @($policies).Count
         PatchConditionalAccess    = [bool]$Config.PatchCAPolicies
         CAPoliciesToChange        = @($toPatch | Select-Object id,displayName,state)
@@ -867,6 +903,47 @@ function Save-NetIPResultJson {
     return Export-NetIPJsonSafe -InputObject $Result -Path (Join-Path $OutputFolder 'result.json') -Depth 40
 }
 
+function Set-NetIPAdminSSPRDisabled {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][bool] $Apply)
+
+    $policy = Get-NetIPAuthorizationPolicy
+    $current = [bool](Get-NetIPObjectPropertyValue -InputObject $policy -Name 'allowedToUseSSPR')
+
+    if (-not $current) {
+        Write-NetIPLog -Level PASS -Message 'Administrator-SSPR er allerede deaktiveret.'
+        return [pscustomobject]@{
+            Setting = 'allowedToUseSSPR'
+            PreviousValue = $false
+            DesiredValue = $false
+            Status = 'AlreadyDisabled'
+            Detail = 'Administrator-SSPR was already disabled.'
+        }
+    }
+
+    if (-not $Apply -or $sync.App.Mock) {
+        Write-NetIPLog -Level PASS -Message 'Administrator-SSPR planlagt deaktiveret.'
+        return [pscustomobject]@{
+            Setting = 'allowedToUseSSPR'
+            PreviousValue = $true
+            DesiredValue = $false
+            Status = if ($Apply) { 'Disabled' } else { 'PlannedDisable' }
+            Detail = 'Administrator-SSPR is tenant-wide for administrator roles.'
+        }
+    }
+
+    Write-NetIPLog -Message 'Deaktiverer administrator-SSPR tenant-wide...'
+    Invoke-NetIPGraphRequest -Method PATCH -Uri 'https://graph.microsoft.com/v1.0/policies/authorizationPolicy' -Body @{ allowedToUseSSPR = $false } | Out-Null
+    Write-NetIPLog -Level PASS -Message 'Administrator-SSPR er deaktiveret tenant-wide.'
+    return [pscustomobject]@{
+        Setting = 'allowedToUseSSPR'
+        PreviousValue = $true
+        DesiredValue = $false
+        Status = 'Disabled'
+        Detail = 'Policy changes can take up to 60 minutes to take effect.'
+    }
+}
+
 function Set-NetIPLanguage {
     [CmdletBinding()]
     param([ValidateSet('da-DK','en-US')][string] $Language = 'da-DK')
@@ -919,6 +996,8 @@ function Set-NetIPLanguage {
         @{ Da = 'Opret brugere hvis de ikke findes'; En = 'Create users if missing' }
         @{ Da = 'Opret gruppen CA-BreakGlass-Exclude hvis den ikke findes'; En = 'Create CA-BreakGlass-Exclude if missing' }
         @{ Da = 'Tilføj break-glass konti til CA-BreakGlass-Exclude'; En = 'Add break-glass accounts to CA-BreakGlass-Exclude' }
+        @{ Da = 'Deaktivér administrator-SSPR tenant-wide'; En = 'Disable administrator SSPR tenant-wide' }
+        @{ Da = "Admin SSPR kan ikke slås fra kun for de to konti. Hvis valgt, deaktiveres administrator-SSPR for alle administratorroller i tenant'en."; En = 'Admin SSPR cannot be disabled only for the two accounts. If selected, administrator SSPR is disabled for all administrator roles in the tenant.' }
         @{ Da = 'Ekskludér CA-BreakGlass-Exclude fra alle eksisterende Conditional Access-politikker'; En = 'Exclude CA-BreakGlass-Exclude from all existing Conditional Access policies' }
         @{ Da = 'Dette ændrer eksisterende Conditional Access-politikker. Der oprettes backup før ændringerne udføres.'; En = 'This changes existing Conditional Access policies. A backup is created before changes are applied.' }
         @{ Da = 'Generér plan'; En = 'Generate plan' }
@@ -1158,6 +1237,7 @@ function Initialize-NetIPWPFUI {
     $sync.WPFCreateUsers.IsChecked = [bool]$defaults.createUsers
     $sync.WPFCreateGroup.IsChecked = [bool]$defaults.createGroup
     $sync.WPFAddUsersToGroup.IsChecked = [bool]$defaults.addUsersToGroup
+    $sync.WPFDisableAdminSSPR.IsChecked = [bool]$defaults.disableAdminSSPR
     $sync.WPFPatchCAPolicies.IsChecked = [bool]$defaults.patchCAPolicies
     if ($sync.WPFLanguageSelector) { $sync.WPFLanguageSelector.SelectedIndex = 0 }
     Set-NetIPLanguage -Language $sync.State.Language
@@ -1196,6 +1276,7 @@ Eksisterende passwords ændres ikke.
 Gruppe: $($plan.GroupName) / $($plan.GroupStatus)
 Medlemskab opdateres: $($plan.AddAccountsToGroup)
 Global Administrator tildeles direkte til begge konti: Ja
+Administrator-SSPR deaktiveres tenant-wide: $($config.DisableAdminSSPR)
 Conditional Access policies patches: $($plan.PatchConditionalAccess)
 Antal policies der patches: $(@($plan.CAPoliciesToChange).Count)
 
@@ -1265,7 +1346,22 @@ Vil du fortsætte?
             $roleAssignments += Ensure-NetIPGlobalAdministratorAssignment -User $user -RoleDefinition $roleDefinition -Apply $true
         }
 
-        Write-NetIPLog -Message 'Step 6/8: Henter Conditional Access policies...'
+        Write-NetIPLog -Message 'Step 6/9: Håndterer administrator-SSPR...'
+        $adminSSPRResult = if ($config.DisableAdminSSPR) {
+            Set-NetIPAdminSSPRDisabled -Apply $true
+        }
+        else {
+            Write-NetIPLog -Message 'Administrator-SSPR ændres ikke.'
+            [pscustomobject]@{
+                Setting = 'allowedToUseSSPR'
+                PreviousValue = $null
+                DesiredValue = $null
+                Status = 'Skipped'
+                Detail = 'Administrator-SSPR change was not selected.'
+            }
+        }
+
+        Write-NetIPLog -Message 'Step 7/9: Henter Conditional Access policies...'
         $policies = @(Get-NetIPConditionalAccessPolicies)
         $backupPath = ''
         $caResults = @()
@@ -1286,15 +1382,15 @@ Vil du fortsætte?
             }
         }
         if ($config.PatchCAPolicies -and $group -and $groupId) {
-            Write-NetIPLog -Message 'Step 7/8: Backupper og opdaterer Conditional Access policies...'
+            Write-NetIPLog -Message 'Step 8/9: Backupper og opdaterer Conditional Access policies...'
             $backupPath = Backup-NetIPConditionalAccessPolicies -Policies $policies -OutputFolder $output
             $caResults = Add-NetIPGroupExclusionToCAPolicies -Policies $policies -GroupId $groupId -Apply $true
         }
         else {
-            Write-NetIPLog -Message 'Step 7/8: Conditional Access patching er fravalgt.'
+            Write-NetIPLog -Message 'Step 8/9: Conditional Access patching er fravalgt.'
         }
 
-        Write-NetIPLog -Message 'Step 8/8: Gemmer resultat og genererer handoff...'
+        Write-NetIPLog -Message 'Step 9/9: Gemmer resultat og genererer handoff...'
         $changed = @($caResults | Where-Object Status -eq 'Patched')
         $failed = @($caResults | Where-Object Status -eq 'Failed')
         $account1Status = [string](Get-NetIPObjectPropertyValue -InputObject $users[0] -Name 'EnsureStatus')
@@ -1310,6 +1406,7 @@ Vil du fortsætte?
             Group = [pscustomobject]@{ DisplayName=$groupDisplayName; Id=$groupId; Status=$groupStatus }
             GroupMembership = $membership
             RoleAssignments = $roleAssignments
+            AdminSSPR = $adminSSPRResult
             CAExclusionsEnabled = [bool]$config.PatchCAPolicies
             CAPoliciesChangedCount = $changed.Count
             CAPoliciesChanged = $changed
@@ -1365,6 +1462,8 @@ Konto 2: $($plan.Account2DisplayName) / $($plan.Account2UPN) / $($plan.Account2S
 Gruppe: $($plan.GroupName) / $($plan.GroupStatus)
 Tilføj konti til gruppe: $($plan.AddAccountsToGroup)
 Tildel Global Administrator: $($plan.AssignGlobalAdministrator) / scope $($plan.RoleAssignmentScope)
+Administrator-SSPR enabled nu: $($plan.CurrentAdminSSPREnabled)
+Administrator-SSPR plan: $($plan.PlannedAdminSSPRStatus)
 
 Conditional Access policies fundet: $($plan.ConditionalAccessCount)
 Patch CA policies: $($plan.PatchConditionalAccess)
@@ -1620,6 +1719,7 @@ $sync.configs.defaults = @'
   "createUsers": true,
   "createGroup": true,
   "addUsersToGroup": true,
+  "disableAdminSSPR": true,
   "patchCAPolicies": false
 }
 
@@ -1632,6 +1732,7 @@ $sync.configs.graphScopes = @'
   "Organization.Read.All",
   "RoleManagement.ReadWrite.Directory",
   "Policy.Read.All",
+  "Policy.ReadWrite.Authorization",
   "Policy.ReadWrite.ConditionalAccess"
 ]
 
@@ -1796,6 +1897,8 @@ $inputXML = @'
                                 <CheckBox x:Name="WPFCreateUsers" Content="Opret brugere hvis de ikke findes"/>
                                 <CheckBox x:Name="WPFCreateGroup" Content="Opret gruppen CA-BreakGlass-Exclude hvis den ikke findes"/>
                                 <CheckBox x:Name="WPFAddUsersToGroup" Content="Tilføj break-glass konti til CA-BreakGlass-Exclude"/>
+                                <CheckBox x:Name="WPFDisableAdminSSPR" Content="Deaktivér administrator-SSPR tenant-wide"/>
+                                <TextBlock Foreground="#92400E" Text="Admin SSPR kan ikke slås fra kun for de to konti. Hvis valgt, deaktiveres administrator-SSPR for alle administratorroller i tenant'en."/>
                                 <CheckBox x:Name="WPFPatchCAPolicies" Content="Ekskludér CA-BreakGlass-Exclude fra alle eksisterende Conditional Access-politikker"/>
                                 <TextBlock Foreground="#92400E" Text="Dette ændrer eksisterende Conditional Access-politikker. Der oprettes backup før ændringerne udføres."/>
                             </StackPanel>

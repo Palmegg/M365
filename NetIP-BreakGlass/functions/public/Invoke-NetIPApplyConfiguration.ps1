@@ -19,6 +19,7 @@ Eksisterende passwords ændres ikke.
 Gruppe: $($plan.GroupName) / $($plan.GroupStatus)
 Medlemskab opdateres: $($plan.AddAccountsToGroup)
 Global Administrator tildeles direkte til begge konti: Ja
+Administrator-SSPR deaktiveres tenant-wide: $($config.DisableAdminSSPR)
 Conditional Access policies patches: $($plan.PatchConditionalAccess)
 Antal policies der patches: $(@($plan.CAPoliciesToChange).Count)
 
@@ -88,7 +89,22 @@ Vil du fortsætte?
             $roleAssignments += Ensure-NetIPGlobalAdministratorAssignment -User $user -RoleDefinition $roleDefinition -Apply $true
         }
 
-        Write-NetIPLog -Message 'Step 6/8: Henter Conditional Access policies...'
+        Write-NetIPLog -Message 'Step 6/9: Håndterer administrator-SSPR...'
+        $adminSSPRResult = if ($config.DisableAdminSSPR) {
+            Set-NetIPAdminSSPRDisabled -Apply $true
+        }
+        else {
+            Write-NetIPLog -Message 'Administrator-SSPR ændres ikke.'
+            [pscustomobject]@{
+                Setting = 'allowedToUseSSPR'
+                PreviousValue = $null
+                DesiredValue = $null
+                Status = 'Skipped'
+                Detail = 'Administrator-SSPR change was not selected.'
+            }
+        }
+
+        Write-NetIPLog -Message 'Step 7/9: Henter Conditional Access policies...'
         $policies = @(Get-NetIPConditionalAccessPolicies)
         $backupPath = ''
         $caResults = @()
@@ -109,15 +125,15 @@ Vil du fortsætte?
             }
         }
         if ($config.PatchCAPolicies -and $group -and $groupId) {
-            Write-NetIPLog -Message 'Step 7/8: Backupper og opdaterer Conditional Access policies...'
+            Write-NetIPLog -Message 'Step 8/9: Backupper og opdaterer Conditional Access policies...'
             $backupPath = Backup-NetIPConditionalAccessPolicies -Policies $policies -OutputFolder $output
             $caResults = Add-NetIPGroupExclusionToCAPolicies -Policies $policies -GroupId $groupId -Apply $true
         }
         else {
-            Write-NetIPLog -Message 'Step 7/8: Conditional Access patching er fravalgt.'
+            Write-NetIPLog -Message 'Step 8/9: Conditional Access patching er fravalgt.'
         }
 
-        Write-NetIPLog -Message 'Step 8/8: Gemmer resultat og genererer handoff...'
+        Write-NetIPLog -Message 'Step 9/9: Gemmer resultat og genererer handoff...'
         $changed = @($caResults | Where-Object Status -eq 'Patched')
         $failed = @($caResults | Where-Object Status -eq 'Failed')
         $account1Status = [string](Get-NetIPObjectPropertyValue -InputObject $users[0] -Name 'EnsureStatus')
@@ -133,6 +149,7 @@ Vil du fortsætte?
             Group = [pscustomobject]@{ DisplayName=$groupDisplayName; Id=$groupId; Status=$groupStatus }
             GroupMembership = $membership
             RoleAssignments = $roleAssignments
+            AdminSSPR = $adminSSPRResult
             CAExclusionsEnabled = [bool]$config.PatchCAPolicies
             CAPoliciesChangedCount = $changed.Count
             CAPoliciesChanged = $changed
