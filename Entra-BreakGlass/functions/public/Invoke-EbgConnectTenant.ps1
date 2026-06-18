@@ -36,6 +36,8 @@ function Invoke-EbgConnectTenant {
         $scopes = @($sync.configs.graphScopes)
 
         try { Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null } catch {}
+        Clear-EbgGraphLoginCache
+        try { Set-MgGraphOption -DisableLoginByWAM $true -ErrorAction SilentlyContinue | Out-Null } catch {}
 
         $sync.State.GraphConnected = $false
         $sync.State.GraphAccount = ''
@@ -46,7 +48,7 @@ function Invoke-EbgConnectTenant {
         Update-EbgUIState | Out-Null
         [System.Windows.Forms.Application]::DoEvents()
 
-        Write-EbgStatus -Busy -Message 'Åbner Microsoft Graph-login. Vælg tenant-konto i Microsoft loginvinduet...'
+        Write-EbgStatus -Busy -Message 'Åbner frisk Microsoft Graph-login. Vælg tenant-konto i Microsoft loginvinduet...'
         [System.Windows.Forms.Application]::DoEvents()
 
         Connect-MgGraph -Scopes $scopes -NoWelcome -ErrorAction Stop | Out-Null
