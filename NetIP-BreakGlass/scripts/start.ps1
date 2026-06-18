@@ -38,6 +38,7 @@ $sync.State = [Hashtable]::Synchronized(@{
     Warnings           = @()
     Errors             = @()
     Language           = 'da-DK'
+    NeutralNameIndex   = 0
 })
 
 $sync.UI = [Hashtable]::Synchronized(@{

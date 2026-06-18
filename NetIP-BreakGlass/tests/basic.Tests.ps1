@@ -12,8 +12,13 @@ Describe 'NetIP-BreakGlass basic functions' {
     }
 
     It 'builds UPN from prefix' {
-        $actual = ConvertTo-BreakGlassUpn -Prefix 'BreakGlass01' -OnMicrosoftDomain 'contoso.onmicrosoft.com'
-        if ($actual -ne 'BreakGlass01@contoso.onmicrosoft.com') { throw "Unexpected UPN: $actual" }
+        $actual = ConvertTo-BreakGlassUpn -Prefix 'horse.unit' -OnMicrosoftDomain 'contoso.onmicrosoft.com'
+        if ($actual -ne 'horse.unit@contoso.onmicrosoft.com') { throw "Unexpected UPN: $actual" }
+    }
+
+    It 'creates neutral UPN prefixes from display names' {
+        $actual = ConvertTo-NetIPNeutralUserPrefix -DisplayName 'Plane Model'
+        if ($actual -ne 'plane.model') { throw "Unexpected neutral prefix: $actual" }
     }
 
     It 'generates long password' {
@@ -23,13 +28,13 @@ Describe 'NetIP-BreakGlass basic functions' {
 
     It 'plans expected accounts' {
         $config = @{
-            UserPrefix1 = 'BreakGlass01'; UserPrefix2 = 'BreakGlass02'
-            DisplayName1 = 'BreakGlass 01'; DisplayName2 = 'BreakGlass 02'
+            UserPrefix1 = 'horse.unit'; UserPrefix2 = 'master.player'
+            DisplayName1 = 'Horse Unit'; DisplayName2 = 'Master Player'
             GroupName = 'CA-BreakGlass-Exclude'; CreateUsers = $true; CreateGroup = $true
             AddUsersToGroup = $true; DisableAdminSSPR = $true; PatchCAPolicies = $false
         }
         $plan = New-NetIPPlanObject -Config $config
-        if ($plan.Account1UPN -ne 'BreakGlass01@contoso.onmicrosoft.com') { throw "Unexpected planned UPN: $($plan.Account1UPN)" }
+        if ($plan.Account1UPN -ne 'horse.unit@contoso.onmicrosoft.com') { throw "Unexpected planned UPN: $($plan.Account1UPN)" }
         if ($plan.PlannedAdminSSPRStatus -ne 'Deaktiveres') { throw "Unexpected Admin SSPR plan: $($plan.PlannedAdminSSPRStatus)" }
     }
 
@@ -50,8 +55,8 @@ Describe 'NetIP-BreakGlass basic functions' {
 
     It 'plans Global Administrator assignment' {
         $config = @{
-            UserPrefix1 = 'BreakGlass01'; UserPrefix2 = 'BreakGlass02'
-            DisplayName1 = 'BreakGlass 01'; DisplayName2 = 'BreakGlass 02'
+            UserPrefix1 = 'horse.unit'; UserPrefix2 = 'master.player'
+            DisplayName1 = 'Horse Unit'; DisplayName2 = 'Master Player'
             GroupName = 'CA-BreakGlass-Exclude'; CreateUsers = $true; CreateGroup = $true
             AddUsersToGroup = $true; DisableAdminSSPR = $true; PatchCAPolicies = $false
         }
@@ -88,8 +93,8 @@ Describe 'NetIP-BreakGlass basic functions' {
             Timestamp = (Get-Date).ToString('o')
             Operator = 'operator@contoso.onmicrosoft.com'
             OnMicrosoftDomain = 'contoso.onmicrosoft.com'
-            Account1 = @{ DisplayName = 'BreakGlass 01'; UserPrincipalName = 'svc_ea_01@contoso.onmicrosoft.com'; Status = 'Created' }
-            Account2 = @{ DisplayName = 'BreakGlass 02'; UserPrincipalName = 'svc_ea_02@contoso.onmicrosoft.com'; Status = 'Created' }
+            Account1 = @{ DisplayName = 'Horse Unit'; UserPrincipalName = 'svc_ea_01@contoso.onmicrosoft.com'; Status = 'Created' }
+            Account2 = @{ DisplayName = 'Master Player'; UserPrincipalName = 'svc_ea_02@contoso.onmicrosoft.com'; Status = 'Created' }
             Group = @{ DisplayName = 'CA-BreakGlass-Exclude'; Id = 'group-id'; Status = 'Created' }
             GroupMembership = @(@{ UserPrincipalName = 'svc_ea_01@contoso.onmicrosoft.com'; Group = 'CA-BreakGlass-Exclude'; Status = 'Added' })
             RoleAssignments = @(@{ UserPrincipalName = 'svc_ea_01@contoso.onmicrosoft.com'; Role = 'Global Administrator'; Scope = '/'; Status = 'Assigned' })

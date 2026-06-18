@@ -3,8 +3,8 @@ function Get-NetIPUserByUpn {
     param([Parameter(Mandatory)][string] $UserPrincipalName)
 
     if ($sync.App.Mock) {
-        if ($UserPrincipalName -like 'BreakGlass01@*') {
-            return [pscustomobject]@{ id = 'mock-user-1'; displayName = 'BreakGlass 01'; userPrincipalName = $UserPrincipalName; accountEnabled = $true }
+        if ($UserPrincipalName -like 'horse.unit@*') {
+            return [pscustomobject]@{ id = 'mock-user-1'; displayName = 'Horse Unit'; userPrincipalName = $UserPrincipalName; accountEnabled = $true }
         }
         return $null
     }

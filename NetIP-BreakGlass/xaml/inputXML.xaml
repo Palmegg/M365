@@ -142,18 +142,22 @@
                             <TextBox x:Name="WPFDisplayName2" Grid.Row="2" Grid.Column="1" Margin="0,2,16,8"/>
                             <TextBlock Grid.Row="2" Grid.Column="2" Text="Account 2 UPN prefix"/>
                             <TextBox x:Name="WPFUserPrefix2" Grid.Row="2" Grid.Column="3"/>
-                            <TextBlock Grid.Row="3" Grid.Column="0" Text="Domain"/>
-                            <TextBox x:Name="WPFDomain" Grid.Row="3" Grid.Column="1" Grid.ColumnSpan="3" IsReadOnly="True"/>
-                            <TextBlock Grid.Row="4" Grid.Column="0" Text="Final UPN preview"/>
-                            <StackPanel Grid.Row="4" Grid.Column="1" Grid.ColumnSpan="3">
+                            <StackPanel Grid.Row="3" Grid.Column="0" Grid.ColumnSpan="4" Orientation="Horizontal" Margin="0,0,0,8">
+                                <Button x:Name="WPFCycleNeutralNames" Content="Skift neutrale navne" Width="170" Margin="0,0,12,0"/>
+                                <TextBlock x:Name="WPFNeutralNameHint" VerticalAlignment="Center" Text="Cykler mellem neutrale display names og UPN-prefixes uden 'BreakGlass' i navnet."/>
+                            </StackPanel>
+                            <TextBlock Grid.Row="4" Grid.Column="0" Text="Domain"/>
+                            <TextBox x:Name="WPFDomain" Grid.Row="4" Grid.Column="1" Grid.ColumnSpan="3" IsReadOnly="True"/>
+                            <TextBlock Grid.Row="5" Grid.Column="0" Text="Final UPN preview"/>
+                            <StackPanel Grid.Row="5" Grid.Column="1" Grid.ColumnSpan="3">
                                 <TextBlock x:Name="WPFUpnPreview1" FontFamily="Consolas"/>
                                 <TextBlock x:Name="WPFUpnPreview2" FontFamily="Consolas"/>
                             </StackPanel>
-                            <TextBlock Grid.Row="5" Grid.Column="0" Text="Security group name"/>
-                            <TextBox x:Name="WPFGroupName" Grid.Row="5" Grid.Column="1" Grid.ColumnSpan="3" IsReadOnly="True"/>
-                            <TextBlock Grid.Row="6" Grid.Column="0" Text="Security group description"/>
-                            <TextBox x:Name="WPFGroupDescription" Grid.Row="6" Grid.Column="1" Grid.ColumnSpan="3" IsReadOnly="True" TextWrapping="Wrap" Height="58"/>
-                            <StackPanel Grid.Row="7" Grid.Column="0" Grid.ColumnSpan="4" Margin="0,10,0,0">
+                            <TextBlock Grid.Row="6" Grid.Column="0" Text="Security group name"/>
+                            <TextBox x:Name="WPFGroupName" Grid.Row="6" Grid.Column="1" Grid.ColumnSpan="3" IsReadOnly="True"/>
+                            <TextBlock Grid.Row="7" Grid.Column="0" Text="Security group description"/>
+                            <TextBox x:Name="WPFGroupDescription" Grid.Row="7" Grid.Column="1" Grid.ColumnSpan="3" IsReadOnly="True" TextWrapping="Wrap" Height="58"/>
+                            <StackPanel Grid.Row="8" Grid.Column="0" Grid.ColumnSpan="4" Margin="0,10,0,0">
                                 <CheckBox x:Name="WPFCreateUsers" Content="Opret brugere hvis de ikke findes"/>
                                 <CheckBox x:Name="WPFCreateGroup" Content="Opret gruppen CA-BreakGlass-Exclude hvis den ikke findes"/>
                                 <CheckBox x:Name="WPFAddUsersToGroup" Content="Tilføj break-glass konti til CA-BreakGlass-Exclude"/>

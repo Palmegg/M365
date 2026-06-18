@@ -43,6 +43,8 @@ function Set-NetIPLanguage {
         @{ Da = 'Account 1 UPN prefix'; En = 'Account 1 UPN prefix' }
         @{ Da = 'Account 2 display name'; En = 'Account 2 display name' }
         @{ Da = 'Account 2 UPN prefix'; En = 'Account 2 UPN prefix' }
+        @{ Da = 'Skift neutrale navne'; En = 'Cycle neutral names' }
+        @{ Da = "Cykler mellem neutrale display names og UPN-prefixes uden 'BreakGlass' i navnet."; En = "Cycles through neutral display names and UPN prefixes without 'BreakGlass' in the name." }
         @{ Da = 'Domain'; En = 'Domain' }
         @{ Da = 'Final UPN preview'; En = 'Final UPN preview' }
         @{ Da = 'Security group name'; En = 'Security group name' }

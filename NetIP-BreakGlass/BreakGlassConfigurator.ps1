@@ -42,6 +42,7 @@ $sync.State = [Hashtable]::Synchronized(@{
     Warnings           = @()
     Errors             = @()
     Language           = 'da-DK'
+    NeutralNameIndex   = 0
 })
 
 $sync.UI = [Hashtable]::Synchronized(@{
@@ -134,6 +135,19 @@ function ConvertTo-BreakGlassUpn {
     if ($cleanPrefix -match '@') { throw 'Angiv kun UPN prefix, ikke et fuldt UPN.' }
     if ($cleanPrefix -notmatch '^[A-Za-z0-9._-]+$') { throw 'UPN prefix må kun indeholde bogstaver, tal, punktum, bindestreg og underscore.' }
     return ('{0}@{1}' -f $cleanPrefix, $OnMicrosoftDomain.ToLowerInvariant())
+}
+
+function ConvertTo-NetIPNeutralUserPrefix {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string] $DisplayName)
+
+    $prefix = $DisplayName.Trim().ToLowerInvariant()
+    $prefix = [regex]::Replace($prefix, '[^a-z0-9]+', '.')
+    $prefix = $prefix.Trim('.')
+    if ([string]::IsNullOrWhiteSpace($prefix)) {
+        throw 'Kunne ikke lave et neutralt UPN prefix fra display name.'
+    }
+    return $prefix
 }
 
 function ConvertTo-NetIPPlainHashtable {
@@ -510,8 +524,8 @@ function Get-NetIPUserByUpn {
     param([Parameter(Mandatory)][string] $UserPrincipalName)
 
     if ($sync.App.Mock) {
-        if ($UserPrincipalName -like 'BreakGlass01@*') {
-            return [pscustomobject]@{ id = 'mock-user-1'; displayName = 'BreakGlass 01'; userPrincipalName = $UserPrincipalName; accountEnabled = $true }
+        if ($UserPrincipalName -like 'horse.unit@*') {
+            return [pscustomobject]@{ id = 'mock-user-1'; displayName = 'Horse Unit'; userPrincipalName = $UserPrincipalName; accountEnabled = $true }
         }
         return $null
     }
@@ -989,6 +1003,8 @@ function Set-NetIPLanguage {
         @{ Da = 'Account 1 UPN prefix'; En = 'Account 1 UPN prefix' }
         @{ Da = 'Account 2 display name'; En = 'Account 2 display name' }
         @{ Da = 'Account 2 UPN prefix'; En = 'Account 2 UPN prefix' }
+        @{ Da = 'Skift neutrale navne'; En = 'Cycle neutral names' }
+        @{ Da = "Cykler mellem neutrale display names og UPN-prefixes uden 'BreakGlass' i navnet."; En = "Cycles through neutral display names and UPN prefixes without 'BreakGlass' in the name." }
         @{ Da = 'Domain'; En = 'Domain' }
         @{ Da = 'Final UPN preview'; En = 'Final UPN preview' }
         @{ Da = 'Security group name'; En = 'Security group name' }
@@ -1047,6 +1063,34 @@ function Set-NetIPLanguage {
     Update-TextObject $sync.Form
     if ($sync.WPFAppTitle) { $sync.WPFAppTitle.Text = $sync.App.Name }
     if ($sync.WPFVersionBadge) { $sync.WPFVersionBadge.Text = "v$($sync.App.Version)" }
+}
+
+function Set-NetIPNeutralAccountNamePair {
+    [CmdletBinding()]
+    param()
+
+    $pairs = @($sync.configs.defaults.neutralNamePairs)
+    if ($pairs.Count -lt 1) {
+        throw 'Der er ingen neutrale navnepar i defaults.json.'
+    }
+
+    $nextIndex = ([int]$sync.State.NeutralNameIndex + 1) % $pairs.Count
+    $sync.State.NeutralNameIndex = $nextIndex
+    $pair = $pairs[$nextIndex]
+
+    $account1 = [string](Get-NetIPObjectPropertyValue -InputObject $pair -Name 'account1')
+    $account2 = [string](Get-NetIPObjectPropertyValue -InputObject $pair -Name 'account2')
+    if ([string]::IsNullOrWhiteSpace($account1) -or [string]::IsNullOrWhiteSpace($account2)) {
+        throw "Navnepar nummer $($nextIndex + 1) er ikke udfyldt korrekt."
+    }
+
+    $sync.WPFDisplayName1.Text = $account1
+    $sync.WPFDisplayName2.Text = $account2
+    $sync.WPFUserPrefix1.Text = ConvertTo-NetIPNeutralUserPrefix -DisplayName $account1
+    $sync.WPFUserPrefix2.Text = ConvertTo-NetIPNeutralUserPrefix -DisplayName $account2
+
+    Write-NetIPLog -Message "Skiftede neutrale kontonavne til: $account1 / $account2"
+    Update-NetIPUIState
 }
 
 function Show-NetIPCreatedPasswordsOnce {
@@ -1670,6 +1714,7 @@ function Invoke-NetIPWPFButton {
         'WPFRunDiscovery' { Invoke-NetIPDiscovery }
         'WPFBuildPlan' { Invoke-NetIPBuildPlan }
         'WPFApplyConfiguration' { Invoke-NetIPApplyConfiguration }
+        'WPFCycleNeutralNames' { Set-NetIPNeutralAccountNamePair }
         'WPFOpenOutputFolder' { Invoke-NetIPOpenOutputFolder }
         'WPFOpenHandoff' { Invoke-NetIPOpenHandoff }
         default { Write-NetIPLog -Level WARN -Message "Ukendt UI handling: $Name" }
@@ -1703,7 +1748,7 @@ function Set-NetIPWPFStep {
 $sync.configs.appsettings = @'
 {
   "name": "Entra Break Glass Configurator",
-  "version": "2.1.0",
+  "version": "2.1.1",
   "outputRoot": ".\\Output",
   "groupName": "CA-BreakGlass-Exclude",
   "groupDescription": "Security group used to exclude dedicated break-glass accounts from existing Conditional Access policies."
@@ -1712,15 +1757,42 @@ $sync.configs.appsettings = @'
 '@ | ConvertFrom-Json
 $sync.configs.defaults = @'
 {
-  "account1DisplayName": "BreakGlass 01",
-  "account1Prefix": "BreakGlass01",
-  "account2DisplayName": "BreakGlass 02",
-  "account2Prefix": "BreakGlass02",
+  "account1DisplayName": "Horse Unit",
+  "account1Prefix": "horse.unit",
+  "account2DisplayName": "Master Player",
+  "account2Prefix": "master.player",
   "createUsers": true,
   "createGroup": true,
   "addUsersToGroup": true,
   "disableAdminSSPR": true,
-  "patchCAPolicies": false
+  "patchCAPolicies": false,
+  "neutralNamePairs": [
+    { "account1": "Horse Unit", "account2": "Master Player" },
+    { "account1": "Car Engine", "account2": "Plane Model" },
+    { "account1": "River Stone", "account2": "Forest Light" },
+    { "account1": "North Bridge", "account2": "South Harbor" },
+    { "account1": "Silver Desk", "account2": "Copper Table" },
+    { "account1": "Blue Window", "account2": "Green Door" },
+    { "account1": "Morning Field", "account2": "Evening Road" },
+    { "account1": "Cloud Runner", "account2": "Signal Tower" },
+    { "account1": "Paper Lantern", "account2": "Canvas Frame" },
+    { "account1": "Stone Garden", "account2": "Glass Studio" },
+    { "account1": "Metro Line", "account2": "Harbor Track" },
+    { "account1": "Oak Cabinet", "account2": "Pine Shelf" },
+    { "account1": "Steel Compass", "account2": "Bronze Anchor" },
+    { "account1": "City Square", "account2": "Market Street" },
+    { "account1": "Signal Beacon", "account2": "Relay Station" },
+    { "account1": "Atlas Point", "account2": "Vector Lane" },
+    { "account1": "Comet Field", "account2": "Orbit House" },
+    { "account1": "Summit Hall", "account2": "Valley Room" },
+    { "account1": "Maple Corner", "account2": "Cedar Avenue" },
+    { "account1": "Bright Ledger", "account2": "Quiet Archive" },
+    { "account1": "Iron Gate", "account2": "Marble Hall" },
+    { "account1": "Ocean Terminal", "account2": "Desert Station" },
+    { "account1": "Pixel Canvas", "account2": "Vector Board" },
+    { "account1": "Garden Module", "account2": "Engine Room" },
+    { "account1": "Project North", "account2": "Project South" }
+  ]
 }
 
 '@ | ConvertFrom-Json
@@ -1882,18 +1954,22 @@ $inputXML = @'
                             <TextBox x:Name="WPFDisplayName2" Grid.Row="2" Grid.Column="1" Margin="0,2,16,8"/>
                             <TextBlock Grid.Row="2" Grid.Column="2" Text="Account 2 UPN prefix"/>
                             <TextBox x:Name="WPFUserPrefix2" Grid.Row="2" Grid.Column="3"/>
-                            <TextBlock Grid.Row="3" Grid.Column="0" Text="Domain"/>
-                            <TextBox x:Name="WPFDomain" Grid.Row="3" Grid.Column="1" Grid.ColumnSpan="3" IsReadOnly="True"/>
-                            <TextBlock Grid.Row="4" Grid.Column="0" Text="Final UPN preview"/>
-                            <StackPanel Grid.Row="4" Grid.Column="1" Grid.ColumnSpan="3">
+                            <StackPanel Grid.Row="3" Grid.Column="0" Grid.ColumnSpan="4" Orientation="Horizontal" Margin="0,0,0,8">
+                                <Button x:Name="WPFCycleNeutralNames" Content="Skift neutrale navne" Width="170" Margin="0,0,12,0"/>
+                                <TextBlock x:Name="WPFNeutralNameHint" VerticalAlignment="Center" Text="Cykler mellem neutrale display names og UPN-prefixes uden 'BreakGlass' i navnet."/>
+                            </StackPanel>
+                            <TextBlock Grid.Row="4" Grid.Column="0" Text="Domain"/>
+                            <TextBox x:Name="WPFDomain" Grid.Row="4" Grid.Column="1" Grid.ColumnSpan="3" IsReadOnly="True"/>
+                            <TextBlock Grid.Row="5" Grid.Column="0" Text="Final UPN preview"/>
+                            <StackPanel Grid.Row="5" Grid.Column="1" Grid.ColumnSpan="3">
                                 <TextBlock x:Name="WPFUpnPreview1" FontFamily="Consolas"/>
                                 <TextBlock x:Name="WPFUpnPreview2" FontFamily="Consolas"/>
                             </StackPanel>
-                            <TextBlock Grid.Row="5" Grid.Column="0" Text="Security group name"/>
-                            <TextBox x:Name="WPFGroupName" Grid.Row="5" Grid.Column="1" Grid.ColumnSpan="3" IsReadOnly="True"/>
-                            <TextBlock Grid.Row="6" Grid.Column="0" Text="Security group description"/>
-                            <TextBox x:Name="WPFGroupDescription" Grid.Row="6" Grid.Column="1" Grid.ColumnSpan="3" IsReadOnly="True" TextWrapping="Wrap" Height="58"/>
-                            <StackPanel Grid.Row="7" Grid.Column="0" Grid.ColumnSpan="4" Margin="0,10,0,0">
+                            <TextBlock Grid.Row="6" Grid.Column="0" Text="Security group name"/>
+                            <TextBox x:Name="WPFGroupName" Grid.Row="6" Grid.Column="1" Grid.ColumnSpan="3" IsReadOnly="True"/>
+                            <TextBlock Grid.Row="7" Grid.Column="0" Text="Security group description"/>
+                            <TextBox x:Name="WPFGroupDescription" Grid.Row="7" Grid.Column="1" Grid.ColumnSpan="3" IsReadOnly="True" TextWrapping="Wrap" Height="58"/>
+                            <StackPanel Grid.Row="8" Grid.Column="0" Grid.ColumnSpan="4" Margin="0,10,0,0">
                                 <CheckBox x:Name="WPFCreateUsers" Content="Opret brugere hvis de ikke findes"/>
                                 <CheckBox x:Name="WPFCreateGroup" Content="Opret gruppen CA-BreakGlass-Exclude hvis den ikke findes"/>
                                 <CheckBox x:Name="WPFAddUsersToGroup" Content="Tilføj break-glass konti til CA-BreakGlass-Exclude"/>
