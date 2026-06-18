@@ -64,6 +64,7 @@ $sync.State = [Hashtable]::Synchronized(@{
     GraphScopes        = @()
     Discovery          = $null
     Plan               = $null
+    Phase1Result       = $null
     Result             = $null
     OutputFolder       = ''
     HandoffPath        = ''
@@ -141,7 +142,6 @@ function Add-EbgGroupExclusionToCAPolicies {
     }
     return $results
 }
-
 function Backup-EbgConditionalAccessPolicies {
     [CmdletBinding()]
     param(
@@ -151,7 +151,6 @@ function Backup-EbgConditionalAccessPolicies {
 
     return Export-EbgJsonSafe -InputObject $Policies -Path (Join-Path $OutputFolder 'ca-policies-before.json') -Depth 50
 }
-
 function ConvertFrom-EbgAAGUIDText {
     [CmdletBinding()]
     param([AllowNull()][string] $Text)
@@ -162,7 +161,6 @@ function ConvertFrom-EbgAAGUIDText {
     $values = @($matches | ForEach-Object { $_.Value.ToLowerInvariant() } | Select-Object -Unique)
     return $values
 }
-
 function ConvertTo-BreakGlassUpn {
     [CmdletBinding()]
     param(
@@ -176,7 +174,6 @@ function ConvertTo-BreakGlassUpn {
     if ($cleanPrefix -notmatch '^[A-Za-z0-9._-]+$') { throw 'UPN prefix må kun indeholde bogstaver, tal, punktum, bindestreg og underscore.' }
     return ('{0}@{1}' -f $cleanPrefix, $OnMicrosoftDomain.ToLowerInvariant())
 }
-
 function ConvertTo-EbgNeutralUserPrefix {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string] $DisplayName)
@@ -189,7 +186,6 @@ function ConvertTo-EbgNeutralUserPrefix {
     }
     return $prefix
 }
-
 function ConvertTo-EbgPlainHashtable {
     [CmdletBinding()]
     param([AllowNull()] $InputObject)
@@ -207,7 +203,6 @@ function ConvertTo-EbgPlainHashtable {
     }
     return $hash
 }
-
 function ConvertTo-EbgRedactedError {
     [CmdletBinding()]
     param([AllowNull()] $ErrorRecord)
@@ -223,7 +218,6 @@ function ConvertTo-EbgRedactedError {
     }
     return $text
 }
-
 function Ensure-EbgAuthenticationStrength {
     [CmdletBinding()]
     param(
@@ -306,7 +300,6 @@ function Ensure-EbgAuthenticationStrength {
     $existing | Add-Member -MemberType NoteProperty -Name allowedAAGUIDs -Value $merged -Force
     return $existing
 }
-
 function Ensure-EbgBreakGlassCAPolicy {
     [CmdletBinding()]
     param(
@@ -361,7 +354,6 @@ function Ensure-EbgBreakGlassCAPolicy {
     $created | Add-Member -MemberType NoteProperty -Name Status -Value 'Created' -Force
     return $created
 }
-
 function Ensure-EbgGlobalAdministratorAssignment {
     [CmdletBinding()]
     param(
@@ -438,7 +430,6 @@ function Ensure-EbgGlobalAdministratorAssignment {
         throw
     }
 }
-
 function Ensure-EbgGroupMember {
     [CmdletBinding()]
     param(
@@ -476,7 +467,6 @@ function Ensure-EbgGroupMember {
         throw
     }
 }
-
 function Ensure-EbgSecurityGroup {
     [CmdletBinding()]
     param(
@@ -512,7 +502,6 @@ function Ensure-EbgSecurityGroup {
     $created | Add-Member -MemberType NoteProperty -Name EnsureStatus -Value 'Created' -Force
     return $created
 }
-
 function Export-EbgJsonSafe {
     [CmdletBinding()]
     param(
@@ -526,7 +515,6 @@ function Export-EbgJsonSafe {
     $InputObject | ConvertTo-Json -Depth $Depth | Set-Content -LiteralPath $Path -Encoding UTF8
     return $Path
 }
-
 function Get-EbgActiveGlobalAdministrators {
     [CmdletBinding()]
     param()
@@ -577,7 +565,6 @@ function Get-EbgActiveGlobalAdministrators {
 
     return @($admins | Sort-Object userPrincipalName -Unique)
 }
-
 function Get-EbgAuthenticationStrengthByName {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string] $DisplayName)
@@ -593,7 +580,6 @@ function Get-EbgAuthenticationStrengthByName {
     $policies = @(Get-EbgGraphCollection -Uri "https://graph.microsoft.com/v1.0/identity/conditionalAccess/authenticationStrength/policies?`$filter=$filter")
     return $policies | Select-Object -First 1
 }
-
 function Get-EbgAuthorizationPolicy {
     [CmdletBinding()]
     param()
@@ -612,7 +598,6 @@ function Get-EbgAuthorizationPolicy {
     }
     return $policy
 }
-
 function Get-EbgConditionalAccessPolicies {
     [CmdletBinding()]
     param()
@@ -626,7 +611,6 @@ function Get-EbgConditionalAccessPolicies {
     }
     return Get-EbgGraphCollection -Uri 'https://graph.microsoft.com/v1.0/identity/conditionalAccess/policies'
 }
-
 function Get-EbgConfigFromUI {
     [CmdletBinding()]
     param()
@@ -654,7 +638,6 @@ function Get-EbgConfigFromUI {
         }
     })
 }
-
 function Get-EbgFido2MethodsForUser {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string] $UserPrincipalName)
@@ -676,7 +659,6 @@ function Get-EbgFido2MethodsForUser {
     $encoded = [uri]::EscapeDataString($UserPrincipalName)
     return Get-EbgGraphCollection -Uri "https://graph.microsoft.com/v1.0/users/$encoded/authentication/fido2Methods"
 }
-
 function Get-EbgGlobalAdministratorRoleDefinition {
     [CmdletBinding()]
     param()
@@ -698,7 +680,6 @@ function Get-EbgGlobalAdministratorRoleDefinition {
     Write-EbgLog -Level PASS -Message 'Role definition fundet: Global Administrator'
     return $role
 }
-
 function Get-EbgGraphCollection {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string] $Uri)
@@ -713,7 +694,6 @@ function Get-EbgGraphCollection {
     }
     return $items
 }
-
 function Get-EbgGroupByDisplayName {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string] $DisplayName)
@@ -727,7 +707,6 @@ function Get-EbgGroupByDisplayName {
     $filter = [uri]::EscapeDataString("displayName eq '$($DisplayName.Replace("'", "''"))'")
     return Get-EbgGraphCollection -Uri "https://graph.microsoft.com/v1.0/groups?`$filter=$filter&`$select=id,displayName,description,mailNickname,securityEnabled,mailEnabled,groupTypes" | Select-Object -First 1
 }
-
 function Get-EbgObjectPropertyValue {
     [CmdletBinding()]
     param(
@@ -751,7 +730,6 @@ function Get-EbgObjectPropertyValue {
     if ($property) { return $property.Value }
     return $null
 }
-
 function Get-EbgOnMicrosoftDomain {
     [CmdletBinding()]
     param([Parameter(Mandatory)] $Organization)
@@ -763,7 +741,6 @@ function Get-EbgOnMicrosoftDomain {
     if ($any) { return [string] $any.name }
     throw 'Kunne ikke finde tenantens .onmicrosoft.com domæne.'
 }
-
 function Get-EbgTemporaryAccessPassMethods {
     [CmdletBinding()]
     param([Parameter(Mandatory)] $User)
@@ -789,7 +766,6 @@ function Get-EbgTemporaryAccessPassMethods {
         $_
     })
 }
-
 function Get-EbgTenantInfo {
     [CmdletBinding()]
     param()
@@ -818,7 +794,6 @@ function Get-EbgTenantInfo {
     $sync.State.OnMicrosoftDomain = $info.OnMicrosoftDomain
     return $info
 }
-
 function Get-EbgUserByUpn {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string] $UserPrincipalName)
@@ -837,7 +812,6 @@ function Get-EbgUserByUpn {
         throw
     }
 }
-
 function Get-EbgAAGUIDSourceUserPrincipalName {
     [CmdletBinding()]
     param([Parameter(Mandatory)][hashtable] $Config)
@@ -856,7 +830,6 @@ function Get-EbgAAGUIDSourceUserPrincipalName {
         }
     })
 }
-
 function Invoke-EbgGraphRequest {
     [CmdletBinding()]
     param(
@@ -890,7 +863,6 @@ function Invoke-EbgGraphRequest {
         throw
     }
 }
-
 function Invoke-EbgRunspace {
     [CmdletBinding()]
     param(
@@ -936,7 +908,6 @@ function Invoke-EbgRunspace {
     }).AddArgument($ScriptBlock).AddArgument($ArgumentList) | Out-Null
     [void]$ps.BeginInvoke()
 }
-
 function New-BreakGlassUser {
     [CmdletBinding()]
     param(
@@ -964,7 +935,6 @@ function New-BreakGlassUser {
     $user | Add-Member -MemberType NoteProperty -Name EnsureStatus -Value 'Created' -Force
     return $user
 }
-
 function New-EbgHandoffHtml {
     [CmdletBinding()]
     param(
@@ -1136,7 +1106,6 @@ function New-EbgHandoffHtml {
     $sync.State.HandoffPath = $path
     return $path
 }
-
 function New-EbgOutputFolder {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string] $TenantId)
@@ -1147,7 +1116,6 @@ function New-EbgOutputFolder {
     $sync.State.OutputFolder = $folder
     return $folder
 }
-
 function New-EbgPlanObject {
     [CmdletBinding()]
     param(
@@ -1226,7 +1194,6 @@ function New-EbgPlanObject {
     $sync.State.Plan = $plan
     return $plan
 }
-
 function New-EbgRandomPassword {
     [CmdletBinding()]
     param([int] $Length = 28)
@@ -1253,7 +1220,6 @@ function New-EbgRandomPassword {
     $shuffled = $chars | Sort-Object { Get-Random }
     return -join $shuffled
 }
-
 function New-EbgSecurityGroup {
     [CmdletBinding()]
     param(
@@ -1275,7 +1241,6 @@ function New-EbgSecurityGroup {
     Invoke-EbgGraphRequest -Method POST -Uri 'https://graph.microsoft.com/v1.0/groups' -Body $body | Out-Null
     return Get-EbgGroupByDisplayName -DisplayName $DisplayName
 }
-
 function New-EbgTemporaryAccessPass {
     [CmdletBinding()]
     param(
@@ -1313,7 +1278,6 @@ function New-EbgTemporaryAccessPass {
     $created | Add-Member -MemberType NoteProperty -Name Status -Value 'Created' -Force
     return $created
 }
-
 function Remove-EbgTemporaryAccessPassMethods {
     [CmdletBinding()]
     param(
@@ -1346,7 +1310,6 @@ function Remove-EbgTemporaryAccessPassMethods {
     }
     return @($results)
 }
-
 function Save-EbgResultJson {
     [CmdletBinding()]
     param(
@@ -1356,7 +1319,6 @@ function Save-EbgResultJson {
 
     return Export-EbgJsonSafe -InputObject $Result -Path (Join-Path $OutputFolder 'result.json') -Depth 40
 }
-
 function Set-EbgAdminSSPRDisabled {
     [CmdletBinding()]
     param([Parameter(Mandatory)][bool] $Apply)
@@ -1397,7 +1359,6 @@ function Set-EbgAdminSSPRDisabled {
         Detail = 'Policy changes can take up to 60 minutes to take effect.'
     }
 }
-
 function Set-EbgLanguage {
     [CmdletBinding()]
     param([ValidateSet('da-DK','en-US')][string] $Language = 'da-DK')
@@ -1514,7 +1475,6 @@ function Set-EbgLanguage {
     if ($sync.WPFAppTitle) { $sync.WPFAppTitle.Text = $sync.App.Name }
     if ($sync.WPFVersionBadge) { $sync.WPFVersionBadge.Text = "v$($sync.App.Version)" }
 }
-
 function Set-EbgNeutralAccountNamePair {
     [CmdletBinding()]
     param([switch] $Random)
@@ -1548,7 +1508,6 @@ function Set-EbgNeutralAccountNamePair {
     Write-EbgLog -Message "${action} til: $account1 / $account2"
     Update-EbgUIState
 }
-
 function Show-EbgCreatedPasswordsOnce {
     [CmdletBinding()]
     param([object[]] $CreatedPasswords)
@@ -1609,7 +1568,6 @@ function Show-EbgCreatedPasswordsOnce {
     })
     $sync.State.CreatedPasswords = @()
 }
-
 function Test-EbgGraphConnection {
     [CmdletBinding()]
     param()
@@ -1623,7 +1581,6 @@ function Test-EbgGraphConnection {
         return $false
     }
 }
-
 function Update-EbgUIState {
     [CmdletBinding()]
     param()
@@ -1738,7 +1695,6 @@ function Update-EbgUIState {
         }
     }
 }
-
 function Write-EbgLog {
     [CmdletBinding()]
     param(
@@ -1771,7 +1727,6 @@ function Write-EbgLog {
         }
     }
 }
-
 function Write-EbgStatus {
     [CmdletBinding()]
     param(
@@ -1795,7 +1750,6 @@ function Write-EbgStatus {
         }
     }
 }
-
 function Initialize-EbgWPFUI {
     [CmdletBinding()]
     param()
@@ -1823,9 +1777,9 @@ function Initialize-EbgWPFUI {
     $sync.WPFAddUsersToGroup.IsChecked = [bool]$defaults.addUsersToGroup
     $sync.WPFDisableAdminSSPR.IsChecked = [bool]$defaults.disableAdminSSPR
     $sync.WPFPatchCAPolicies.IsChecked = [bool]$defaults.patchCAPolicies
-    if ($sync.WPFCreateAuthenticationStrength) { $sync.WPFCreateAuthenticationStrength.IsChecked = [bool]$defaults.createAuthenticationStrength }
-    if ($sync.WPFCreateBreakGlassCAPolicy) { $sync.WPFCreateBreakGlassCAPolicy.IsChecked = [bool]$defaults.createBreakGlassCAPolicy }
-    if ($sync.WPFEnableBreakGlassCAPolicy) { $sync.WPFEnableBreakGlassCAPolicy.IsChecked = [bool]$defaults.enableBreakGlassCAPolicy }
+    if ($sync['WPFCreateAuthenticationStrength']) { $sync['WPFCreateAuthenticationStrength'].IsChecked = [bool]$defaults.createAuthenticationStrength }
+    if ($sync['WPFCreateBreakGlassCAPolicy']) { $sync['WPFCreateBreakGlassCAPolicy'].IsChecked = [bool]$defaults.createBreakGlassCAPolicy }
+    if ($sync['WPFEnableBreakGlassCAPolicy']) { $sync['WPFEnableBreakGlassCAPolicy'].IsChecked = [bool]$defaults.enableBreakGlassCAPolicy }
     if ($sync.WPFLanguageSelector) { $sync.WPFLanguageSelector.SelectedIndex = 0 }
     Set-EbgNeutralAccountNamePair -Random
     Set-EbgLanguage -Language $sync.State.Language
@@ -2169,7 +2123,6 @@ function Invoke-EbgApplyPhase2 {
         Write-EbgStatus -Message 'Phase 2 er færdig. CA-politikken er oprettet som disabled.'
     }
 }
-
 function Invoke-EbgBuildPlan {
     [CmdletBinding()]
     param()
@@ -2228,7 +2181,6 @@ $($plan | ConvertTo-Json -Depth 30)
         Write-EbgStatus -Message 'Plan er genereret.'
     }
 }
-
 function Invoke-EbgConnectTenant {
     [CmdletBinding()]
     param()
@@ -2264,7 +2216,6 @@ function Invoke-EbgConnectTenant {
         Write-EbgStatus -Message 'Microsoft Graph er forbundet.'
     }
 }
-
 function Invoke-EbgDiscovery {
     [CmdletBinding()]
     param()
@@ -2380,7 +2331,6 @@ function Invoke-EbgDiscovery {
         Write-EbgStatus -Message 'Discovery er færdig.'
     }
 }
-
 function Invoke-EbgFetchAAGUIDs {
     [CmdletBinding()]
     param()
@@ -2435,7 +2385,6 @@ function Invoke-EbgFetchAAGUIDs {
         Write-EbgStatus -Message "AAGUID hentet fra $sourceUpn."
     }
 }
-
 function Invoke-EbgOpenOutputFolder {
     [CmdletBinding()]
     param()
@@ -2459,7 +2408,6 @@ function Invoke-EbgOpenHandoff {
         [System.Windows.MessageBox]::Show('Handoff-dokumentet er ikke genereret endnu.', $sync.App.Name, 'OK', 'Information') | Out-Null
     }
 }
-
 function Invoke-EbgWPFButton {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string] $Name)
@@ -2549,7 +2497,6 @@ function Move-EbgWPFStep {
 
     Set-EbgWPFStep -Step $targetStep
 }
-
 $sync.configs.appsettings = @'
 {
   "name": "Entra Break Glass Configurator",
@@ -2561,7 +2508,6 @@ $sync.configs.appsettings = @'
   "authenticationStrengthDescription": "Requires passkeys (FIDO2) from approved attested security key AAGUIDs for break-glass accounts.",
   "breakGlassCAPolicyName": "[CA999] IdentityProtection-AnyApp-AnyPlatform-BreakGlass-FIDO2"
 }
-
 '@ | ConvertFrom-Json
 $sync.configs.defaults = @'
 {
@@ -2605,7 +2551,6 @@ $sync.configs.defaults = @'
     { "account1": "Project North", "account2": "Project South" }
   ]
 }
-
 '@ | ConvertFrom-Json
 $sync.configs.graphScopes = @'
 [
@@ -2621,7 +2566,6 @@ $sync.configs.graphScopes = @'
   "Policy.ReadWrite.Authorization",
   "Policy.ReadWrite.ConditionalAccess"
 ]
-
 '@ | ConvertFrom-Json
 $inputXML = @'
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
@@ -3162,7 +3106,6 @@ $inputXML = @'
         </Border>
     </Grid>
 </Window>
-
 '@
 $maxThreads = 1
 $initialSessionState = [System.Management.Automation.Runspaces.InitialSessionState]::CreateDefault()

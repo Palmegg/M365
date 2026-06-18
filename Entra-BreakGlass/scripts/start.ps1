@@ -60,6 +60,7 @@ $sync.State = [Hashtable]::Synchronized(@{
     GraphScopes        = @()
     Discovery          = $null
     Plan               = $null
+    Phase1Result       = $null
     Result             = $null
     OutputFolder       = ''
     HandoffPath        = ''

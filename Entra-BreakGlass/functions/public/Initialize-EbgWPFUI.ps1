@@ -25,9 +25,9 @@ function Initialize-EbgWPFUI {
     $sync.WPFAddUsersToGroup.IsChecked = [bool]$defaults.addUsersToGroup
     $sync.WPFDisableAdminSSPR.IsChecked = [bool]$defaults.disableAdminSSPR
     $sync.WPFPatchCAPolicies.IsChecked = [bool]$defaults.patchCAPolicies
-    if ($sync.WPFCreateAuthenticationStrength) { $sync.WPFCreateAuthenticationStrength.IsChecked = [bool]$defaults.createAuthenticationStrength }
-    if ($sync.WPFCreateBreakGlassCAPolicy) { $sync.WPFCreateBreakGlassCAPolicy.IsChecked = [bool]$defaults.createBreakGlassCAPolicy }
-    if ($sync.WPFEnableBreakGlassCAPolicy) { $sync.WPFEnableBreakGlassCAPolicy.IsChecked = [bool]$defaults.enableBreakGlassCAPolicy }
+    if ($sync['WPFCreateAuthenticationStrength']) { $sync['WPFCreateAuthenticationStrength'].IsChecked = [bool]$defaults.createAuthenticationStrength }
+    if ($sync['WPFCreateBreakGlassCAPolicy']) { $sync['WPFCreateBreakGlassCAPolicy'].IsChecked = [bool]$defaults.createBreakGlassCAPolicy }
+    if ($sync['WPFEnableBreakGlassCAPolicy']) { $sync['WPFEnableBreakGlassCAPolicy'].IsChecked = [bool]$defaults.enableBreakGlassCAPolicy }
     if ($sync.WPFLanguageSelector) { $sync.WPFLanguageSelector.SelectedIndex = 0 }
     Set-EbgNeutralAccountNamePair -Random
     Set-EbgLanguage -Language $sync.State.Language
