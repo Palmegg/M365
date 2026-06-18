@@ -9,7 +9,7 @@ Get-ChildItem function:\ | Where-Object { $_.Name -like '*-Ebg*' -or $_.Name -li
 }
 
 $sync.Runspace = [runspacefactory]::CreateRunspacePool(1, $maxThreads, $initialSessionState, $Host)
-$sync.Runspace.ApartmentState = 'STA'
+$sync.Runspace.ApartmentState = 'MTA'
 $sync.Runspace.ThreadOptions = 'ReuseThread'
 $sync.Runspace.Open()
 
