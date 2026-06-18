@@ -34,7 +34,7 @@ function New-EbgTemporaryAccessPass {
     catch {
         $message = ConvertTo-EbgRedactedError -ErrorRecord $_
         if ($message -match '403 Forbidden|accessDenied|Request Authorization failed') {
-            throw "Kunne ikke oprette Temporary Access Pass for $upn. Microsoft Graph afviste requesten med 403/accessDenied. For delegated Graph kræver TAP-oprettelse på andre brugere rollen Authentication Administrator eller Privileged Authentication Administrator. Hvis target-kontoen allerede har en privilegeret administratorrolle, brug Privileged Authentication Administrator eller fjern midlertidigt rollen fra target-kontoen og kør igen."
+            throw "Kunne ikke oprette Temporary Access Pass for $upn. Microsoft Graph afviste requesten med 403/accessDenied. TAP kræver delegated Graph scope UserAuthMethod-TAP.ReadWrite.All med admin consent samt Entra rollen Authentication Administrator eller Privileged Authentication Administrator. Hvis target-kontoen allerede har en privilegeret administratorrolle, brug Privileged Authentication Administrator."
         }
         throw
     }

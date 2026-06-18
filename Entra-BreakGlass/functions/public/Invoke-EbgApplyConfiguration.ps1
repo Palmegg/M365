@@ -57,6 +57,11 @@ Vil du fortsætte?
         if (-not [bool](Get-EbgObjectPropertyValue -InputObject $tapPrerequisite -Name 'Allowed')) {
             $account = [string](Get-EbgObjectPropertyValue -InputObject $tapPrerequisite -Name 'Account')
             $roles = @((Get-EbgObjectPropertyValue -InputObject $tapPrerequisite -Name 'RequiredRoles')) -join ' eller '
+            $scope = [string](Get-EbgObjectPropertyValue -InputObject $tapPrerequisite -Name 'RequiredScope')
+            $hasScope = [bool](Get-EbgObjectPropertyValue -InputObject $tapPrerequisite -Name 'HasRequiredScope')
+            if (-not $hasScope) {
+                throw "Phase 1a stoppet før ændringer: Graph-tokenet for $account mangler delegated scope $scope. Giv admin consent til den scope i loginprompten/tenant'en, log ind igen i konfiguratoren, og kør Phase 1a igen."
+            }
             throw "Phase 1a stoppet før ændringer: $account mangler Entra rollen $roles. Microsoft Graph kræver en af disse roller for at oprette Temporary Access Pass på andre brugere. Tildel rollen, log ud/ind i konfiguratoren, og kør Phase 1a igen."
         }
 

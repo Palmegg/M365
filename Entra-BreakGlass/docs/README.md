@@ -73,6 +73,7 @@ Default scopes ligger i `config/graphScopes.json`:
 - `Organization.Read.All`
 - `UserAuthenticationMethod.Read.All`
 - `UserAuthenticationMethod.ReadWrite.All`
+- `UserAuthMethod-TAP.ReadWrite.All`
 - `RoleManagement.ReadWrite.Directory`
 - `Policy.Read.All`
 - `Policy.ReadWrite.AuthenticationMethod`
@@ -85,7 +86,7 @@ Admin consent kan være nødvendig i kundens tenant.
 
 Den indloggede konto skal have rettigheder til at oprette brugere/grupper, tildele directory roles, oprette Temporary Access Pass, læse FIDO2 authentication methods, læse/opdatere authentication strengths, læse/opdatere authorization policy hvis Admin SSPR deaktiveres og, hvis CA vælges, læse og opdatere Conditional Access-politikker.
 
-Microsoft Graph kræver `Authentication Administrator` eller `Privileged Authentication Administrator` for at oprette Temporary Access Pass på andre brugere. Hvis target-kontiene allerede har en privilegeret administratorrolle, skal operatoren typisk bruge `Privileged Authentication Administrator`. Phase 1a pre-checker dette før ændringer. Nye Phase 1a-runs opretter TAP før Global Administrator rollen tildeles.
+Microsoft Graph kræver delegated scope `UserAuthMethod-TAP.ReadWrite.All` med admin consent samt `Authentication Administrator` eller `Privileged Authentication Administrator` for at oprette Temporary Access Pass på andre brugere. Hvis target-kontiene allerede har en privilegeret administratorrolle, skal operatoren typisk bruge `Privileged Authentication Administrator`. Phase 1a pre-checker dette før ændringer. Nye Phase 1a-runs opretter TAP før Global Administrator rollen tildeles.
 
 ## Password og TAP-håndtering
 

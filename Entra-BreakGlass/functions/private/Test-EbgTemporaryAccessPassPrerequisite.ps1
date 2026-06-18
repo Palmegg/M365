@@ -3,17 +3,30 @@ function Test-EbgTemporaryAccessPassPrerequisite {
     param()
 
     $requiredRoleNames = @('Authentication Administrator', 'Privileged Authentication Administrator')
+    $requiredScopeName = 'UserAuthMethod-TAP.ReadWrite.All'
     if ($sync.App.Mock) {
         return [pscustomobject]@{
             Allowed = $true
             Account = [string]$sync.State.GraphAccount
             MatchedRoles = @('Mock Authentication Administrator')
             RequiredRoles = $requiredRoleNames
+            RequiredScope = $requiredScopeName
+            HasRequiredScope = $true
             Detail = 'Mock mode.'
         }
     }
 
     Write-EbgLog -Message 'Pre-check: kontrollerer om operator kan oprette Temporary Access Pass...'
+    $context = Get-MgContext -ErrorAction Stop
+    $currentScopes = @($context.Scopes)
+    $hasRequiredScope = $currentScopes -contains $requiredScopeName
+    if ($hasRequiredScope) {
+        Write-EbgLog -Level PASS -Message "TAP pre-check OK: token har scope $requiredScopeName."
+    }
+    else {
+        Write-EbgLog -Level WARN -Message "TAP pre-check fejlede: token mangler scope $requiredScopeName. Aktuelle scopes: $($currentScopes -join ', ')"
+    }
+
     $me = Invoke-EbgGraphRequest -Method GET -Uri 'https://graph.microsoft.com/v1.0/me?$select=id,displayName,userPrincipalName'
     $operatorId = [string](Get-EbgObjectPropertyValue -InputObject $me -Name 'id')
     $operatorUpn = [string](Get-EbgObjectPropertyValue -InputObject $me -Name 'userPrincipalName')
@@ -53,8 +66,9 @@ function Test-EbgTemporaryAccessPassPrerequisite {
     }
 
     $matchedRoles = @($matchedRoles | Select-Object -Unique)
-    $allowed = $matchedRoles.Count -gt 0
-    if ($allowed) {
+    $hasRequiredRole = $matchedRoles.Count -gt 0
+    $allowed = $hasRequiredRole -and $hasRequiredScope
+    if ($hasRequiredRole) {
         Write-EbgLog -Level PASS -Message "TAP pre-check OK: $operatorUpn har $($matchedRoles -join ', ')."
     }
     else {
@@ -66,6 +80,8 @@ function Test-EbgTemporaryAccessPassPrerequisite {
         Account = $operatorUpn
         MatchedRoles = $matchedRoles
         RequiredRoles = $requiredRoleNames
-        Detail = if ($allowed) { 'OK' } else { 'Temporary Access Pass kræver Authentication Administrator eller Privileged Authentication Administrator for delegated Graph.' }
+        RequiredScope = $requiredScopeName
+        HasRequiredScope = $hasRequiredScope
+        Detail = if ($allowed) { 'OK' } elseif (-not $hasRequiredScope) { "Temporary Access Pass kræver Graph delegated scope $requiredScopeName." } else { 'Temporary Access Pass kræver Authentication Administrator eller Privileged Authentication Administrator for delegated Graph.' }
     }
 }

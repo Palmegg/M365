@@ -5,6 +5,7 @@
   "Organization.Read.All",
   "UserAuthenticationMethod.Read.All",
   "UserAuthenticationMethod.ReadWrite.All",
+  "UserAuthMethod-TAP.ReadWrite.All",
   "RoleManagement.ReadWrite.Directory",
   "Policy.Read.All",
   "Policy.ReadWrite.AuthenticationMethod",

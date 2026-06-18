@@ -1366,7 +1366,7 @@ function New-EbgTemporaryAccessPass {
     catch {
         $message = ConvertTo-EbgRedactedError -ErrorRecord $_
         if ($message -match '403 Forbidden|accessDenied|Request Authorization failed') {
-            throw "Kunne ikke oprette Temporary Access Pass for $upn. Microsoft Graph afviste requesten med 403/accessDenied. For delegated Graph kræver TAP-oprettelse på andre brugere rollen Authentication Administrator eller Privileged Authentication Administrator. Hvis target-kontoen allerede har en privilegeret administratorrolle, brug Privileged Authentication Administrator eller fjern midlertidigt rollen fra target-kontoen og kør igen."
+            throw "Kunne ikke oprette Temporary Access Pass for $upn. Microsoft Graph afviste requesten med 403/accessDenied. TAP kræver delegated Graph scope UserAuthMethod-TAP.ReadWrite.All med admin consent samt Entra rollen Authentication Administrator eller Privileged Authentication Administrator. Hvis target-kontoen allerede har en privilegeret administratorrolle, brug Privileged Authentication Administrator."
         }
         throw
     }
@@ -1739,17 +1739,30 @@ function Test-EbgTemporaryAccessPassPrerequisite {
     param()
 
     $requiredRoleNames = @('Authentication Administrator', 'Privileged Authentication Administrator')
+    $requiredScopeName = 'UserAuthMethod-TAP.ReadWrite.All'
     if ($sync.App.Mock) {
         return [pscustomobject]@{
             Allowed = $true
             Account = [string]$sync.State.GraphAccount
             MatchedRoles = @('Mock Authentication Administrator')
             RequiredRoles = $requiredRoleNames
+            RequiredScope = $requiredScopeName
+            HasRequiredScope = $true
             Detail = 'Mock mode.'
         }
     }
 
     Write-EbgLog -Message 'Pre-check: kontrollerer om operator kan oprette Temporary Access Pass...'
+    $context = Get-MgContext -ErrorAction Stop
+    $currentScopes = @($context.Scopes)
+    $hasRequiredScope = $currentScopes -contains $requiredScopeName
+    if ($hasRequiredScope) {
+        Write-EbgLog -Level PASS -Message "TAP pre-check OK: token har scope $requiredScopeName."
+    }
+    else {
+        Write-EbgLog -Level WARN -Message "TAP pre-check fejlede: token mangler scope $requiredScopeName. Aktuelle scopes: $($currentScopes -join ', ')"
+    }
+
     $me = Invoke-EbgGraphRequest -Method GET -Uri 'https://graph.microsoft.com/v1.0/me?$select=id,displayName,userPrincipalName'
     $operatorId = [string](Get-EbgObjectPropertyValue -InputObject $me -Name 'id')
     $operatorUpn = [string](Get-EbgObjectPropertyValue -InputObject $me -Name 'userPrincipalName')
@@ -1789,8 +1802,9 @@ function Test-EbgTemporaryAccessPassPrerequisite {
     }
 
     $matchedRoles = @($matchedRoles | Select-Object -Unique)
-    $allowed = $matchedRoles.Count -gt 0
-    if ($allowed) {
+    $hasRequiredRole = $matchedRoles.Count -gt 0
+    $allowed = $hasRequiredRole -and $hasRequiredScope
+    if ($hasRequiredRole) {
         Write-EbgLog -Level PASS -Message "TAP pre-check OK: $operatorUpn har $($matchedRoles -join ', ')."
     }
     else {
@@ -1802,7 +1816,9 @@ function Test-EbgTemporaryAccessPassPrerequisite {
         Account = $operatorUpn
         MatchedRoles = $matchedRoles
         RequiredRoles = $requiredRoleNames
-        Detail = if ($allowed) { 'OK' } else { 'Temporary Access Pass kræver Authentication Administrator eller Privileged Authentication Administrator for delegated Graph.' }
+        RequiredScope = $requiredScopeName
+        HasRequiredScope = $hasRequiredScope
+        Detail = if ($allowed) { 'OK' } elseif (-not $hasRequiredScope) { "Temporary Access Pass kræver Graph delegated scope $requiredScopeName." } else { 'Temporary Access Pass kræver Authentication Administrator eller Privileged Authentication Administrator for delegated Graph.' }
     }
 }
 
@@ -2204,6 +2220,11 @@ Vil du fortsætte?
         if (-not [bool](Get-EbgObjectPropertyValue -InputObject $tapPrerequisite -Name 'Allowed')) {
             $account = [string](Get-EbgObjectPropertyValue -InputObject $tapPrerequisite -Name 'Account')
             $roles = @((Get-EbgObjectPropertyValue -InputObject $tapPrerequisite -Name 'RequiredRoles')) -join ' eller '
+            $scope = [string](Get-EbgObjectPropertyValue -InputObject $tapPrerequisite -Name 'RequiredScope')
+            $hasScope = [bool](Get-EbgObjectPropertyValue -InputObject $tapPrerequisite -Name 'HasRequiredScope')
+            if (-not $hasScope) {
+                throw "Phase 1a stoppet før ændringer: Graph-tokenet for $account mangler delegated scope $scope. Giv admin consent til den scope i loginprompten/tenant'en, log ind igen i konfiguratoren, og kør Phase 1a igen."
+            }
             throw "Phase 1a stoppet før ændringer: $account mangler Entra rollen $roles. Microsoft Graph kræver en af disse roller for at oprette Temporary Access Pass på andre brugere. Tildel rollen, log ud/ind i konfiguratoren, og kør Phase 1a igen."
         }
 
@@ -3085,7 +3106,7 @@ function Stop-EbgCurrentTask {
 $sync.configs.appsettings = @'
 {
   "name": "Entra Break Glass Configurator",
-  "version": "2.4.8",
+  "version": "2.4.9",
   "outputRoot": ".\\Output",
   "groupName": "CA-BreakGlass-Exclude",
   "groupDescription": "Security group used to exclude dedicated break-glass accounts from existing Conditional Access policies.",
@@ -3146,12 +3167,14 @@ $sync.configs.graphScopes = @'
   "Organization.Read.All",
   "UserAuthenticationMethod.Read.All",
   "UserAuthenticationMethod.ReadWrite.All",
+  "UserAuthMethod-TAP.ReadWrite.All",
   "RoleManagement.ReadWrite.Directory",
   "Policy.Read.All",
   "Policy.ReadWrite.AuthenticationMethod",
   "Policy.ReadWrite.Authorization",
   "Policy.ReadWrite.ConditionalAccess"
 ]
+
 '@ | ConvertFrom-Json
 $inputXML = @'
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
