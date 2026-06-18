@@ -185,9 +185,11 @@ Vil du fortsætte?
 
         if ($config.PatchCAPolicies -and $group -and $groupId) {
             Write-EbgLog -Message 'Phase 1a step 9/10: Backupper og ekskluderer CA-BreakGlass-Exclude fra eksisterende CA policies...'
-            Write-EbgStatus -Busy -Message 'Phase 1a step 9/10: backupper og ekskluderer gruppen fra CA policies...'
+            Write-EbgStatus -Busy -Message "Phase 1a step 9/10: backupper $(@($policies).Count) CA policies..."
             [System.Windows.Forms.Application]::DoEvents()
             $backupPath = Backup-EbgConditionalAccessPolicies -Policies $policies -OutputFolder $output
+            Write-EbgStatus -Busy -Message "Phase 1a step 9/10: ekskluderer gruppen fra $(@($policies).Count) CA policies..."
+            [System.Windows.Forms.Application]::DoEvents()
             $caResults = Add-EbgGroupExclusionToCAPolicies -Policies $policies -GroupId $groupId -Apply $true
         }
         else {
