@@ -5,9 +5,8 @@ PowerShell 7/WPF værktøj til en simpel Microsoft Graph-baseret v1 opsætning a
 ## Hvad værktøjet gør
 
 - Forbinder til Microsoft Graph med standard Microsoft Graph PowerShell `Connect-MgGraph`.
-- Login køres direkte på WPF-værktøjets egen PowerShell/UI-runspace med `-ContextScope Process`, så discovery, plan og apply bruger samme Graph-session.
-- Før login kaldes `Disconnect-MgGraph`, og værktøjet forsøger at deaktivere Web Account Manager login med `Set-MgGraphOption -DisableLoginByWAM $true`.
-- Connect-siden har et felt til target tenant ID/domain. Hvis feltet udfyldes, bruges `Connect-MgGraph -TenantId <værdi>`, og værktøjet validerer efter login at Graph-sessionen landede på den ønskede tenant.
+- Login køres direkte på WPF-værktøjets egen PowerShell/UI-runspace med plain `Connect-MgGraph -Scopes ... -NoWelcome`, så Microsofts eget loginvindue/account picker styrer konto- og tenantvalg.
+- Før login kaldes `Disconnect-MgGraph`, så den aktive Graph PowerShell-session ryddes.
 - Finder tenantens `*.onmicrosoft.com` domæne.
 - Kontrollerer de eksakte target UPNs for to break-glass konti.
 - Phase 1a opretter manglende cloud-only brugere, hvis valgt.

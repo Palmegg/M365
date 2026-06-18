@@ -29,8 +29,6 @@ function Set-EbgLanguage {
         @{ Da = 'Forbind'; En = 'Connect' }
         @{ Da = 'Forbind én gang til Microsoft Graph. Samme session bruges til discovery, plan og udførsel.'; En = 'Connect once to Microsoft Graph. The same session is used for discovery, plan, and apply.' }
         @{ Da = 'Requested Graph scopes:'; En = 'Requested Graph scopes:' }
-        @{ Da = 'Target tenant ID/domain'; En = 'Target tenant ID/domain' }
-        @{ Da = 'Skriv kundens tenant ID eller .onmicrosoft.com domæne for at tvinge Graph-login mod den tenant.'; En = 'Enter the customer tenant ID or .onmicrosoft.com domain to force Graph sign-in against that tenant.' }
         @{ Da = 'Forbind til Microsoft 365 tenant'; En = 'Connect to Microsoft 365 tenant' }
         @{ Da = 'Forbundet:'; En = 'Connected:' }
         @{ Da = 'Konto:'; En = 'Account:' }
