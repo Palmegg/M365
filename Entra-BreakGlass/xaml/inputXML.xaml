@@ -374,27 +374,52 @@
                 </Grid>
 
                 <Grid x:Name="WPFPageConnect" Visibility="Collapsed">
-                    <ScrollViewer VerticalScrollBarVisibility="Auto">
-                        <StackPanel MaxWidth="940" HorizontalAlignment="Center">
-                            <TextBlock Text="Forbind" FontSize="22" FontWeight="SemiBold" Margin="0,0,0,12"/>
-                            <TextBlock Text="Forbind én gang til Microsoft Graph. Samme session bruges til discovery, plan og udførsel."/>
-                            <TextBlock Text="Requested Graph scopes:" FontWeight="SemiBold" Margin="0,16,0,4"/>
-                            <TextBox x:Name="WPFGraphScopes" IsReadOnly="True" AcceptsReturn="True" Height="190" FontFamily="Consolas" VerticalScrollBarVisibility="Disabled"/>
-                            <Button x:Name="WPFConnectTenant" Content="Forbind til Microsoft 365 tenant" Width="240" HorizontalAlignment="Left"/>
-                            <UniformGrid Columns="2" Margin="0,14,0,0">
-                                <TextBlock Text="Forbundet:" FontWeight="SemiBold"/>
-                                <TextBlock x:Name="WPFGraphStatus" Text="Nej"/>
-                                <TextBlock Text="Konto:" FontWeight="SemiBold"/>
-                                <TextBlock x:Name="WPFGraphAccount"/>
-                                <TextBlock Text="Tenant ID:" FontWeight="SemiBold"/>
-                                <TextBlock x:Name="WPFTenantId"/>
-                                <TextBlock Text="Tenant navn:" FontWeight="SemiBold"/>
-                                <TextBlock x:Name="WPFTenantName"/>
-                                <TextBlock Text=".onmicrosoft.com domæne:" FontWeight="SemiBold"/>
-                                <TextBlock x:Name="WPFOnMicrosoftDomain"/>
-                            </UniformGrid>
+                    <Grid MaxWidth="1060" HorizontalAlignment="Center" VerticalAlignment="Top">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="560"/>
+                            <ColumnDefinition Width="34"/>
+                            <ColumnDefinition Width="420"/>
+                        </Grid.ColumnDefinitions>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+                        <TextBlock Grid.Row="0" Grid.ColumnSpan="3" Text="Forbind" FontSize="22" FontWeight="SemiBold" Margin="0,0,0,12"/>
+                        <TextBlock Grid.Row="1" Grid.ColumnSpan="3" Text="Forbind én gang til Microsoft Graph. Samme session bruges til discovery, plan og udførsel." Margin="0,0,0,18"/>
+                        <StackPanel Grid.Row="2" Grid.Column="0">
+                            <TextBlock Text="Requested Graph scopes:" FontWeight="SemiBold" Margin="0,0,0,4"/>
+                            <TextBox x:Name="WPFGraphScopes" IsReadOnly="True" AcceptsReturn="True" Height="190" FontFamily="Consolas" VerticalScrollBarVisibility="Disabled" HorizontalScrollBarVisibility="Disabled"/>
+                            <Button x:Name="WPFConnectTenant" Content="Forbind til Microsoft 365 tenant" Width="260" HorizontalAlignment="Left"/>
                         </StackPanel>
-                    </ScrollViewer>
+                        <Border Grid.Row="2" Grid.Column="2" Background="{StaticResource PanelRaised}" BorderBrush="{StaticResource BorderSoft}" BorderThickness="1" CornerRadius="10" Padding="18,16" VerticalAlignment="Top">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="150"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                </Grid.RowDefinitions>
+                                <TextBlock Grid.Row="0" Grid.ColumnSpan="2" Text="Forbindelsesstatus" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,12"/>
+                                <TextBlock Grid.Row="1" Grid.Column="0" Text="Forbundet:" FontWeight="SemiBold"/>
+                                <TextBlock Grid.Row="1" Grid.Column="1" x:Name="WPFGraphStatus" Text="Nej"/>
+                                <TextBlock Grid.Row="2" Grid.Column="0" Text="Konto:" FontWeight="SemiBold" Margin="0,8,0,0"/>
+                                <TextBlock Grid.Row="2" Grid.Column="1" x:Name="WPFGraphAccount" Margin="0,8,0,0"/>
+                                <TextBlock Grid.Row="3" Grid.Column="0" Text="Tenant ID:" FontWeight="SemiBold" Margin="0,8,0,0"/>
+                                <TextBlock Grid.Row="3" Grid.Column="1" x:Name="WPFTenantId" Margin="0,8,0,0"/>
+                                <TextBlock Grid.Row="4" Grid.Column="0" Text="Tenant navn:" FontWeight="SemiBold" Margin="0,8,0,0"/>
+                                <TextBlock Grid.Row="4" Grid.Column="1" x:Name="WPFTenantName" Margin="0,8,0,0"/>
+                                <TextBlock Grid.Row="5" Grid.Column="0" Text=".onmicrosoft.com:" FontWeight="SemiBold" Margin="0,8,0,0"/>
+                                <TextBlock Grid.Row="5" Grid.Column="1" x:Name="WPFOnMicrosoftDomain" Margin="0,8,0,0"/>
+                            </Grid>
+                        </Border>
+                    </Grid>
                 </Grid>
 
                 <Grid x:Name="WPFPageDiscovery" Visibility="Collapsed">
