@@ -1944,9 +1944,9 @@ function Set-EbgLanguage {
         @{ Da = 'Security group name'; En = 'Security group name' }
         @{ Da = 'Security group description'; En = 'Security group description' }
         @{ Da = 'FIDO2 authentication strength'; En = 'FIDO2 authentication strength' }
-        @{ Da = 'AAGUID kildebruger'; En = 'AAGUID source user' }
-        @{ Da = 'Hent AAGUID'; En = 'Fetch AAGUID' }
-        @{ Da = 'Tilladte AAGUIDs'; En = 'Allowed AAGUIDs' }
+        @{ Da = 'Read FIDO2 keys from'; En = 'Read FIDO2 keys from' }
+        @{ Da = 'Fetch FIDO2 AAGUIDs'; En = 'Fetch FIDO2 AAGUIDs' }
+        @{ Da = 'Allowed key AAGUIDs'; En = 'Allowed key AAGUIDs' }
         @{ Da = 'Auth strength navn'; En = 'Auth strength name' }
         @{ Da = 'BG CA policy navn'; En = 'BG CA policy name' }
         @{ Da = 'Opret/opdater BreakGlass-FIDO2 authentication strength med AAGUID-restriction'; En = 'Create/update BreakGlass-FIDO2 authentication strength with AAGUID restriction' }
@@ -2270,6 +2270,7 @@ function Update-EbgUIState {
     if ($sync.WPFDomain) { $sync.WPFDomain.Text = $domain }
     if ($sync.WPFUpnPreview1 -and $domain) { $sync.WPFUpnPreview1.Text = "$(if($sync.WPFUserPrefix1){$sync.WPFUserPrefix1.Text})@$domain" }
     if ($sync.WPFUpnPreview2 -and $domain) { $sync.WPFUpnPreview2.Text = "$(if($sync.WPFUserPrefix2){$sync.WPFUserPrefix2.Text})@$domain" }
+    Update-EbgAAGUIDSourceOptions
     if ($sync.WPFGraphStatus) {
         $sync.WPFGraphStatus.Text = if ($sync.State.GraphConnected) {
             if ($sync.State.Language -eq 'en-US') { 'Yes' } else { 'Ja' }
@@ -2490,6 +2491,28 @@ function Update-EbgUIState {
     }
     if ($sync.WPFApplyPhase2) {
         $sync.WPFApplyPhase2.IsEnabled = (-not [bool]$sync.UI.ProcessRunning) -and $hasPhase1
+    }
+    if ($sync.WPFFetchAAGUIDs) {
+        $sync.WPFFetchAAGUIDs.IsEnabled = (-not [bool]$sync.UI.ProcessRunning) -and $hasGraph
+    }
+}
+
+function Update-EbgAAGUIDSourceOptions {
+    [CmdletBinding()]
+    param()
+
+    if (-not $sync.WPFAAGUIDSourceUser) { return }
+
+    $domain = [string]$sync.State.OnMicrosoftDomain
+    if ([string]::IsNullOrWhiteSpace($domain)) { return }
+
+    $upn1 = "$(if($sync.WPFUserPrefix1){$sync.WPFUserPrefix1.Text.Trim()})@$domain"
+    $upn2 = "$(if($sync.WPFUserPrefix2){$sync.WPFUserPrefix2.Text.Trim()})@$domain"
+
+    if ($sync.WPFAAGUIDSourceUser.Items.Count -ge 3) {
+        $sync.WPFAAGUIDSourceUser.Items[0].Content = "Account 1 - $upn1"
+        $sync.WPFAAGUIDSourceUser.Items[1].Content = "Account 2 - $upn2"
+        $sync.WPFAAGUIDSourceUser.Items[2].Content = 'Other user UPN'
     }
 }
 
@@ -3356,19 +3379,32 @@ function Invoke-EbgFetchAAGUIDs {
         [System.Windows.MessageBox]::Show("Du skal først forbinde til Microsoft Graph under trinnet 'Forbind'.", $sync.App.Name, 'OK', 'Warning') | Out-Null
         return
     }
+    if ($sync.UI.ProcessRunning) {
+        [System.Windows.MessageBox]::Show('Der kører allerede en opgave. Vent til den er færdig.', $sync.App.Name, 'OK', 'Information') | Out-Null
+        return
+    }
 
-    $config = Get-EbgConfigFromUI
-    Invoke-EbgRunspace -ArgumentList @($config) -ScriptBlock {
-        param($config)
-        Write-EbgStatus -Busy -Message 'Henter FIDO2 AAGUID...'
+    $sync.UI.ProcessRunning = $true
+    if ($sync.WPFFetchAAGUIDs) { $sync.WPFFetchAAGUIDs.IsEnabled = $false }
+    if ($sync.WPFProgressBar) { $sync.WPFProgressBar.IsIndeterminate = $true }
+    Update-EbgUIState | Out-Null
+
+    try {
+        $config = Get-EbgConfigFromUI
+        Write-EbgStatus -Busy -Message 'Henter FIDO2 AAGUIDs...'
+        [System.Windows.Forms.Application]::DoEvents()
+
+        Ensure-EbgGraphContext
+        [System.Windows.Forms.Application]::DoEvents()
+
         $sourceUpn = Get-EbgAAGUIDSourceUserPrincipalName -Config $config
-        Write-EbgLog -Message "Henter FIDO2 methods fra: $sourceUpn"
+        Write-EbgLog -Message "Henter registrerede FIDO2/passkey methods fra: $sourceUpn"
+        [System.Windows.Forms.Application]::DoEvents()
+
         $methods = @(Get-EbgFido2MethodsForUser -UserPrincipalName $sourceUpn)
         if ($methods.Count -lt 1) {
-            Write-EbgStatus -Message 'Ingen FIDO2 methods fundet.'
-            $sync.Form.Dispatcher.Invoke([System.Action]{
-                [System.Windows.MessageBox]::Show("Der blev ikke fundet registrerede FIDO2/passkey methods på $sourceUpn.", $sync.App.Name, 'OK', 'Warning') | Out-Null
-            })
+            Write-EbgStatus -Message "Ingen FIDO2/passkey methods fundet på $sourceUpn."
+            [System.Windows.MessageBox]::Show("Der blev ikke fundet registrerede FIDO2/passkey methods på $sourceUpn. Log ind på kontoen via https://aka.ms/mfasetup og registrer security keys først.", $sync.App.Name, 'OK', 'Warning') | Out-Null
             return
         }
 
@@ -3376,32 +3412,41 @@ function Invoke-EbgFetchAAGUIDs {
             [string](Get-EbgObjectPropertyValue -InputObject $_ -Name 'aaGuid')
         } | Where-Object { $_ -match '^[0-9a-fA-F-]{36}$' } | ForEach-Object { $_.ToLowerInvariant() } | Select-Object -Unique)
 
-        $details = @($methods | ForEach-Object {
-            $name = [string](Get-EbgObjectPropertyValue -InputObject $_ -Name 'displayName')
-            $model = [string](Get-EbgObjectPropertyValue -InputObject $_ -Name 'model')
-            $guid = [string](Get-EbgObjectPropertyValue -InputObject $_ -Name 'aaGuid')
-            $attestation = [string](Get-EbgObjectPropertyValue -InputObject $_ -Name 'attestationLevel')
-            $type = [string](Get-EbgObjectPropertyValue -InputObject $_ -Name 'passkeyType')
-            "$name / $model / $guid / attestation=$attestation / type=$type"
-        })
+        foreach ($method in $methods) {
+            $name = [string](Get-EbgObjectPropertyValue -InputObject $method -Name 'displayName')
+            $model = [string](Get-EbgObjectPropertyValue -InputObject $method -Name 'model')
+            $guid = [string](Get-EbgObjectPropertyValue -InputObject $method -Name 'aaGuid')
+            $attestation = [string](Get-EbgObjectPropertyValue -InputObject $method -Name 'attestationLevel')
+            $type = [string](Get-EbgObjectPropertyValue -InputObject $method -Name 'passkeyType')
+            Write-EbgLog -Level PASS -Message "FIDO2 method fundet: user=$sourceUpn; name=$name; model=$model; aaGuid=$guid; attestation=$attestation; type=$type"
+        }
 
-        foreach ($detail in $details) { Write-EbgLog -Level PASS -Message "FIDO2 method: $detail" }
         if ($aaGuids.Count -lt 1) {
-            Write-EbgStatus -Message 'Ingen gyldige AAGUIDs fundet.'
-            $sync.Form.Dispatcher.Invoke([System.Action]{
-                [System.Windows.MessageBox]::Show("FIDO2 methods blev fundet, men ingen gyldige AAGUIDs kunne læses.", $sync.App.Name, 'OK', 'Warning') | Out-Null
-            })
+            Write-EbgStatus -Message 'FIDO2 methods fundet, men ingen gyldige AAGUIDs kunne læses.'
+            [System.Windows.MessageBox]::Show("FIDO2/passkey methods blev fundet på $sourceUpn, men Microsoft Graph returnerede ingen gyldige AAGUIDs.", $sync.App.Name, 'OK', 'Warning') | Out-Null
             return
         }
 
-        $sync.Form.Dispatcher.Invoke([System.Action]{
-            $existing = @(ConvertFrom-EbgAAGUIDText -Text $sync.WPFAAGUIDs.Text)
-            $merged = @($existing + $aaGuids | Select-Object -Unique)
-            $sync.WPFAAGUIDs.Text = ($merged -join [Environment]::NewLine)
-        })
-        Write-EbgStatus -Message "AAGUID hentet fra $sourceUpn."
+        $existing = @(ConvertFrom-EbgAAGUIDText -Text $sync.WPFAAGUIDs.Text)
+        $merged = @($existing + $aaGuids | Select-Object -Unique)
+        $sync.WPFAAGUIDs.Text = ($merged -join [Environment]::NewLine)
+        Write-EbgStatus -Message "AAGUIDs hentet fra $sourceUpn."
+        [System.Windows.MessageBox]::Show("AAGUIDs hentet fra ${sourceUpn}:`n`n$($aaGuids -join [Environment]::NewLine)", $sync.App.Name, 'OK', 'Information') | Out-Null
+    }
+    catch {
+        $message = ConvertTo-EbgRedactedError -ErrorRecord $_
+        Write-EbgLog -Level ERROR -Message $message
+        Write-EbgStatus -Message 'Hentning af AAGUID fejlede.'
+        [System.Windows.MessageBox]::Show($message, $sync.App.Name, 'OK', 'Error') | Out-Null
+    }
+    finally {
+        $sync.UI.ProcessRunning = $false
+        if ($sync.WPFProgressBar) { $sync.WPFProgressBar.IsIndeterminate = $false }
+        if ($sync.WPFFetchAAGUIDs) { $sync.WPFFetchAAGUIDs.IsEnabled = $true }
+        Update-EbgUIState | Out-Null
     }
 }
+
 function Invoke-EbgOpenOutputFolder {
     [CmdletBinding()]
     param()
@@ -3575,7 +3620,7 @@ function Stop-EbgCurrentTask {
 $sync.configs.appsettings = @'
 {
   "name": "Entra Break Glass Configurator",
-  "version": "2.4.18",
+  "version": "2.4.19",
   "outputRoot": ".\\Output",
   "groupName": "CA-BreakGlass-Exclude",
   "groupDescription": "Security group used to exclude dedicated break-glass accounts from existing Conditional Access policies.",
@@ -4184,7 +4229,7 @@ $inputXML = @'
                     <DockPanel>
                         <StackPanel DockPanel.Dock="Top">
                             <TextBlock Text="Phase 2 - FIDO2 og dedikeret CA-policy" FontSize="22" FontWeight="SemiBold" Margin="0,0,0,12"/>
-                            <TextBlock Text="Dette trin refresher de to konti, henter AAGUIDs fra registrerede FIDO2 methods, kan slette TAP, opretter/opdaterer BreakGlass-FIDO2 authentication strength og opretter den dedikerede CA-policy som disabled."/>
+                            <TextBlock Text="Dette trin refresher de to konti, læser de registrerede FIDO2/passkey security keys, udtrækker deres AAGUIDs, kan slette TAP, opretter/opdaterer BreakGlass-FIDO2 authentication strength og opretter den dedikerede CA-policy som disabled." TextWrapping="Wrap"/>
                             <Grid Margin="0,18,0,8">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="190"/>
@@ -4202,23 +4247,26 @@ $inputXML = @'
                                 <TextBox x:Name="WPFAuthenticationStrengthName" Grid.Row="0" Grid.Column="1" IsReadOnly="True" Margin="0,2,16,8"/>
                                 <TextBlock Grid.Row="0" Grid.Column="2" Text="BG CA policy navn"/>
                                 <TextBox x:Name="WPFBreakGlassCAPolicyName" Grid.Row="0" Grid.Column="3" IsReadOnly="True"/>
-                                <TextBlock Grid.Row="1" Grid.Column="0" Text="AAGUID kildebruger"/>
+                                <TextBlock Grid.Row="1" Grid.Column="0" Text="Read FIDO2 keys from"/>
                                 <StackPanel Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="3" Orientation="Horizontal">
-                                    <ComboBox x:Name="WPFAAGUIDSourceUser" Width="170" SelectedIndex="0" Margin="0,2,8,8">
+                                    <ComboBox x:Name="WPFAAGUIDSourceUser" Width="360" SelectedIndex="0" Margin="0,2,8,8">
                                         <ComboBoxItem Content="Account 1"/>
                                         <ComboBoxItem Content="Account 2"/>
-                                        <ComboBoxItem Content="Custom UPN"/>
+                                        <ComboBoxItem Content="Other user UPN"/>
                                     </ComboBox>
-                                    <TextBox x:Name="WPFAAGUIDCustomUser" Width="310" Margin="0,2,8,8"/>
-                                    <Button x:Name="WPFFetchAAGUIDs" Content="Hent AAGUID" Width="130" Margin="0,0,0,8"/>
+                                    <TextBox x:Name="WPFAAGUIDCustomUser" Width="300" Margin="0,2,8,8" ToolTip="Only used when 'Other user UPN' is selected."/>
+                                    <Button x:Name="WPFFetchAAGUIDs" Content="Fetch FIDO2 AAGUIDs" Width="170" Margin="0,0,0,8"/>
                                 </StackPanel>
-                                <TextBlock Grid.Row="2" Grid.Column="0" Text="Tilladte AAGUIDs"/>
-                                <TextBox x:Name="WPFAAGUIDs" Grid.Row="2" Grid.Column="1" Grid.ColumnSpan="3" AcceptsReturn="True" TextWrapping="Wrap" Height="72"/>
+                                <TextBlock Grid.Row="2" Grid.Column="0" Text="Allowed key AAGUIDs"/>
+                                <StackPanel Grid.Row="2" Grid.Column="1" Grid.ColumnSpan="3">
+                                    <TextBlock Text="One AAGUID per line. Click Fetch FIDO2 AAGUIDs after FIDO2 keys are registered on the selected account." Foreground="{StaticResource TextMuted}" Margin="0,0,0,4"/>
+                                    <TextBox x:Name="WPFAAGUIDs" AcceptsReturn="True" TextWrapping="NoWrap" Height="118" FontFamily="Consolas" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"/>
+                                </StackPanel>
                                 <TextBlock Grid.Row="3" Grid.Column="0" Grid.ColumnSpan="4" Foreground="#FBBF24" Text="Phase 2 bliver først tilgængelig efter Phase 1a og manuel FIDO2-registrering. CA-politikken oprettes som disabled."/>
                             </Grid>
                             <Button x:Name="WPFApplyPhase2" Content="Kør Phase 2" Width="160" HorizontalAlignment="Left" Margin="0,14,0,8"/>
                         </StackPanel>
-                        <TextBox x:Name="WPFPhase2Log" IsReadOnly="True" AcceptsReturn="True" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" FontFamily="Consolas"/>
+                        <TextBox x:Name="WPFPhase2Log" IsReadOnly="True" AcceptsReturn="True" MinHeight="150" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" FontFamily="Consolas"/>
                     </DockPanel>
                 </Grid>
 

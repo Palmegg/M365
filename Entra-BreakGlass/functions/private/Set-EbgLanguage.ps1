@@ -50,9 +50,9 @@ function Set-EbgLanguage {
         @{ Da = 'Security group name'; En = 'Security group name' }
         @{ Da = 'Security group description'; En = 'Security group description' }
         @{ Da = 'FIDO2 authentication strength'; En = 'FIDO2 authentication strength' }
-        @{ Da = 'AAGUID kildebruger'; En = 'AAGUID source user' }
-        @{ Da = 'Hent AAGUID'; En = 'Fetch AAGUID' }
-        @{ Da = 'Tilladte AAGUIDs'; En = 'Allowed AAGUIDs' }
+        @{ Da = 'Read FIDO2 keys from'; En = 'Read FIDO2 keys from' }
+        @{ Da = 'Fetch FIDO2 AAGUIDs'; En = 'Fetch FIDO2 AAGUIDs' }
+        @{ Da = 'Allowed key AAGUIDs'; En = 'Allowed key AAGUIDs' }
         @{ Da = 'Auth strength navn'; En = 'Auth strength name' }
         @{ Da = 'BG CA policy navn'; En = 'BG CA policy name' }
         @{ Da = 'Opret/opdater BreakGlass-FIDO2 authentication strength med AAGUID-restriction'; En = 'Create/update BreakGlass-FIDO2 authentication strength with AAGUID restriction' }

@@ -536,7 +536,7 @@
                     <DockPanel>
                         <StackPanel DockPanel.Dock="Top">
                             <TextBlock Text="Phase 2 - FIDO2 og dedikeret CA-policy" FontSize="22" FontWeight="SemiBold" Margin="0,0,0,12"/>
-                            <TextBlock Text="Dette trin refresher de to konti, henter AAGUIDs fra registrerede FIDO2 methods, kan slette TAP, opretter/opdaterer BreakGlass-FIDO2 authentication strength og opretter den dedikerede CA-policy som disabled."/>
+                            <TextBlock Text="Dette trin refresher de to konti, læser de registrerede FIDO2/passkey security keys, udtrækker deres AAGUIDs, kan slette TAP, opretter/opdaterer BreakGlass-FIDO2 authentication strength og opretter den dedikerede CA-policy som disabled." TextWrapping="Wrap"/>
                             <Grid Margin="0,18,0,8">
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="190"/>
@@ -554,23 +554,26 @@
                                 <TextBox x:Name="WPFAuthenticationStrengthName" Grid.Row="0" Grid.Column="1" IsReadOnly="True" Margin="0,2,16,8"/>
                                 <TextBlock Grid.Row="0" Grid.Column="2" Text="BG CA policy navn"/>
                                 <TextBox x:Name="WPFBreakGlassCAPolicyName" Grid.Row="0" Grid.Column="3" IsReadOnly="True"/>
-                                <TextBlock Grid.Row="1" Grid.Column="0" Text="AAGUID kildebruger"/>
+                                <TextBlock Grid.Row="1" Grid.Column="0" Text="Read FIDO2 keys from"/>
                                 <StackPanel Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="3" Orientation="Horizontal">
-                                    <ComboBox x:Name="WPFAAGUIDSourceUser" Width="170" SelectedIndex="0" Margin="0,2,8,8">
+                                    <ComboBox x:Name="WPFAAGUIDSourceUser" Width="360" SelectedIndex="0" Margin="0,2,8,8">
                                         <ComboBoxItem Content="Account 1"/>
                                         <ComboBoxItem Content="Account 2"/>
-                                        <ComboBoxItem Content="Custom UPN"/>
+                                        <ComboBoxItem Content="Other user UPN"/>
                                     </ComboBox>
-                                    <TextBox x:Name="WPFAAGUIDCustomUser" Width="310" Margin="0,2,8,8"/>
-                                    <Button x:Name="WPFFetchAAGUIDs" Content="Hent AAGUID" Width="130" Margin="0,0,0,8"/>
+                                    <TextBox x:Name="WPFAAGUIDCustomUser" Width="300" Margin="0,2,8,8" ToolTip="Only used when 'Other user UPN' is selected."/>
+                                    <Button x:Name="WPFFetchAAGUIDs" Content="Fetch FIDO2 AAGUIDs" Width="170" Margin="0,0,0,8"/>
                                 </StackPanel>
-                                <TextBlock Grid.Row="2" Grid.Column="0" Text="Tilladte AAGUIDs"/>
-                                <TextBox x:Name="WPFAAGUIDs" Grid.Row="2" Grid.Column="1" Grid.ColumnSpan="3" AcceptsReturn="True" TextWrapping="Wrap" Height="72"/>
+                                <TextBlock Grid.Row="2" Grid.Column="0" Text="Allowed key AAGUIDs"/>
+                                <StackPanel Grid.Row="2" Grid.Column="1" Grid.ColumnSpan="3">
+                                    <TextBlock Text="One AAGUID per line. Click Fetch FIDO2 AAGUIDs after FIDO2 keys are registered on the selected account." Foreground="{StaticResource TextMuted}" Margin="0,0,0,4"/>
+                                    <TextBox x:Name="WPFAAGUIDs" AcceptsReturn="True" TextWrapping="NoWrap" Height="118" FontFamily="Consolas" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"/>
+                                </StackPanel>
                                 <TextBlock Grid.Row="3" Grid.Column="0" Grid.ColumnSpan="4" Foreground="#FBBF24" Text="Phase 2 bliver først tilgængelig efter Phase 1a og manuel FIDO2-registrering. CA-politikken oprettes som disabled."/>
                             </Grid>
                             <Button x:Name="WPFApplyPhase2" Content="Kør Phase 2" Width="160" HorizontalAlignment="Left" Margin="0,14,0,8"/>
                         </StackPanel>
-                        <TextBox x:Name="WPFPhase2Log" IsReadOnly="True" AcceptsReturn="True" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" FontFamily="Consolas"/>
+                        <TextBox x:Name="WPFPhase2Log" IsReadOnly="True" AcceptsReturn="True" MinHeight="150" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" FontFamily="Consolas"/>
                     </DockPanel>
                 </Grid>
 
