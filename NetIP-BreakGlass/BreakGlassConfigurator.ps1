@@ -8,7 +8,7 @@ param(
     [switch] $NoCompileBanner
 )
 
-if ($PSVersionTable.PSVersion.Major -lt 7) {
+if (($PSVersionTable.PSEdition -ne 'Core') -or ($PSVersionTable.PSVersion.Major -lt 7)) {
     $pwshCommand = Get-Command pwsh.exe -ErrorAction SilentlyContinue
     $pwshPath = if ($pwshCommand) {
         $pwshCommand.Source
@@ -27,13 +27,13 @@ if ($PSVersionTable.PSVersion.Major -lt 7) {
         '-NoProfile',
         '-ExecutionPolicy', 'Bypass',
         '-STA',
-        '-File', ('"{0}"' -f $scriptPath)
+        '-File', $scriptPath
     )
     if ($Mock) { $arguments += '-Mock' }
     if ($DebugMode) { $arguments += '-DebugMode' }
     if ($NoCompileBanner) { $arguments += '-NoCompileBanner' }
 
-    Start-Process -FilePath $pwshPath -ArgumentList $arguments | Out-Null
+    & $pwshPath @arguments
     return
 }
 
@@ -2220,7 +2220,7 @@ function Move-NetIPWPFStep {
 $sync.configs.appsettings = @'
 {
   "name": "Entra Break Glass Configurator",
-  "version": "2.2.6",
+  "version": "2.2.7",
   "outputRoot": ".\\Output",
   "groupName": "CA-BreakGlass-Exclude",
   "groupDescription": "Security group used to exclude dedicated break-glass accounts from existing Conditional Access policies.",

@@ -4,7 +4,7 @@ param(
     [switch] $NoCompileBanner
 )
 
-if ($PSVersionTable.PSVersion.Major -lt 7) {
+if (($PSVersionTable.PSEdition -ne 'Core') -or ($PSVersionTable.PSVersion.Major -lt 7)) {
     $pwshCommand = Get-Command pwsh.exe -ErrorAction SilentlyContinue
     $pwshPath = if ($pwshCommand) {
         $pwshCommand.Source
@@ -23,13 +23,13 @@ if ($PSVersionTable.PSVersion.Major -lt 7) {
         '-NoProfile',
         '-ExecutionPolicy', 'Bypass',
         '-STA',
-        '-File', ('"{0}"' -f $scriptPath)
+        '-File', $scriptPath
     )
     if ($Mock) { $arguments += '-Mock' }
     if ($DebugMode) { $arguments += '-DebugMode' }
     if ($NoCompileBanner) { $arguments += '-NoCompileBanner' }
 
-    Start-Process -FilePath $pwshPath -ArgumentList $arguments | Out-Null
+    & $pwshPath @arguments
     return
 }
 
