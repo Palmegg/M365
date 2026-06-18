@@ -305,19 +305,51 @@
                 <RowDefinition Height="*"/>
                 <RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
-            <Border Grid.Row="0" Visibility="Collapsed">
-                <StackPanel>
-                    <Button x:Name="WPFStepWelcome" Content="1. Velkommen" Margin="0,0,8,0"/>
+            <StackPanel Grid.Row="0" Margin="34,16,34,0">
+                <UniformGrid Columns="5">
+                    <Border x:Name="WPFPhasePrepCard" Background="{StaticResource PanelRaised}" BorderBrush="{StaticResource BorderSoft}" BorderThickness="1" CornerRadius="10" Padding="14,10" Margin="0,0,8,0">
+                        <StackPanel>
+                            <TextBlock x:Name="WPFPhasePrepTitle" Text="Forberedelse" FontWeight="SemiBold"/>
+                            <TextBlock x:Name="WPFPhasePrepStatus" Text="Start, forbindelse, discovery, plan" Foreground="{StaticResource TextMuted}" FontSize="11"/>
+                        </StackPanel>
+                    </Border>
+                    <Border x:Name="WPFPhase1Card" Background="{StaticResource PanelRaised}" BorderBrush="{StaticResource BorderSoft}" BorderThickness="1" CornerRadius="10" Padding="14,10" Margin="0,0,8,0">
+                        <StackPanel>
+                            <TextBlock x:Name="WPFPhase1Title" Text="Phase 1a" FontWeight="SemiBold"/>
+                            <TextBlock x:Name="WPFPhase1Status" Text="Tenant ændringer og TAP" Foreground="{StaticResource TextMuted}" FontSize="11"/>
+                        </StackPanel>
+                    </Border>
+                    <Border x:Name="WPFPhaseManualCard" Background="{StaticResource PanelRaised}" BorderBrush="{StaticResource BorderSoft}" BorderThickness="1" CornerRadius="10" Padding="14,10" Margin="0,0,8,0">
+                        <StackPanel>
+                            <TextBlock x:Name="WPFPhaseManualTitle" Text="Phase 1b" FontWeight="SemiBold"/>
+                            <TextBlock x:Name="WPFPhaseManualStatus" Text="Manuel FIDO2 registrering" Foreground="{StaticResource TextMuted}" FontSize="11"/>
+                        </StackPanel>
+                    </Border>
+                    <Border x:Name="WPFPhase2Card" Background="{StaticResource PanelRaised}" BorderBrush="{StaticResource BorderSoft}" BorderThickness="1" CornerRadius="10" Padding="14,10" Margin="0,0,8,0">
+                        <StackPanel>
+                            <TextBlock x:Name="WPFPhase2Title" Text="Phase 2" FontWeight="SemiBold"/>
+                            <TextBlock x:Name="WPFPhase2Status" Text="AAGUID, auth strength, CA policy" Foreground="{StaticResource TextMuted}" FontSize="11"/>
+                        </StackPanel>
+                    </Border>
+                    <Border x:Name="WPFPhaseHandoffCard" Background="{StaticResource PanelRaised}" BorderBrush="{StaticResource BorderSoft}" BorderThickness="1" CornerRadius="10" Padding="14,10">
+                        <StackPanel>
+                            <TextBlock x:Name="WPFPhaseHandoffTitle" Text="Handoff" FontWeight="SemiBold"/>
+                            <TextBlock x:Name="WPFPhaseHandoffStatus" Text="Rapport og næste steps" Foreground="{StaticResource TextMuted}" FontSize="11"/>
+                        </StackPanel>
+                    </Border>
+                </UniformGrid>
+                <StackPanel Visibility="Collapsed">
+                    <Button x:Name="WPFStepWelcome" Content="1. Start" Margin="0,0,8,0"/>
                     <Button x:Name="WPFStepConnect" Content="2. Forbind" IsEnabled="False" Margin="0,0,8,0"/>
                     <Button x:Name="WPFStepDiscovery" Content="3. Discovery" IsEnabled="False" Margin="0,0,8,0"/>
-                    <Button x:Name="WPFStepConfig" Content="4. Konfiguration" IsEnabled="False" Margin="0,0,8,0"/>
-                    <Button x:Name="WPFStepPlan" Content="5. Plan" IsEnabled="False" Margin="0,0,8,0"/>
-                    <Button x:Name="WPFStepApply" Content="6. Phase 1" IsEnabled="False" Margin="0,0,8,0"/>
-                    <Button x:Name="WPFStepManualFido" Content="7. Manuel FIDO2" IsEnabled="False" Margin="0,0,8,0"/>
+                    <Button x:Name="WPFStepConfig" Content="4. Phase 1 config" IsEnabled="False" Margin="0,0,8,0"/>
+                    <Button x:Name="WPFStepPlan" Content="5. Phase 1 plan" IsEnabled="False" Margin="0,0,8,0"/>
+                    <Button x:Name="WPFStepApply" Content="6. Phase 1a" IsEnabled="False" Margin="0,0,8,0"/>
+                    <Button x:Name="WPFStepManualFido" Content="7. Phase 1b" IsEnabled="False" Margin="0,0,8,0"/>
                     <Button x:Name="WPFStepPhase2" Content="8. Phase 2" IsEnabled="False" Margin="0,0,8,0"/>
                     <Button x:Name="WPFStepHandoff" Content="9. Handoff" IsEnabled="False" Margin="0"/>
                 </StackPanel>
-            </Border>
+            </StackPanel>
 
             <Grid Grid.Row="1" Margin="34,20">
                 <Grid x:Name="WPFPageWelcome">
@@ -529,7 +561,10 @@
                         <ColumnDefinition Width="270"/>
                     </Grid.ColumnDefinitions>
                     <Button x:Name="WPFBackStep" Grid.Column="0" Content="Tilbage" MinWidth="240" HorizontalAlignment="Left"/>
-                    <TextBlock x:Name="WPFCurrentStepText" Grid.Column="1" HorizontalAlignment="Center" VerticalAlignment="Center" FontWeight="SemiBold" Foreground="{StaticResource TextSecondary}"/>
+                    <StackPanel Grid.Column="1" HorizontalAlignment="Center" VerticalAlignment="Center">
+                        <TextBlock x:Name="WPFCurrentPhaseText" HorizontalAlignment="Center" FontWeight="SemiBold" Foreground="{StaticResource TextPrimary}"/>
+                        <TextBlock x:Name="WPFCurrentStepText" HorizontalAlignment="Center" Margin="0,3,0,0" FontWeight="SemiBold" Foreground="{StaticResource TextSecondary}"/>
+                    </StackPanel>
                     <Button x:Name="WPFNextStep" Grid.Column="2" Content="Videre" MinWidth="240" HorizontalAlignment="Right"/>
                 </Grid>
             </Border>

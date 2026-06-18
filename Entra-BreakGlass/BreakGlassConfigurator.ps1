@@ -1657,13 +1657,13 @@ function Update-EbgUIState {
 
     $steps = @('Welcome','Connect','Discovery','Config','Plan','Apply','ManualFido','Phase2','Handoff')
     $titles = @{
-        Welcome = 'Velkommen'
+        Welcome = 'Start'
         Connect = 'Forbind'
         Discovery = 'Discovery'
-        Config = 'Konfiguration'
-        Plan = 'Plan'
+        Config = 'Phase 1 konfiguration'
+        Plan = 'Phase 1 plan'
         Apply = 'Phase 1a'
-        ManualFido = 'Manuel FIDO2'
+        ManualFido = 'Phase 1b manuel FIDO2'
         Phase2 = 'Phase 2'
         Handoff = 'Handoff'
     }
@@ -1673,6 +1673,112 @@ function Update-EbgUIState {
 
     if ($sync.WPFCurrentStepText) {
         $sync.WPFCurrentStepText.Text = "Step $($index + 1) af $($steps.Count): $($titles[$current])"
+    }
+    if ($sync.WPFCurrentPhaseText) {
+        $phaseLabel = switch ($current) {
+            { $_ -in @('Welcome','Connect','Discovery','Config','Plan') } { 'Forberedelse' }
+            'Apply' { 'Phase 1a - automatiske tenant-ændringer' }
+            'ManualFido' { 'Phase 1b - manuel FIDO2 registrering' }
+            'Phase2' { 'Phase 2 - FIDO2 enforcement forberedes' }
+            'Handoff' { 'Handoff' }
+            default { 'Forberedelse' }
+        }
+        $sync.WPFCurrentPhaseText.Text = "Aktuel fase: $phaseLabel"
+    }
+
+    $phaseDefinitions = @(
+        @{
+            Key='Prep'; Card='WPFPhasePrepCard'; Title='WPFPhasePrepTitle'; Status='WPFPhasePrepStatus'
+            IsActive=($current -in @('Welcome','Connect','Discovery','Config','Plan'))
+            IsDone=($index -gt 4)
+            IsAvailable=$true
+            ActiveText='Aktiv: start, connect, discovery og plan'
+            DoneText='Færdig'
+            LockedText=''
+            ReadyText='Klar'
+        },
+        @{
+            Key='Phase1'; Card='WPFPhase1Card'; Title='WPFPhase1Title'; Status='WPFPhase1Status'
+            IsActive=($current -eq 'Apply')
+            IsDone=$hasPhase1
+            IsAvailable=$hasPlan
+            ActiveText='Aktiv: opretter konti, TAP og CA exclusions'
+            DoneText='Færdig'
+            LockedText='Låst indtil plan er genereret'
+            ReadyText='Klar til kørsel'
+        },
+        @{
+            Key='Manual'; Card='WPFPhaseManualCard'; Title='WPFPhaseManualTitle'; Status='WPFPhaseManualStatus'
+            IsActive=($current -eq 'ManualFido')
+            IsDone=($current -in @('Phase2','Handoff'))
+            IsAvailable=$hasPhase1
+            ActiveText='Aktiv: registrer 2 FIDO2 keys pr. konto'
+            DoneText='Færdig eller bekræftet'
+            LockedText='Låst indtil Phase 1a er færdig'
+            ReadyText='Klar efter Phase 1a'
+        },
+        @{
+            Key='Phase2'; Card='WPFPhase2Card'; Title='WPFPhase2Title'; Status='WPFPhase2Status'
+            IsActive=($current -eq 'Phase2')
+            IsDone=($current -eq 'Handoff' -and $hasHandoff)
+            IsAvailable=$hasPhase1
+            ActiveText='Aktiv: AAGUID, auth strength og disabled CA policy'
+            DoneText='Færdig'
+            LockedText='Låst indtil FIDO2 er registreret manuelt'
+            ReadyText='Klar efter manuel FIDO2'
+        },
+        @{
+            Key='Handoff'; Card='WPFPhaseHandoffCard'; Title='WPFPhaseHandoffTitle'; Status='WPFPhaseHandoffStatus'
+            IsActive=($current -eq 'Handoff')
+            IsDone=$false
+            IsAvailable=$hasHandoff
+            ActiveText='Aktiv: rapport og næste steps'
+            DoneText='Færdig'
+            LockedText='Låst indtil rapport er genereret'
+            ReadyText='Klar'
+        }
+    )
+    $doneBrush = $sync.Form.Resources['AccentSoft']
+    $activePhaseBrush = $sync.Form.Resources['ButtonHoverBackground']
+    $lockedBrush = $sync.Form.Resources['ButtonDisabledBackground']
+    $readyBrush = $sync.Form.Resources['PanelRaised']
+    $doneBorderBrush = $sync.Form.Resources['Accent']
+    $activePhaseBorderBrush = $sync.Form.Resources['Accent']
+    $lockedBorderBrush = $sync.Form.Resources['BorderSoft']
+    $readyBorderBrush = $sync.Form.Resources['BorderSoft']
+    $primaryTextBrush = $sync.Form.Resources['TextPrimary']
+    $mutedTextBrush = $sync.Form.Resources['TextMuted']
+    $secondaryTextBrush = $sync.Form.Resources['TextSecondary']
+
+    foreach ($phase in $phaseDefinitions) {
+        $card = $sync[$phase.Card]
+        $title = $sync[$phase.Title]
+        $status = $sync[$phase.Status]
+        if (-not $card) { continue }
+        if ([bool]$phase.IsActive) {
+            $card.Background = $activePhaseBrush
+            $card.BorderBrush = $activePhaseBorderBrush
+            if ($title) { $title.Foreground = $primaryTextBrush }
+            if ($status) { $status.Foreground = $secondaryTextBrush; $status.Text = [string]$phase.ActiveText }
+        }
+        elseif ([bool]$phase.IsDone) {
+            $card.Background = $doneBrush
+            $card.BorderBrush = $doneBorderBrush
+            if ($title) { $title.Foreground = $primaryTextBrush }
+            if ($status) { $status.Foreground = $secondaryTextBrush; $status.Text = [string]$phase.DoneText }
+        }
+        elseif (-not [bool]$phase.IsAvailable) {
+            $card.Background = $lockedBrush
+            $card.BorderBrush = $lockedBorderBrush
+            if ($title) { $title.Foreground = $mutedTextBrush }
+            if ($status) { $status.Foreground = $mutedTextBrush; $status.Text = [string]$phase.LockedText }
+        }
+        else {
+            $card.Background = $readyBrush
+            $card.BorderBrush = $readyBorderBrush
+            if ($title) { $title.Foreground = $primaryTextBrush }
+            if ($status) { $status.Foreground = $mutedTextBrush; $status.Text = [string]$phase.ReadyText }
+        }
     }
 
     if ($sync.WPFBackStep) {
@@ -1695,6 +1801,7 @@ function Update-EbgUIState {
         }
     }
 }
+
 function Write-EbgLog {
     [CmdletBinding()]
     param(
@@ -2875,19 +2982,51 @@ $inputXML = @'
                 <RowDefinition Height="*"/>
                 <RowDefinition Height="Auto"/>
             </Grid.RowDefinitions>
-            <Border Grid.Row="0" Visibility="Collapsed">
-                <StackPanel>
-                    <Button x:Name="WPFStepWelcome" Content="1. Velkommen" Margin="0,0,8,0"/>
+            <StackPanel Grid.Row="0" Margin="34,16,34,0">
+                <UniformGrid Columns="5">
+                    <Border x:Name="WPFPhasePrepCard" Background="{StaticResource PanelRaised}" BorderBrush="{StaticResource BorderSoft}" BorderThickness="1" CornerRadius="10" Padding="14,10" Margin="0,0,8,0">
+                        <StackPanel>
+                            <TextBlock x:Name="WPFPhasePrepTitle" Text="Forberedelse" FontWeight="SemiBold"/>
+                            <TextBlock x:Name="WPFPhasePrepStatus" Text="Start, forbindelse, discovery, plan" Foreground="{StaticResource TextMuted}" FontSize="11"/>
+                        </StackPanel>
+                    </Border>
+                    <Border x:Name="WPFPhase1Card" Background="{StaticResource PanelRaised}" BorderBrush="{StaticResource BorderSoft}" BorderThickness="1" CornerRadius="10" Padding="14,10" Margin="0,0,8,0">
+                        <StackPanel>
+                            <TextBlock x:Name="WPFPhase1Title" Text="Phase 1a" FontWeight="SemiBold"/>
+                            <TextBlock x:Name="WPFPhase1Status" Text="Tenant ændringer og TAP" Foreground="{StaticResource TextMuted}" FontSize="11"/>
+                        </StackPanel>
+                    </Border>
+                    <Border x:Name="WPFPhaseManualCard" Background="{StaticResource PanelRaised}" BorderBrush="{StaticResource BorderSoft}" BorderThickness="1" CornerRadius="10" Padding="14,10" Margin="0,0,8,0">
+                        <StackPanel>
+                            <TextBlock x:Name="WPFPhaseManualTitle" Text="Phase 1b" FontWeight="SemiBold"/>
+                            <TextBlock x:Name="WPFPhaseManualStatus" Text="Manuel FIDO2 registrering" Foreground="{StaticResource TextMuted}" FontSize="11"/>
+                        </StackPanel>
+                    </Border>
+                    <Border x:Name="WPFPhase2Card" Background="{StaticResource PanelRaised}" BorderBrush="{StaticResource BorderSoft}" BorderThickness="1" CornerRadius="10" Padding="14,10" Margin="0,0,8,0">
+                        <StackPanel>
+                            <TextBlock x:Name="WPFPhase2Title" Text="Phase 2" FontWeight="SemiBold"/>
+                            <TextBlock x:Name="WPFPhase2Status" Text="AAGUID, auth strength, CA policy" Foreground="{StaticResource TextMuted}" FontSize="11"/>
+                        </StackPanel>
+                    </Border>
+                    <Border x:Name="WPFPhaseHandoffCard" Background="{StaticResource PanelRaised}" BorderBrush="{StaticResource BorderSoft}" BorderThickness="1" CornerRadius="10" Padding="14,10">
+                        <StackPanel>
+                            <TextBlock x:Name="WPFPhaseHandoffTitle" Text="Handoff" FontWeight="SemiBold"/>
+                            <TextBlock x:Name="WPFPhaseHandoffStatus" Text="Rapport og næste steps" Foreground="{StaticResource TextMuted}" FontSize="11"/>
+                        </StackPanel>
+                    </Border>
+                </UniformGrid>
+                <StackPanel Visibility="Collapsed">
+                    <Button x:Name="WPFStepWelcome" Content="1. Start" Margin="0,0,8,0"/>
                     <Button x:Name="WPFStepConnect" Content="2. Forbind" IsEnabled="False" Margin="0,0,8,0"/>
                     <Button x:Name="WPFStepDiscovery" Content="3. Discovery" IsEnabled="False" Margin="0,0,8,0"/>
-                    <Button x:Name="WPFStepConfig" Content="4. Konfiguration" IsEnabled="False" Margin="0,0,8,0"/>
-                    <Button x:Name="WPFStepPlan" Content="5. Plan" IsEnabled="False" Margin="0,0,8,0"/>
-                    <Button x:Name="WPFStepApply" Content="6. Phase 1" IsEnabled="False" Margin="0,0,8,0"/>
-                    <Button x:Name="WPFStepManualFido" Content="7. Manuel FIDO2" IsEnabled="False" Margin="0,0,8,0"/>
+                    <Button x:Name="WPFStepConfig" Content="4. Phase 1 config" IsEnabled="False" Margin="0,0,8,0"/>
+                    <Button x:Name="WPFStepPlan" Content="5. Phase 1 plan" IsEnabled="False" Margin="0,0,8,0"/>
+                    <Button x:Name="WPFStepApply" Content="6. Phase 1a" IsEnabled="False" Margin="0,0,8,0"/>
+                    <Button x:Name="WPFStepManualFido" Content="7. Phase 1b" IsEnabled="False" Margin="0,0,8,0"/>
                     <Button x:Name="WPFStepPhase2" Content="8. Phase 2" IsEnabled="False" Margin="0,0,8,0"/>
                     <Button x:Name="WPFStepHandoff" Content="9. Handoff" IsEnabled="False" Margin="0"/>
                 </StackPanel>
-            </Border>
+            </StackPanel>
 
             <Grid Grid.Row="1" Margin="34,20">
                 <Grid x:Name="WPFPageWelcome">
@@ -3099,7 +3238,10 @@ $inputXML = @'
                         <ColumnDefinition Width="270"/>
                     </Grid.ColumnDefinitions>
                     <Button x:Name="WPFBackStep" Grid.Column="0" Content="Tilbage" MinWidth="240" HorizontalAlignment="Left"/>
-                    <TextBlock x:Name="WPFCurrentStepText" Grid.Column="1" HorizontalAlignment="Center" VerticalAlignment="Center" FontWeight="SemiBold" Foreground="{StaticResource TextSecondary}"/>
+                    <StackPanel Grid.Column="1" HorizontalAlignment="Center" VerticalAlignment="Center">
+                        <TextBlock x:Name="WPFCurrentPhaseText" HorizontalAlignment="Center" FontWeight="SemiBold" Foreground="{StaticResource TextPrimary}"/>
+                        <TextBlock x:Name="WPFCurrentStepText" HorizontalAlignment="Center" Margin="0,3,0,0" FontWeight="SemiBold" Foreground="{StaticResource TextSecondary}"/>
+                    </StackPanel>
                     <Button x:Name="WPFNextStep" Grid.Column="2" Content="Videre" MinWidth="240" HorizontalAlignment="Right"/>
                 </Grid>
             </Border>

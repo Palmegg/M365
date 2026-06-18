@@ -74,13 +74,13 @@ function Update-EbgUIState {
 
     $steps = @('Welcome','Connect','Discovery','Config','Plan','Apply','ManualFido','Phase2','Handoff')
     $titles = @{
-        Welcome = 'Velkommen'
+        Welcome = 'Start'
         Connect = 'Forbind'
         Discovery = 'Discovery'
-        Config = 'Konfiguration'
-        Plan = 'Plan'
+        Config = 'Phase 1 konfiguration'
+        Plan = 'Phase 1 plan'
         Apply = 'Phase 1a'
-        ManualFido = 'Manuel FIDO2'
+        ManualFido = 'Phase 1b manuel FIDO2'
         Phase2 = 'Phase 2'
         Handoff = 'Handoff'
     }
@@ -90,6 +90,112 @@ function Update-EbgUIState {
 
     if ($sync.WPFCurrentStepText) {
         $sync.WPFCurrentStepText.Text = "Step $($index + 1) af $($steps.Count): $($titles[$current])"
+    }
+    if ($sync.WPFCurrentPhaseText) {
+        $phaseLabel = switch ($current) {
+            { $_ -in @('Welcome','Connect','Discovery','Config','Plan') } { 'Forberedelse' }
+            'Apply' { 'Phase 1a - automatiske tenant-ændringer' }
+            'ManualFido' { 'Phase 1b - manuel FIDO2 registrering' }
+            'Phase2' { 'Phase 2 - FIDO2 enforcement forberedes' }
+            'Handoff' { 'Handoff' }
+            default { 'Forberedelse' }
+        }
+        $sync.WPFCurrentPhaseText.Text = "Aktuel fase: $phaseLabel"
+    }
+
+    $phaseDefinitions = @(
+        @{
+            Key='Prep'; Card='WPFPhasePrepCard'; Title='WPFPhasePrepTitle'; Status='WPFPhasePrepStatus'
+            IsActive=($current -in @('Welcome','Connect','Discovery','Config','Plan'))
+            IsDone=($index -gt 4)
+            IsAvailable=$true
+            ActiveText='Aktiv: start, connect, discovery og plan'
+            DoneText='Færdig'
+            LockedText=''
+            ReadyText='Klar'
+        },
+        @{
+            Key='Phase1'; Card='WPFPhase1Card'; Title='WPFPhase1Title'; Status='WPFPhase1Status'
+            IsActive=($current -eq 'Apply')
+            IsDone=$hasPhase1
+            IsAvailable=$hasPlan
+            ActiveText='Aktiv: opretter konti, TAP og CA exclusions'
+            DoneText='Færdig'
+            LockedText='Låst indtil plan er genereret'
+            ReadyText='Klar til kørsel'
+        },
+        @{
+            Key='Manual'; Card='WPFPhaseManualCard'; Title='WPFPhaseManualTitle'; Status='WPFPhaseManualStatus'
+            IsActive=($current -eq 'ManualFido')
+            IsDone=($current -in @('Phase2','Handoff'))
+            IsAvailable=$hasPhase1
+            ActiveText='Aktiv: registrer 2 FIDO2 keys pr. konto'
+            DoneText='Færdig eller bekræftet'
+            LockedText='Låst indtil Phase 1a er færdig'
+            ReadyText='Klar efter Phase 1a'
+        },
+        @{
+            Key='Phase2'; Card='WPFPhase2Card'; Title='WPFPhase2Title'; Status='WPFPhase2Status'
+            IsActive=($current -eq 'Phase2')
+            IsDone=($current -eq 'Handoff' -and $hasHandoff)
+            IsAvailable=$hasPhase1
+            ActiveText='Aktiv: AAGUID, auth strength og disabled CA policy'
+            DoneText='Færdig'
+            LockedText='Låst indtil FIDO2 er registreret manuelt'
+            ReadyText='Klar efter manuel FIDO2'
+        },
+        @{
+            Key='Handoff'; Card='WPFPhaseHandoffCard'; Title='WPFPhaseHandoffTitle'; Status='WPFPhaseHandoffStatus'
+            IsActive=($current -eq 'Handoff')
+            IsDone=$false
+            IsAvailable=$hasHandoff
+            ActiveText='Aktiv: rapport og næste steps'
+            DoneText='Færdig'
+            LockedText='Låst indtil rapport er genereret'
+            ReadyText='Klar'
+        }
+    )
+    $doneBrush = $sync.Form.Resources['AccentSoft']
+    $activePhaseBrush = $sync.Form.Resources['ButtonHoverBackground']
+    $lockedBrush = $sync.Form.Resources['ButtonDisabledBackground']
+    $readyBrush = $sync.Form.Resources['PanelRaised']
+    $doneBorderBrush = $sync.Form.Resources['Accent']
+    $activePhaseBorderBrush = $sync.Form.Resources['Accent']
+    $lockedBorderBrush = $sync.Form.Resources['BorderSoft']
+    $readyBorderBrush = $sync.Form.Resources['BorderSoft']
+    $primaryTextBrush = $sync.Form.Resources['TextPrimary']
+    $mutedTextBrush = $sync.Form.Resources['TextMuted']
+    $secondaryTextBrush = $sync.Form.Resources['TextSecondary']
+
+    foreach ($phase in $phaseDefinitions) {
+        $card = $sync[$phase.Card]
+        $title = $sync[$phase.Title]
+        $status = $sync[$phase.Status]
+        if (-not $card) { continue }
+        if ([bool]$phase.IsActive) {
+            $card.Background = $activePhaseBrush
+            $card.BorderBrush = $activePhaseBorderBrush
+            if ($title) { $title.Foreground = $primaryTextBrush }
+            if ($status) { $status.Foreground = $secondaryTextBrush; $status.Text = [string]$phase.ActiveText }
+        }
+        elseif ([bool]$phase.IsDone) {
+            $card.Background = $doneBrush
+            $card.BorderBrush = $doneBorderBrush
+            if ($title) { $title.Foreground = $primaryTextBrush }
+            if ($status) { $status.Foreground = $secondaryTextBrush; $status.Text = [string]$phase.DoneText }
+        }
+        elseif (-not [bool]$phase.IsAvailable) {
+            $card.Background = $lockedBrush
+            $card.BorderBrush = $lockedBorderBrush
+            if ($title) { $title.Foreground = $mutedTextBrush }
+            if ($status) { $status.Foreground = $mutedTextBrush; $status.Text = [string]$phase.LockedText }
+        }
+        else {
+            $card.Background = $readyBrush
+            $card.BorderBrush = $readyBorderBrush
+            if ($title) { $title.Foreground = $primaryTextBrush }
+            if ($status) { $status.Foreground = $mutedTextBrush; $status.Text = [string]$phase.ReadyText }
+        }
     }
 
     if ($sync.WPFBackStep) {
