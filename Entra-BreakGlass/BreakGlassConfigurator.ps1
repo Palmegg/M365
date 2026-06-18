@@ -1945,7 +1945,7 @@ function Update-EbgUIState {
     }
 
     if ($sync.WPFStopDiscovery) {
-        $sync.WPFStopDiscovery.IsEnabled = [bool]$sync.UI.ProcessRunning -and ([string]$sync.UI.CurrentStep -eq 'Discovery')
+        $sync.WPFStopDiscovery.IsEnabled = $false
     }
     if ($sync.WPFRunDiscovery) {
         $sync.WPFRunDiscovery.IsEnabled = -not [bool]$sync.UI.ProcessRunning
@@ -2538,26 +2538,54 @@ function Invoke-EbgDiscovery {
         [System.Windows.MessageBox]::Show("Du skal først forbinde til Microsoft Graph under trinnet 'Forbind'.", $sync.App.Name, 'OK', 'Warning') | Out-Null
         return
     }
-    $config = Get-EbgConfigFromUI
-    Invoke-EbgRunspace -ArgumentList @($config) -ScriptBlock {
-        param($config)
+    if ($sync.UI.ProcessRunning) {
+        [System.Windows.MessageBox]::Show('Der kører allerede en opgave. Vent til den er færdig.', $sync.App.Name, 'OK', 'Information') | Out-Null
+        return
+    }
+
+    $sync.UI.ProcessRunning = $true
+    $sync.UI.StopRequested = $false
+    if ($sync.WPFRunDiscovery) { $sync.WPFRunDiscovery.IsEnabled = $false }
+    if ($sync.WPFStopDiscovery) { $sync.WPFStopDiscovery.IsEnabled = $false }
+    if ($sync.WPFProgressBar) { $sync.WPFProgressBar.IsIndeterminate = $true }
+
+    try {
+        $config = Get-EbgConfigFromUI
         Write-EbgStatus -Busy -Message 'Kører discovery...'
+        [System.Windows.Forms.Application]::DoEvents()
+
         Ensure-EbgGraphContext
+        [System.Windows.Forms.Application]::DoEvents()
+
         Write-EbgStatus -Busy -Message 'Discovery: henter tenant information...'
+        [System.Windows.Forms.Application]::DoEvents()
         $tenant = Get-EbgTenantInfo
+
         $upn1 = ConvertTo-BreakGlassUpn -Prefix $config.UserPrefix1 -OnMicrosoftDomain $tenant.OnMicrosoftDomain
         $upn2 = ConvertTo-BreakGlassUpn -Prefix $config.UserPrefix2 -OnMicrosoftDomain $tenant.OnMicrosoftDomain
+
         Write-EbgStatus -Busy -Message "Discovery: tjekker target user 1 ($upn1)..."
+        [System.Windows.Forms.Application]::DoEvents()
         $user1 = Get-EbgUserByUpn -UserPrincipalName $upn1
+
         Write-EbgStatus -Busy -Message "Discovery: tjekker target user 2 ($upn2)..."
+        [System.Windows.Forms.Application]::DoEvents()
         $user2 = Get-EbgUserByUpn -UserPrincipalName $upn2
+
         Write-EbgStatus -Busy -Message "Discovery: tjekker security group ($($config.GroupName))..."
+        [System.Windows.Forms.Application]::DoEvents()
         $group = Get-EbgGroupByDisplayName -DisplayName $config.GroupName
+
         Write-EbgStatus -Busy -Message 'Discovery: henter Conditional Access policies...'
+        [System.Windows.Forms.Application]::DoEvents()
         $policies = @(Get-EbgConditionalAccessPolicies)
+
         Write-EbgStatus -Busy -Message 'Discovery: henter aktive Global Administrator assignments...'
+        [System.Windows.Forms.Application]::DoEvents()
         $activeGlobalAdmins = @(Get-EbgActiveGlobalAdministrators)
+
         Write-EbgStatus -Busy -Message 'Discovery: analyserer CA exclusions...'
+        [System.Windows.Forms.Application]::DoEvents()
         $already = @()
         $groupId = [string](Get-EbgObjectPropertyValue -InputObject $group -Name 'id')
         if ($group -and $groupId) {
@@ -2566,6 +2594,7 @@ function Invoke-EbgDiscovery {
                 if ($excludeGroups -contains $groupId) { $already += $policy }
             }
         }
+
         $discovery = [pscustomobject]@{
             Tenant = $tenant
             User1 = $user1
@@ -2619,38 +2648,50 @@ function Invoke-EbgDiscovery {
                 Text = " - GA: $([string](Get-EbgObjectPropertyValue -InputObject $admin -Name 'displayName')) <$([string](Get-EbgObjectPropertyValue -InputObject $admin -Name 'userPrincipalName'))>"
             }
         }
-        $sync.Form.Dispatcher.Invoke([System.Action]{
-            $sync.WPFDiscoverySummary.Text = $summary
-            $sync.WPFDiscoverySummary.Foreground = switch ($summarySeverity) {
+
+        $sync.WPFDiscoverySummary.Text = $summary
+        $sync.WPFDiscoverySummary.Foreground = switch ($summarySeverity) {
+            'Good' { [System.Windows.Media.Brushes]::ForestGreen }
+            'Warning' { [System.Windows.Media.Brushes]::DarkOrange }
+            'Bad' { [System.Windows.Media.Brushes]::Firebrick }
+            default { [System.Windows.Media.Brushes]::Black }
+        }
+        $document = New-Object System.Windows.Documents.FlowDocument
+        foreach ($line in $lines) {
+            $paragraph = New-Object System.Windows.Documents.Paragraph
+            $prefix = switch ($line.Severity) {
+                'Good' { '[OK] ' }
+                'Warning' { '[ADVARSEL] ' }
+                'Bad' { '[FEJL] ' }
+                default { '[INFO] ' }
+            }
+            $run = New-Object System.Windows.Documents.Run ($prefix + $line.Text)
+            $run.Foreground = switch ($line.Severity) {
                 'Good' { [System.Windows.Media.Brushes]::ForestGreen }
                 'Warning' { [System.Windows.Media.Brushes]::DarkOrange }
                 'Bad' { [System.Windows.Media.Brushes]::Firebrick }
-                default { [System.Windows.Media.Brushes]::Black }
+                default { [System.Windows.Media.Brushes]::SlateGray }
             }
-            $document = New-Object System.Windows.Documents.FlowDocument
-            foreach ($line in $lines) {
-                $paragraph = New-Object System.Windows.Documents.Paragraph
-                $prefix = switch ($line.Severity) {
-                    'Good' { '[OK] ' }
-                    'Warning' { '[ADVARSEL] ' }
-                    'Bad' { '[FEJL] ' }
-                    default { '[INFO] ' }
-                }
-                $run = New-Object System.Windows.Documents.Run ($prefix + $line.Text)
-                $run.Foreground = switch ($line.Severity) {
-                    'Good' { [System.Windows.Media.Brushes]::ForestGreen }
-                    'Warning' { [System.Windows.Media.Brushes]::DarkOrange }
-                    'Bad' { [System.Windows.Media.Brushes]::Firebrick }
-                    default { [System.Windows.Media.Brushes]::SlateGray }
-                }
-                $run.FontWeight = if ($line.Severity -eq 'Info') { [System.Windows.FontWeights]::Normal } else { [System.Windows.FontWeights]::SemiBold }
-                [void]$paragraph.Inlines.Add($run)
-                [void]$document.Blocks.Add($paragraph)
-            }
-            $sync.WPFDiscoveryList.Document = $document
-            Invoke-EbgWPFButton -Name 'WPFStepDiscovery'
-        })
+            $run.FontWeight = if ($line.Severity -eq 'Info') { [System.Windows.FontWeights]::Normal } else { [System.Windows.FontWeights]::SemiBold }
+            [void]$paragraph.Inlines.Add($run)
+            [void]$document.Blocks.Add($paragraph)
+        }
+        $sync.WPFDiscoveryList.Document = $document
+        Invoke-EbgWPFButton -Name 'WPFStepDiscovery'
         Write-EbgStatus -Message 'Discovery er færdig.'
+    }
+    catch {
+        $message = ConvertTo-EbgRedactedError -ErrorRecord $_
+        Write-EbgLog -Level ERROR -Message $message
+        Write-EbgStatus -Message 'Discovery fejlede.'
+        [System.Windows.MessageBox]::Show($message, $sync.App.Name, 'OK', 'Error') | Out-Null
+    }
+    finally {
+        $sync.UI.ProcessRunning = $false
+        if ($sync.WPFProgressBar) { $sync.WPFProgressBar.IsIndeterminate = $false }
+        if ($sync.WPFRunDiscovery) { $sync.WPFRunDiscovery.IsEnabled = $true }
+        if ($sync.WPFStopDiscovery) { $sync.WPFStopDiscovery.IsEnabled = $false }
+        Update-EbgUIState | Out-Null
     }
 }
 
@@ -2865,7 +2906,7 @@ function Stop-EbgCurrentTask {
 $sync.configs.appsettings = @'
 {
   "name": "Entra Break Glass Configurator",
-  "version": "2.4.2",
+  "version": "2.4.3",
   "outputRoot": ".\\Output",
   "groupName": "CA-BreakGlass-Exclude",
   "groupDescription": "Security group used to exclude dedicated break-glass accounts from existing Conditional Access policies.",
@@ -3370,7 +3411,7 @@ $inputXML = @'
                             <TextBlock Text="Discovery er read-only og viser aktive Global Administrator-konti, de aktuelle target UPNs, CA-BreakGlass-Exclude og eksisterende Conditional Access-politikker."/>
                             <StackPanel Orientation="Horizontal" Margin="0,14,0,8">
                                 <Button x:Name="WPFRunDiscovery" Content="Kør discovery" Width="150" HorizontalAlignment="Left"/>
-                                <Button x:Name="WPFStopDiscovery" Content="Stop discovery" Width="150" HorizontalAlignment="Left" Margin="10,0,0,0" IsEnabled="False"/>
+                                <Button x:Name="WPFStopDiscovery" Content="Stop discovery" Width="150" HorizontalAlignment="Left" Margin="10,0,0,0" IsEnabled="False" Visibility="Collapsed"/>
                             </StackPanel>
                             <TextBlock x:Name="WPFDiscoverySummary" FontWeight="SemiBold"/>
                         </StackPanel>

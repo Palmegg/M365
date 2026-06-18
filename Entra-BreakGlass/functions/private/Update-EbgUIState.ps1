@@ -219,7 +219,7 @@ function Update-EbgUIState {
     }
 
     if ($sync.WPFStopDiscovery) {
-        $sync.WPFStopDiscovery.IsEnabled = [bool]$sync.UI.ProcessRunning -and ([string]$sync.UI.CurrentStep -eq 'Discovery')
+        $sync.WPFStopDiscovery.IsEnabled = $false
     }
     if ($sync.WPFRunDiscovery) {
         $sync.WPFRunDiscovery.IsEnabled = -not [bool]$sync.UI.ProcessRunning

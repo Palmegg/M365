@@ -11,7 +11,7 @@ PowerShell 7/WPF værktøj til en simpel Microsoft Graph-baseret v1 opsætning a
 - WPF-vinduet minimeres kort mens Microsoft Graph-login åbnes, så Microsofts loginvindue ikke skjules bag konfiguratoren. Efter login restore'r værktøjet WPF-vinduet.
 - Background-steps sikrer aktiv Graph context i worker-runspace før Graph-kald. Discovery viser løbende hvilket Graph-step der køres.
 - Background-runspace kører som STA, så Microsoft Graph PowerShell ikke hænger på Graph requests efter WPF-login.
-- Discovery-siden har en stopknap, der forsøger at afbryde den aktuelle baggrundsworker og nulstille progress/status.
+- Discovery kører på WPF/UI-runspacet, fordi Microsoft Graph PowerShell i nogle tenants hænger på det første Graph-kald fra background-runspace. UI-status opdateres mellem hvert Graph-kald.
 - Finder tenantens `*.onmicrosoft.com` domæne.
 - Kontrollerer de eksakte target UPNs for to break-glass konti.
 - Phase 1a opretter manglende cloud-only brugere, hvis valgt.

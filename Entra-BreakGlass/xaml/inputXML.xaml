@@ -434,7 +434,7 @@
                             <TextBlock Text="Discovery er read-only og viser aktive Global Administrator-konti, de aktuelle target UPNs, CA-BreakGlass-Exclude og eksisterende Conditional Access-politikker."/>
                             <StackPanel Orientation="Horizontal" Margin="0,14,0,8">
                                 <Button x:Name="WPFRunDiscovery" Content="Kør discovery" Width="150" HorizontalAlignment="Left"/>
-                                <Button x:Name="WPFStopDiscovery" Content="Stop discovery" Width="150" HorizontalAlignment="Left" Margin="10,0,0,0" IsEnabled="False"/>
+                                <Button x:Name="WPFStopDiscovery" Content="Stop discovery" Width="150" HorizontalAlignment="Left" Margin="10,0,0,0" IsEnabled="False" Visibility="Collapsed"/>
                             </StackPanel>
                             <TextBlock x:Name="WPFDiscoverySummary" FontWeight="SemiBold"/>
                         </StackPanel>
