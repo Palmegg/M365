@@ -35,6 +35,7 @@ function New-EbgPlanObject {
     if ($Config.DisableAdminSSPR) { $warnings += 'Administrator-SSPR deaktiveres tenant-wide og kan tage op til 60 minutter at slå igennem.' }
     $warnings += 'Phase 1 opretter Temporary Access Pass for begge konti: one-time use = No, duration = 2 hours.'
     $warnings += 'Phase 1 sikrer at FIDO2/passkey Authentication Method policy er enabled for CA-BreakGlass-Exclude, så kontiene kan registrere security keys.'
+    $warnings += 'Phase 1 ekskluderer CA-BreakGlass-Exclude fra Authentication Methods registration campaign, så break-glass konti ikke nudges til ekstra metoder.'
     $warnings += 'Phase 1b kræver manuel registrering af to FIDO2 security keys pr. konto.'
     $warnings += 'Phase 2 opretter/opdaterer BreakGlass-FIDO2 authentication strength og en dedikeret CA-policy som disabled.'
     if ($Config.PatchCAPolicies) { $warnings += 'Eksisterende Conditional Access-politikker ændres. Backup oprettes før ændringer.' }
@@ -63,6 +64,7 @@ function New-EbgPlanObject {
         AuthenticationStrengthAAGUIDs = @($Config.AAGUIDs)
         TemporaryAccessPassStatus    = 'Phase 1: oprettes for begge konti, genanvendelig i 2 timer'
         Fido2AuthenticationMethodPolicyStatus = 'Phase 1: enables FIDO2/passkey for CA-BreakGlass-Exclude'
+        RegistrationCampaignStatus = 'Phase 1: excludes CA-BreakGlass-Exclude from authentication methods registration campaign'
         AuthenticationStrengthStatus = if (@($Config.AAGUIDs).Count -gt 0) { 'Phase 2: oprettes/opdateres med angivne + fundne AAGUIDs' } else { 'Phase 2: oprettes/opdateres efter automatisk AAGUID refresh' }
         BreakGlassCAPolicyName    = $Config.BreakGlassCAPolicyName
         BreakGlassCAPolicyStatus  = 'Phase 2: oprettes disabled og tildeles direkte til de 2 konti'

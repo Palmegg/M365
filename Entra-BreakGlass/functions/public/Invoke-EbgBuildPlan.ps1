@@ -52,6 +52,7 @@ Administrator-SSPR enabled nu: $($plan.CurrentAdminSSPREnabled)
 Administrator-SSPR plan: $($plan.PlannedAdminSSPRStatus)
 Temporary Access Pass: $($plan.TemporaryAccessPassStatus)
 FIDO2/passkey method policy: $($plan.Fido2AuthenticationMethodPolicyStatus)
+Registration campaign: $($plan.RegistrationCampaignStatus)
 
 Authentication strength: $($plan.AuthenticationStrengthName) / $($plan.AuthenticationStrengthStatus)
 AAGUIDs: $(@($plan.AuthenticationStrengthAAGUIDs) -join ', ')

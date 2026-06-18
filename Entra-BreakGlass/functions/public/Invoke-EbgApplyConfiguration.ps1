@@ -29,7 +29,7 @@ Phase 1a udfører:
 4. Opretter Temporary Access Pass: one-time use = No, duration = 2 hours
 5. Tildeler direkte Global Administrator rolle
 6. Melder konti ind i exclude-gruppen
-7. Aktiverer FIDO2/passkey for exclude-gruppen
+7. Aktiverer FIDO2/passkey for exclude-gruppen og ekskluderer den fra registration campaign
 8. Ekskluderer gruppen fra eksisterende CA policies: $($config.PatchCAPolicies)
 
 Admin SSPR kan tage op til 60 minutter før ændringen slår igennem.
@@ -164,11 +164,13 @@ Vil du fortsætte?
             $membership += [pscustomobject]@{ Status='Skipped'; Detail='Gruppemedlemskab er fravalgt.' }
         }
 
-        Write-EbgLog -Message 'Phase 1a step 8/11: Sikrer FIDO2/passkey Authentication Method policy for exclude-gruppen...'
-        Write-EbgStatus -Busy -Message 'Phase 1a step 8/11: aktiverer FIDO2/passkey for exclude-gruppen...'
+        Write-EbgLog -Message 'Phase 1a step 8/11: Sikrer FIDO2/passkey policy og registration campaign exclusion for exclude-gruppen...'
+        Write-EbgStatus -Busy -Message 'Phase 1a step 8/11: aktiverer FIDO2/passkey og fjerner registration nudge...'
         [System.Windows.Forms.Application]::DoEvents()
         $fido2MethodPolicy = Ensure-EbgFido2AuthenticationMethodPolicy -Group $group -Apply $true
         Write-EbgLog -Level PASS -Message "FIDO2/passkey policy håndteret: $($fido2MethodPolicy.Status)"
+        $registrationCampaign = Ensure-EbgRegistrationCampaignExclusion -Group $group -Apply $true
+        Write-EbgLog -Level PASS -Message "Registration campaign håndteret: $($registrationCampaign.Status)"
 
         Write-EbgLog -Message 'Phase 1a step 9/11: Henter eksisterende Conditional Access policies...'
         Write-EbgStatus -Busy -Message 'Phase 1a step 9/11: henter eksisterende Conditional Access policies...'
@@ -234,6 +236,7 @@ Vil du fortsætte?
             Group = [pscustomobject]@{ DisplayName=$groupDisplayName; Id=$groupId; Status=$groupStatus }
             GroupMembership = $membership
             Fido2AuthenticationMethodPolicy = $fido2MethodPolicy
+            RegistrationCampaign = $registrationCampaign
             RoleAssignments = $roleAssignments
             AdminSSPR = $adminSSPRResult
             TemporaryAccessPassSummary = @($temporaryAccessPasses | ForEach-Object {
@@ -255,6 +258,7 @@ Vil du fortsætte?
             Warnings = @(
                 'Phase 1b: Log ind på begge break-glass konti med TAP og registrer to FIDO2 security keys pr. konto.'
                 'FIDO2/passkey Authentication Method policy er enabled for CA-BreakGlass-Exclude, så kontiene kan registrere security keys.'
+                'CA-BreakGlass-Exclude er ekskluderet fra Authentication Methods registration campaign, så kontiene ikke nudges til ekstra metoder.'
                 'Admin SSPR ændringer kan tage op til 60 minutter før de slår igennem.'
             )
         }

@@ -53,6 +53,7 @@ Describe 'Ebg-BreakGlass basic functions' {
         if ($plan.PlannedAdminSSPRStatus -ne 'Deaktiveres') { throw "Unexpected Admin SSPR plan: $($plan.PlannedAdminSSPRStatus)" }
         if ($plan.TemporaryAccessPassStatus -ne 'Phase 1: oprettes for begge konti, genanvendelig i 2 timer') { throw "Unexpected TAP plan: $($plan.TemporaryAccessPassStatus)" }
         if ($plan.Fido2AuthenticationMethodPolicyStatus -ne 'Phase 1: enables FIDO2/passkey for CA-BreakGlass-Exclude') { throw "Unexpected FIDO2 method policy plan: $($plan.Fido2AuthenticationMethodPolicyStatus)" }
+        if ($plan.RegistrationCampaignStatus -ne 'Phase 1: excludes CA-BreakGlass-Exclude from authentication methods registration campaign') { throw "Unexpected registration campaign plan: $($plan.RegistrationCampaignStatus)" }
         if ($plan.AuthenticationStrengthStatus -ne 'Phase 2: oprettes/opdateres med angivne + fundne AAGUIDs') { throw "Unexpected auth strength plan: $($plan.AuthenticationStrengthStatus)" }
         if ($plan.BreakGlassCAPolicyStatus -ne 'Phase 2: oprettes disabled og tildeles direkte til de 2 konti') { throw "Unexpected BG CA plan: $($plan.BreakGlassCAPolicyStatus)" }
     }
@@ -140,6 +141,13 @@ Describe 'Ebg-BreakGlass basic functions' {
         if ($result.TargetGroupId -ne 'mock-ca-exclude-group') { throw "Unexpected FIDO2 method policy target: $($result.TargetGroupId)" }
     }
 
+    It 'excludes group from authentication methods registration campaign in mock mode' {
+        $group = @{ id = 'mock-ca-exclude-group'; displayName = 'CA-BreakGlass-Exclude' }
+        $result = Ensure-EbgRegistrationCampaignExclusion -Group $group -Apply $true
+        if ($result.Status -ne 'Excluded') { throw "Unexpected registration campaign status: $($result.Status)" }
+        if ($result.TargetGroupId -ne 'mock-ca-exclude-group') { throw "Unexpected registration campaign target: $($result.TargetGroupId)" }
+    }
+
     It 'reads properties case-insensitively without numeric index binding' {
         $user = @{ id = 'mock-user-3'; userPrincipalName = 'svc_ea_03@contoso.onmicrosoft.com' }
         $upn = Get-EbgObjectPropertyValue -InputObject $user -Name 'UserPrincipalName'
@@ -158,6 +166,7 @@ Describe 'Ebg-BreakGlass basic functions' {
             Account2 = @{ DisplayName = 'Master Player'; UserPrincipalName = 'svc_ea_02@contoso.onmicrosoft.com'; Status = 'Created' }
             Group = @{ DisplayName = 'CA-BreakGlass-Exclude'; Id = 'group-id'; Status = 'Created' }
             Fido2AuthenticationMethodPolicy = @{ displayName = 'FIDO2/passkey authentication method policy'; state = 'enabled'; TargetGroupName = 'CA-BreakGlass-Exclude'; Status = 'Updated'; Detail = 'FIDO2/passkey enabled for group CA-BreakGlass-Exclude.' }
+            RegistrationCampaign = @{ TargetGroupName = 'CA-BreakGlass-Exclude'; Status = 'Excluded'; Detail = 'Group CA-BreakGlass-Exclude is excluded from authentication methods registration campaign.' }
             GroupMembership = @(@{ UserPrincipalName = 'svc_ea_01@contoso.onmicrosoft.com'; Group = 'CA-BreakGlass-Exclude'; Status = 'Added' })
             RoleAssignments = @(@{ UserPrincipalName = 'svc_ea_01@contoso.onmicrosoft.com'; Role = 'Global Administrator'; Scope = '/'; Status = 'Assigned' })
             AdminSSPR = @{ Setting = 'allowedToUseSSPR'; PreviousValue = $true; DesiredValue = $false; Status = 'Disabled'; Detail = 'Policy changes can take up to 60 minutes to take effect.' }
@@ -178,6 +187,7 @@ Describe 'Ebg-BreakGlass basic functions' {
         if ($html -notmatch 'Global Administrator') { throw 'Handoff missing Global Administrator assignment.' }
         if ($html -notmatch 'allowedToUseSSPR') { throw 'Handoff missing Admin SSPR result.' }
         if ($html -notmatch 'BreakGlass-FIDO2') { throw 'Handoff missing authentication strength result.' }
+        if ($html -notmatch 'Authentication Methods registration campaign') { throw 'Handoff missing registration campaign result.' }
         if ($html -notmatch 'a4e9fc6d-4cbe-4758-b8ba-37598bb5bbaa') { throw 'Handoff missing AAGUID.' }
     }
 }

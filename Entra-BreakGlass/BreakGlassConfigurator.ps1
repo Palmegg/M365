@@ -748,6 +748,118 @@ function Ensure-EbgGroupMember {
         throw
     }
 }
+function Ensure-EbgRegistrationCampaignExclusion {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)] $Group,
+        [Parameter(Mandatory)][bool] $Apply
+    )
+
+    $groupId = [string](Get-EbgObjectPropertyValue -InputObject $Group -Name 'id')
+    $groupName = [string](Get-EbgObjectPropertyValue -InputObject $Group -Name 'displayName')
+    if ([string]::IsNullOrWhiteSpace($groupId)) {
+        throw 'Kan ikke ekskludere fra registration campaign, fordi CA-BreakGlass-Exclude gruppen mangler Object ID.'
+    }
+
+    if (-not $Apply -or $sync.App.Mock) {
+        return [pscustomobject]@{
+            id = 'authenticationMethodsRegistrationCampaign'
+            TargetGroupId = $groupId
+            TargetGroupName = $groupName
+            Status = if ($Apply) { 'Excluded' } else { 'PlannedExclude' }
+            Detail = "Group $groupName is excluded from authentication methods registration campaign."
+        }
+    }
+
+    $policy = Get-EbgAuthenticationMethodsPolicy
+    $registrationEnforcement = Get-EbgObjectPropertyValue -InputObject $policy -Name 'registrationEnforcement'
+    $campaign = Get-EbgObjectPropertyValue -InputObject $registrationEnforcement -Name 'authenticationMethodsRegistrationCampaign'
+    if (-not $campaign) {
+        return [pscustomobject]@{
+            id = 'authenticationMethodsRegistrationCampaign'
+            TargetGroupId = $groupId
+            TargetGroupName = $groupName
+            Status = 'NotConfigured'
+            Detail = 'Authentication methods registration campaign was not present on the tenant policy.'
+        }
+    }
+
+    $includeTargets = @()
+    foreach ($target in @(Get-EbgObjectPropertyValue -InputObject $campaign -Name 'includeTargets')) {
+        $targetId = [string](Get-EbgObjectPropertyValue -InputObject $target -Name 'id')
+        if ([string]::IsNullOrWhiteSpace($targetId)) { continue }
+        $item = @{
+            id = $targetId
+            targetType = [string](Get-EbgObjectPropertyValue -InputObject $target -Name 'targetType')
+        }
+        $method = [string](Get-EbgObjectPropertyValue -InputObject $target -Name 'targetedAuthenticationMethod')
+        if (-not [string]::IsNullOrWhiteSpace($method)) {
+            $item.targetedAuthenticationMethod = $method
+        }
+        $includeTargets += $item
+    }
+
+    $excludeTargets = @()
+    $alreadyExcluded = $false
+    foreach ($target in @(Get-EbgObjectPropertyValue -InputObject $campaign -Name 'excludeTargets')) {
+        $targetId = [string](Get-EbgObjectPropertyValue -InputObject $target -Name 'id')
+        if ([string]::IsNullOrWhiteSpace($targetId)) { continue }
+        if ([string]::Equals($targetId, $groupId, [System.StringComparison]::OrdinalIgnoreCase)) {
+            $alreadyExcluded = $true
+        }
+        $targetType = [string](Get-EbgObjectPropertyValue -InputObject $target -Name 'targetType')
+        if ([string]::IsNullOrWhiteSpace($targetType)) { $targetType = 'group' }
+        $excludeTargets += @{
+            id = $targetId
+            targetType = $targetType
+        }
+    }
+
+    if ($alreadyExcluded) {
+        return [pscustomobject]@{
+            id = 'authenticationMethodsRegistrationCampaign'
+            TargetGroupId = $groupId
+            TargetGroupName = $groupName
+            Status = 'AlreadyExcluded'
+            Detail = "Group $groupName is already excluded from authentication methods registration campaign."
+        }
+    }
+
+    $excludeTargets += @{
+        id = $groupId
+        targetType = 'group'
+    }
+
+    $campaignBody = @{
+        includeTargets = @($includeTargets)
+        excludeTargets = @($excludeTargets)
+    }
+
+    $state = [string](Get-EbgObjectPropertyValue -InputObject $campaign -Name 'state')
+    if (-not [string]::IsNullOrWhiteSpace($state)) { $campaignBody.state = $state }
+
+    $snooze = Get-EbgObjectPropertyValue -InputObject $campaign -Name 'snoozeDurationInDays'
+    if ($null -ne $snooze) { $campaignBody.snoozeDurationInDays = $snooze }
+
+    $enforce = Get-EbgObjectPropertyValue -InputObject $campaign -Name 'enforceRegistrationAfterAllowedSnoozes'
+    if ($null -ne $enforce) { $campaignBody.enforceRegistrationAfterAllowedSnoozes = [bool]$enforce }
+
+    Write-EbgLog -Message "Ekskluderer $groupName fra Authentication Methods registration campaign."
+    Invoke-EbgGraphRequest -Method PATCH -Uri 'https://graph.microsoft.com/v1.0/policies/authenticationMethodsPolicy' -Body @{
+        registrationEnforcement = @{
+            authenticationMethodsRegistrationCampaign = $campaignBody
+        }
+    } | Out-Null
+
+    return [pscustomobject]@{
+        id = 'authenticationMethodsRegistrationCampaign'
+        TargetGroupId = $groupId
+        TargetGroupName = $groupName
+        Status = 'Excluded'
+        Detail = "Group $groupName is excluded from authentication methods registration campaign."
+    }
+}
+
 function Ensure-EbgSecurityGroup {
     [CmdletBinding()]
     param(
@@ -846,6 +958,34 @@ function Get-EbgActiveGlobalAdministrators {
 
     return @($admins | Sort-Object userPrincipalName -Unique)
 }
+function Get-EbgAuthenticationMethodsPolicy {
+    [CmdletBinding()]
+    param()
+
+    if ($sync.App.Mock) {
+        return [pscustomobject]@{
+            id = 'authenticationMethodsPolicy'
+            registrationEnforcement = [pscustomobject]@{
+                authenticationMethodsRegistrationCampaign = [pscustomobject]@{
+                    state = 'enabled'
+                    snoozeDurationInDays = 1
+                    enforceRegistrationAfterAllowedSnoozes = $true
+                    includeTargets = @(
+                        [pscustomobject]@{
+                            id = 'all_users'
+                            targetType = 'group'
+                            targetedAuthenticationMethod = 'microsoftAuthenticator'
+                        }
+                    )
+                    excludeTargets = @()
+                }
+            }
+        }
+    }
+
+    return Invoke-EbgGraphRequest -Method GET -Uri 'https://graph.microsoft.com/v1.0/policies/authenticationMethodsPolicy'
+}
+
 function Get-EbgAuthenticationStrengthByName {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string] $DisplayName)
@@ -1286,6 +1426,7 @@ function New-EbgHandoffHtml {
     $account2 = Get-EbgObjectPropertyValue -InputObject $Result -Name 'Account2'
     $group = Get-EbgObjectPropertyValue -InputObject $Result -Name 'Group'
     $fido2MethodPolicy = Get-EbgObjectPropertyValue -InputObject $Result -Name 'Fido2AuthenticationMethodPolicy'
+    $registrationCampaign = Get-EbgObjectPropertyValue -InputObject $Result -Name 'RegistrationCampaign'
     $changed = @(Get-EbgObjectPropertyValue -InputObject $Result -Name 'CAPoliciesChanged')
     $already = @(Get-EbgObjectPropertyValue -InputObject $Result -Name 'CAPoliciesAlreadyExcluded')
     $failed = @(Get-EbgObjectPropertyValue -InputObject $Result -Name 'CAPoliciesFailed')
@@ -1371,6 +1512,13 @@ function New-EbgHandoffHtml {
     <tr><th>Target group</th><td>$(ConvertTo-EbgHtmlValue (Get-EbgObjectPropertyValue -InputObject $fido2MethodPolicy -Name 'TargetGroupName'))</td></tr>
     <tr><th>Status</th><td>$(ConvertTo-EbgHtmlValue (Get-EbgObjectPropertyValue -InputObject $fido2MethodPolicy -Name 'Status'))</td></tr>
     <tr><th>Detail</th><td>$(ConvertTo-EbgHtmlValue (Get-EbgObjectPropertyValue -InputObject $fido2MethodPolicy -Name 'Detail'))</td></tr>
+  </table>
+  <h2>Authentication Methods registration campaign</h2>
+  <table>
+    <tr><th>Policy</th><td>Authentication Methods registration campaign</td></tr>
+    <tr><th>Target group</th><td>$(ConvertTo-EbgHtmlValue (Get-EbgObjectPropertyValue -InputObject $registrationCampaign -Name 'TargetGroupName'))</td></tr>
+    <tr><th>Status</th><td>$(ConvertTo-EbgHtmlValue (Get-EbgObjectPropertyValue -InputObject $registrationCampaign -Name 'Status'))</td></tr>
+    <tr><th>Detail</th><td>$(ConvertTo-EbgHtmlValue (Get-EbgObjectPropertyValue -InputObject $registrationCampaign -Name 'Detail'))</td></tr>
   </table>
   <h2>Administratorrolle</h2>
   <p>Begge break-glass konti tildeles direkte Global Administrator på tenant scope (/).</p>
@@ -1483,6 +1631,7 @@ function New-EbgPlanObject {
     if ($Config.DisableAdminSSPR) { $warnings += 'Administrator-SSPR deaktiveres tenant-wide og kan tage op til 60 minutter at slå igennem.' }
     $warnings += 'Phase 1 opretter Temporary Access Pass for begge konti: one-time use = No, duration = 2 hours.'
     $warnings += 'Phase 1 sikrer at FIDO2/passkey Authentication Method policy er enabled for CA-BreakGlass-Exclude, så kontiene kan registrere security keys.'
+    $warnings += 'Phase 1 ekskluderer CA-BreakGlass-Exclude fra Authentication Methods registration campaign, så break-glass konti ikke nudges til ekstra metoder.'
     $warnings += 'Phase 1b kræver manuel registrering af to FIDO2 security keys pr. konto.'
     $warnings += 'Phase 2 opretter/opdaterer BreakGlass-FIDO2 authentication strength og en dedikeret CA-policy som disabled.'
     if ($Config.PatchCAPolicies) { $warnings += 'Eksisterende Conditional Access-politikker ændres. Backup oprettes før ændringer.' }
@@ -1511,6 +1660,7 @@ function New-EbgPlanObject {
         AuthenticationStrengthAAGUIDs = @($Config.AAGUIDs)
         TemporaryAccessPassStatus    = 'Phase 1: oprettes for begge konti, genanvendelig i 2 timer'
         Fido2AuthenticationMethodPolicyStatus = 'Phase 1: enables FIDO2/passkey for CA-BreakGlass-Exclude'
+        RegistrationCampaignStatus = 'Phase 1: excludes CA-BreakGlass-Exclude from authentication methods registration campaign'
         AuthenticationStrengthStatus = if (@($Config.AAGUIDs).Count -gt 0) { 'Phase 2: oprettes/opdateres med angivne + fundne AAGUIDs' } else { 'Phase 2: oprettes/opdateres efter automatisk AAGUID refresh' }
         BreakGlassCAPolicyName    = $Config.BreakGlassCAPolicyName
         BreakGlassCAPolicyStatus  = 'Phase 2: oprettes disabled og tildeles direkte til de 2 konti'
@@ -2476,7 +2626,7 @@ Phase 1a udfører:
 4. Opretter Temporary Access Pass: one-time use = No, duration = 2 hours
 5. Tildeler direkte Global Administrator rolle
 6. Melder konti ind i exclude-gruppen
-7. Aktiverer FIDO2/passkey for exclude-gruppen
+7. Aktiverer FIDO2/passkey for exclude-gruppen og ekskluderer den fra registration campaign
 8. Ekskluderer gruppen fra eksisterende CA policies: $($config.PatchCAPolicies)
 
 Admin SSPR kan tage op til 60 minutter før ændringen slår igennem.
@@ -2611,11 +2761,13 @@ Vil du fortsætte?
             $membership += [pscustomobject]@{ Status='Skipped'; Detail='Gruppemedlemskab er fravalgt.' }
         }
 
-        Write-EbgLog -Message 'Phase 1a step 8/11: Sikrer FIDO2/passkey Authentication Method policy for exclude-gruppen...'
-        Write-EbgStatus -Busy -Message 'Phase 1a step 8/11: aktiverer FIDO2/passkey for exclude-gruppen...'
+        Write-EbgLog -Message 'Phase 1a step 8/11: Sikrer FIDO2/passkey policy og registration campaign exclusion for exclude-gruppen...'
+        Write-EbgStatus -Busy -Message 'Phase 1a step 8/11: aktiverer FIDO2/passkey og fjerner registration nudge...'
         [System.Windows.Forms.Application]::DoEvents()
         $fido2MethodPolicy = Ensure-EbgFido2AuthenticationMethodPolicy -Group $group -Apply $true
         Write-EbgLog -Level PASS -Message "FIDO2/passkey policy håndteret: $($fido2MethodPolicy.Status)"
+        $registrationCampaign = Ensure-EbgRegistrationCampaignExclusion -Group $group -Apply $true
+        Write-EbgLog -Level PASS -Message "Registration campaign håndteret: $($registrationCampaign.Status)"
 
         Write-EbgLog -Message 'Phase 1a step 9/11: Henter eksisterende Conditional Access policies...'
         Write-EbgStatus -Busy -Message 'Phase 1a step 9/11: henter eksisterende Conditional Access policies...'
@@ -2681,6 +2833,7 @@ Vil du fortsætte?
             Group = [pscustomobject]@{ DisplayName=$groupDisplayName; Id=$groupId; Status=$groupStatus }
             GroupMembership = $membership
             Fido2AuthenticationMethodPolicy = $fido2MethodPolicy
+            RegistrationCampaign = $registrationCampaign
             RoleAssignments = $roleAssignments
             AdminSSPR = $adminSSPRResult
             TemporaryAccessPassSummary = @($temporaryAccessPasses | ForEach-Object {
@@ -2702,6 +2855,7 @@ Vil du fortsætte?
             Warnings = @(
                 'Phase 1b: Log ind på begge break-glass konti med TAP og registrer to FIDO2 security keys pr. konto.'
                 'FIDO2/passkey Authentication Method policy er enabled for CA-BreakGlass-Exclude, så kontiene kan registrere security keys.'
+                'CA-BreakGlass-Exclude er ekskluderet fra Authentication Methods registration campaign, så kontiene ikke nudges til ekstra metoder.'
                 'Admin SSPR ændringer kan tage op til 60 minutter før de slår igennem.'
             )
         }
@@ -2897,6 +3051,7 @@ Administrator-SSPR enabled nu: $($plan.CurrentAdminSSPREnabled)
 Administrator-SSPR plan: $($plan.PlannedAdminSSPRStatus)
 Temporary Access Pass: $($plan.TemporaryAccessPassStatus)
 FIDO2/passkey method policy: $($plan.Fido2AuthenticationMethodPolicyStatus)
+Registration campaign: $($plan.RegistrationCampaignStatus)
 
 Authentication strength: $($plan.AuthenticationStrengthName) / $($plan.AuthenticationStrengthStatus)
 AAGUIDs: $(@($plan.AuthenticationStrengthAAGUIDs) -join ', ')
@@ -3420,7 +3575,7 @@ function Stop-EbgCurrentTask {
 $sync.configs.appsettings = @'
 {
   "name": "Entra Break Glass Configurator",
-  "version": "2.4.17",
+  "version": "2.4.18",
   "outputRoot": ".\\Output",
   "groupName": "CA-BreakGlass-Exclude",
   "groupDescription": "Security group used to exclude dedicated break-glass accounts from existing Conditional Access policies.",
@@ -3856,7 +4011,7 @@ $inputXML = @'
                                 </ComboBox>
                             </StackPanel>
                             <TextBlock Text="Velkommen" FontSize="22" FontWeight="SemiBold" Margin="0,0,0,12"/>
-                            <TextBlock Text="Værktøjet kører i to faser: Phase 1 opretter break-glass konti, Global Administrator rolle, TAP, CA-exclude gruppe, FIDO2/passkey method policy og CA-exclusions. Derefter logger konsulenten manuelt på kontiene og registrerer FIDO2 keys."/>
+                            <TextBlock Text="Værktøjet kører i to faser: Phase 1 opretter break-glass konti, Global Administrator rolle, TAP, CA-exclude gruppe, FIDO2/passkey method policy, registration campaign exclusion og CA-exclusions. Derefter logger konsulenten manuelt på kontiene og registrerer FIDO2 keys."/>
                             <TextBlock Margin="0,12,0,0" Text="Phase 2 refresher kontiene, læser FIDO2 AAGUIDs, kan slette TAP, opretter BreakGlass-FIDO2 authentication strength og opretter en dedikeret CA-policy som disabled."/>
                             <TextBlock Margin="0,12,0,0" Text="Værktøjet forbinder kun til Microsoft Graph. Det bruger ikke Azure, PIM, RMAU, Log Analytics eller Sentinel."/>
                             <TextBlock Margin="0,12,0,0" Text="Discovery og Plan foretager ingen ændringer. Ændringer udføres først i Phase 1 og Phase 2."/>
@@ -4003,7 +4158,7 @@ $inputXML = @'
                     <DockPanel>
                         <StackPanel DockPanel.Dock="Top">
                             <TextBlock Text="Phase 1a - Grundopsætning" FontSize="22" FontWeight="SemiBold" Margin="0,0,0,12"/>
-                            <TextBlock Text="Dette trin opretter/genbruger CA-BreakGlass-Exclude, de to konti, Global Administrator assignments, Admin SSPR, TAP, gruppemedlemskab, FIDO2/passkey method policy og CA exclusions."/>
+                            <TextBlock Text="Dette trin opretter/genbruger CA-BreakGlass-Exclude, de to konti, Global Administrator assignments, Admin SSPR, TAP, gruppemedlemskab, FIDO2/passkey method policy, registration campaign exclusion og CA exclusions."/>
                             <TextBlock Foreground="#FBBF24" Margin="0,8,0,0" Text="Admin SSPR kan tage op til 60 minutter før ændringen slår igennem. TAP oprettes som genanvendelig i 2 timer."/>
                             <Button x:Name="WPFApplyConfiguration" Content="Kør Phase 1a" Width="180" HorizontalAlignment="Left" Margin="0,14,0,8"/>
                         </StackPanel>

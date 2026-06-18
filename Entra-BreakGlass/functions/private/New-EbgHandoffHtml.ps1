@@ -29,6 +29,7 @@ function New-EbgHandoffHtml {
     $account2 = Get-EbgObjectPropertyValue -InputObject $Result -Name 'Account2'
     $group = Get-EbgObjectPropertyValue -InputObject $Result -Name 'Group'
     $fido2MethodPolicy = Get-EbgObjectPropertyValue -InputObject $Result -Name 'Fido2AuthenticationMethodPolicy'
+    $registrationCampaign = Get-EbgObjectPropertyValue -InputObject $Result -Name 'RegistrationCampaign'
     $changed = @(Get-EbgObjectPropertyValue -InputObject $Result -Name 'CAPoliciesChanged')
     $already = @(Get-EbgObjectPropertyValue -InputObject $Result -Name 'CAPoliciesAlreadyExcluded')
     $failed = @(Get-EbgObjectPropertyValue -InputObject $Result -Name 'CAPoliciesFailed')
@@ -114,6 +115,13 @@ function New-EbgHandoffHtml {
     <tr><th>Target group</th><td>$(ConvertTo-EbgHtmlValue (Get-EbgObjectPropertyValue -InputObject $fido2MethodPolicy -Name 'TargetGroupName'))</td></tr>
     <tr><th>Status</th><td>$(ConvertTo-EbgHtmlValue (Get-EbgObjectPropertyValue -InputObject $fido2MethodPolicy -Name 'Status'))</td></tr>
     <tr><th>Detail</th><td>$(ConvertTo-EbgHtmlValue (Get-EbgObjectPropertyValue -InputObject $fido2MethodPolicy -Name 'Detail'))</td></tr>
+  </table>
+  <h2>Authentication Methods registration campaign</h2>
+  <table>
+    <tr><th>Policy</th><td>Authentication Methods registration campaign</td></tr>
+    <tr><th>Target group</th><td>$(ConvertTo-EbgHtmlValue (Get-EbgObjectPropertyValue -InputObject $registrationCampaign -Name 'TargetGroupName'))</td></tr>
+    <tr><th>Status</th><td>$(ConvertTo-EbgHtmlValue (Get-EbgObjectPropertyValue -InputObject $registrationCampaign -Name 'Status'))</td></tr>
+    <tr><th>Detail</th><td>$(ConvertTo-EbgHtmlValue (Get-EbgObjectPropertyValue -InputObject $registrationCampaign -Name 'Detail'))</td></tr>
   </table>
   <h2>Administratorrolle</h2>
   <p>Begge break-glass konti tildeles direkte Global Administrator på tenant scope (/).</p>
