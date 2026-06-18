@@ -217,4 +217,11 @@ function Update-EbgUIState {
             $sync.WPFNextStep.Content = "Videre til $($titles[$nextStep])"
         }
     }
+
+    if ($sync.WPFStopDiscovery) {
+        $sync.WPFStopDiscovery.IsEnabled = [bool]$sync.UI.ProcessRunning -and ([string]$sync.UI.CurrentStep -eq 'Discovery')
+    }
+    if ($sync.WPFRunDiscovery) {
+        $sync.WPFRunDiscovery.IsEnabled = -not [bool]$sync.UI.ProcessRunning
+    }
 }

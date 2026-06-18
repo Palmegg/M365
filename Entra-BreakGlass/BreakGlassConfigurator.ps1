@@ -76,9 +76,12 @@ $sync.State = [Hashtable]::Synchronized(@{
 })
 
 $sync.UI = [Hashtable]::Synchronized(@{
-    CurrentStep    = 'Velkommen'
-    ProcessRunning = $false
-    ConfigVisited  = $false
+    CurrentStep       = 'Velkommen'
+    ProcessRunning    = $false
+    ConfigVisited     = $false
+    CurrentPowerShell = $null
+    CurrentAsync      = $null
+    StopRequested     = $false
 })
 
 $sync.Paths = @{
@@ -954,6 +957,7 @@ function Invoke-EbgRunspace {
         return
     }
     $sync.UI.ProcessRunning = $true
+    $sync.UI.StopRequested = $false
     if ($sync.WPFProgressBar) {
         [void]$sync.WPFProgressBar.Dispatcher.Invoke([System.Action]{ $sync.WPFProgressBar.IsIndeterminate = $true })
     }
@@ -977,6 +981,8 @@ function Invoke-EbgRunspace {
         }
         finally {
             $sync.UI.ProcessRunning = $false
+            $sync.UI.CurrentPowerShell = $null
+            $sync.UI.CurrentAsync = $null
             if ($sync.Form) {
                 [void]$sync.Form.Dispatcher.Invoke([System.Action]{
                     $sync.WPFProgressBar.IsIndeterminate = $false
@@ -985,8 +991,12 @@ function Invoke-EbgRunspace {
             }
         }
     }).AddArgument($ScriptBlock).AddArgument($ArgumentList) | Out-Null
-    [void]$ps.BeginInvoke()
+    $async = $ps.BeginInvoke()
+    $sync.UI.CurrentPowerShell = $ps
+    $sync.UI.CurrentAsync = $async
+    [void]$async
 }
+
 function New-BreakGlassUser {
     [CmdletBinding()]
     param(
@@ -1933,6 +1943,13 @@ function Update-EbgUIState {
             $sync.WPFNextStep.Content = "Videre til $($titles[$nextStep])"
         }
     }
+
+    if ($sync.WPFStopDiscovery) {
+        $sync.WPFStopDiscovery.IsEnabled = [bool]$sync.UI.ProcessRunning -and ([string]$sync.UI.CurrentStep -eq 'Discovery')
+    }
+    if ($sync.WPFRunDiscovery) {
+        $sync.WPFRunDiscovery.IsEnabled = -not [bool]$sync.UI.ProcessRunning
+    }
 }
 
 function Write-EbgLog {
@@ -2732,6 +2749,7 @@ function Invoke-EbgWPFButton {
         'WPFNextStep' { Move-EbgWPFStep -Direction 1 }
         'WPFConnectTenant' { Invoke-EbgConnectTenant }
         'WPFRunDiscovery' { Invoke-EbgDiscovery }
+        'WPFStopDiscovery' { Stop-EbgCurrentTask }
         'WPFBuildPlan' { Invoke-EbgBuildPlan }
         'WPFApplyConfiguration' { Invoke-EbgApplyConfiguration }
         'WPFApplyPhase2' { Invoke-EbgApplyPhase2 }
@@ -2803,10 +2821,51 @@ function Move-EbgWPFStep {
 
     Set-EbgWPFStep -Step $targetStep
 }
+
+function Stop-EbgCurrentTask {
+    [CmdletBinding()]
+    param()
+
+    $ps = $sync.UI.CurrentPowerShell
+    if (-not $sync.UI.ProcessRunning -or -not $ps) {
+        Write-EbgStatus -Message 'Der kører ingen baggrundsopgave at stoppe.'
+        return
+    }
+
+    $sync.UI.StopRequested = $true
+    Write-EbgStatus -Busy -Message 'Stopper baggrundsopgave...'
+    if ($sync.WPFStopDiscovery) { $sync.WPFStopDiscovery.IsEnabled = $false }
+
+    $targetPowerShell = $ps
+    [System.Threading.ThreadPool]::QueueUserWorkItem([System.Threading.WaitCallback]{
+        param($state)
+
+        try {
+            $state.Stop()
+            Write-EbgStatus -Message 'Baggrundsopgave stoppet.'
+        }
+        catch {
+            Write-EbgLog -Level WARN -Message "Kunne ikke stoppe baggrundsopgaven rent: $($_.Exception.Message)"
+            Write-EbgStatus -Message 'Stop blev sendt, men opgaven svarer ikke endnu.'
+        }
+        finally {
+            $sync.UI.ProcessRunning = $false
+            $sync.UI.CurrentPowerShell = $null
+            $sync.UI.CurrentAsync = $null
+            if ($sync.Form) {
+                [void]$sync.Form.Dispatcher.Invoke([System.Action]{
+                    if ($sync.WPFProgressBar) { $sync.WPFProgressBar.IsIndeterminate = $false }
+                    Update-EbgUIState | Out-Null
+                })
+            }
+        }
+    }, $targetPowerShell) | Out-Null
+}
+
 $sync.configs.appsettings = @'
 {
   "name": "Entra Break Glass Configurator",
-  "version": "2.4.1",
+  "version": "2.4.2",
   "outputRoot": ".\\Output",
   "groupName": "CA-BreakGlass-Exclude",
   "groupDescription": "Security group used to exclude dedicated break-glass accounts from existing Conditional Access policies.",
@@ -3309,7 +3368,10 @@ $inputXML = @'
                         <StackPanel DockPanel.Dock="Top">
                             <TextBlock Text="Discovery" FontSize="22" FontWeight="SemiBold" Margin="0,0,0,12"/>
                             <TextBlock Text="Discovery er read-only og viser aktive Global Administrator-konti, de aktuelle target UPNs, CA-BreakGlass-Exclude og eksisterende Conditional Access-politikker."/>
-                            <Button x:Name="WPFRunDiscovery" Content="Kør discovery" Width="150" HorizontalAlignment="Left" Margin="0,14,0,8"/>
+                            <StackPanel Orientation="Horizontal" Margin="0,14,0,8">
+                                <Button x:Name="WPFRunDiscovery" Content="Kør discovery" Width="150" HorizontalAlignment="Left"/>
+                                <Button x:Name="WPFStopDiscovery" Content="Stop discovery" Width="150" HorizontalAlignment="Left" Margin="10,0,0,0" IsEnabled="False"/>
+                            </StackPanel>
                             <TextBlock x:Name="WPFDiscoverySummary" FontWeight="SemiBold"/>
                         </StackPanel>
                         <RichTextBox x:Name="WPFDiscoveryList" IsReadOnly="True" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" FontFamily="Consolas" BorderBrush="{StaticResource BorderSoft}" BorderThickness="1" Background="#0F1115"/>

@@ -432,7 +432,10 @@
                         <StackPanel DockPanel.Dock="Top">
                             <TextBlock Text="Discovery" FontSize="22" FontWeight="SemiBold" Margin="0,0,0,12"/>
                             <TextBlock Text="Discovery er read-only og viser aktive Global Administrator-konti, de aktuelle target UPNs, CA-BreakGlass-Exclude og eksisterende Conditional Access-politikker."/>
-                            <Button x:Name="WPFRunDiscovery" Content="Kør discovery" Width="150" HorizontalAlignment="Left" Margin="0,14,0,8"/>
+                            <StackPanel Orientation="Horizontal" Margin="0,14,0,8">
+                                <Button x:Name="WPFRunDiscovery" Content="Kør discovery" Width="150" HorizontalAlignment="Left"/>
+                                <Button x:Name="WPFStopDiscovery" Content="Stop discovery" Width="150" HorizontalAlignment="Left" Margin="10,0,0,0" IsEnabled="False"/>
+                            </StackPanel>
                             <TextBlock x:Name="WPFDiscoverySummary" FontWeight="SemiBold"/>
                         </StackPanel>
                         <RichTextBox x:Name="WPFDiscoveryList" IsReadOnly="True" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" FontFamily="Consolas" BorderBrush="{StaticResource BorderSoft}" BorderThickness="1" Background="#0F1115"/>

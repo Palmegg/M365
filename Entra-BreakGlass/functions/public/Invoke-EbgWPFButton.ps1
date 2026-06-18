@@ -16,6 +16,7 @@ function Invoke-EbgWPFButton {
         'WPFNextStep' { Move-EbgWPFStep -Direction 1 }
         'WPFConnectTenant' { Invoke-EbgConnectTenant }
         'WPFRunDiscovery' { Invoke-EbgDiscovery }
+        'WPFStopDiscovery' { Stop-EbgCurrentTask }
         'WPFBuildPlan' { Invoke-EbgBuildPlan }
         'WPFApplyConfiguration' { Invoke-EbgApplyConfiguration }
         'WPFApplyPhase2' { Invoke-EbgApplyPhase2 }

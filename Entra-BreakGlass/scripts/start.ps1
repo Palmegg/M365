@@ -72,9 +72,12 @@ $sync.State = [Hashtable]::Synchronized(@{
 })
 
 $sync.UI = [Hashtable]::Synchronized(@{
-    CurrentStep    = 'Velkommen'
-    ProcessRunning = $false
-    ConfigVisited  = $false
+    CurrentStep       = 'Velkommen'
+    ProcessRunning    = $false
+    ConfigVisited     = $false
+    CurrentPowerShell = $null
+    CurrentAsync      = $null
+    StopRequested     = $false
 })
 
 $sync.Paths = @{

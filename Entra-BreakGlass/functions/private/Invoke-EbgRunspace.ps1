@@ -10,6 +10,7 @@ function Invoke-EbgRunspace {
         return
     }
     $sync.UI.ProcessRunning = $true
+    $sync.UI.StopRequested = $false
     if ($sync.WPFProgressBar) {
         [void]$sync.WPFProgressBar.Dispatcher.Invoke([System.Action]{ $sync.WPFProgressBar.IsIndeterminate = $true })
     }
@@ -33,6 +34,8 @@ function Invoke-EbgRunspace {
         }
         finally {
             $sync.UI.ProcessRunning = $false
+            $sync.UI.CurrentPowerShell = $null
+            $sync.UI.CurrentAsync = $null
             if ($sync.Form) {
                 [void]$sync.Form.Dispatcher.Invoke([System.Action]{
                     $sync.WPFProgressBar.IsIndeterminate = $false
@@ -41,5 +44,8 @@ function Invoke-EbgRunspace {
             }
         }
     }).AddArgument($ScriptBlock).AddArgument($ArgumentList) | Out-Null
-    [void]$ps.BeginInvoke()
+    $async = $ps.BeginInvoke()
+    $sync.UI.CurrentPowerShell = $ps
+    $sync.UI.CurrentAsync = $async
+    [void]$async
 }
