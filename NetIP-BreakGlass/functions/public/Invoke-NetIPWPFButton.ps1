@@ -51,7 +51,7 @@ function Set-NetIPWPFStep {
 
 function Move-NetIPWPFStep {
     [CmdletBinding()]
-    param([Parameter(Mandatory)][ValidateSet(-1,1)][int] $Direction)
+    param([Parameter(Mandatory)][int] $Direction)
 
     $steps = @('Welcome','Connect','Discovery','Config','Plan','Apply','Handoff')
     $current = [string]$sync.UI.CurrentStep
@@ -62,7 +62,7 @@ function Move-NetIPWPFStep {
     if ($targetIndex -lt 0 -or $targetIndex -ge $steps.Count) { return }
 
     $targetStep = $steps[$targetIndex]
-    $targetButtonName = @{
+    $buttonMap = @{
         Welcome = 'WPFStepWelcome'
         Connect = 'WPFStepConnect'
         Discovery = 'WPFStepDiscovery'
@@ -70,7 +70,8 @@ function Move-NetIPWPFStep {
         Plan = 'WPFStepPlan'
         Apply = 'WPFStepApply'
         Handoff = 'WPFStepHandoff'
-    }[$targetStep]
+    }
+    $targetButtonName = [string]$buttonMap[$targetStep]
 
     if ($Direction -gt 0 -and $sync[$targetButtonName] -and -not [bool]$sync[$targetButtonName].IsEnabled) {
         [System.Windows.MessageBox]::Show('Dette trin er ikke klar endnu. Udfør først handlingen på den nuværende side.', $sync.App.Name, 'OK', 'Information') | Out-Null

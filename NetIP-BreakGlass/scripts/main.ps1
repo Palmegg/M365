@@ -58,4 +58,4 @@ $sync.Form.Add_Closing({
     }
 })
 
-$sync.Form.ShowDialog() | Out-Null
+[void]$sync.Form.ShowDialog()

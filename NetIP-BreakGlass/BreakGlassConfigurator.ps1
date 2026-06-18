@@ -1459,16 +1459,20 @@ function Update-NetIPUIState {
         Apply = 'WPFStepApply'
         Handoff = 'WPFStepHandoff'
     }
+    $activeBrush = [System.Windows.Media.BrushConverter]::new().ConvertFromString('#0F3040')
+    $inactiveBrush = [System.Windows.Media.BrushConverter]::new().ConvertFromString('#181B1F')
+    $activeBorderBrush = [System.Windows.Media.BrushConverter]::new().ConvertFromString('#38BDF8')
+    $inactiveBorderBrush = [System.Windows.Media.BrushConverter]::new().ConvertFromString('#E5E7EB')
     foreach ($entry in $stepMap.GetEnumerator()) {
         $button = $sync[$entry.Value]
         if (-not $button) { continue }
         if ([string]$sync.UI.CurrentStep -eq [string]$entry.Key) {
-            $button.Background = [System.Windows.Media.BrushConverter]::new().ConvertFromString('#0F3040')
-            $button.BorderBrush = [System.Windows.Media.BrushConverter]::new().ConvertFromString('#38BDF8')
+            $button.Background = $activeBrush
+            $button.BorderBrush = $activeBorderBrush
         }
         else {
-            $button.Background = [System.Windows.Media.BrushConverter]::new().ConvertFromString('#181B1F')
-            $button.BorderBrush = [System.Windows.Media.BrushConverter]::new().ConvertFromString('#E5E7EB')
+            $button.Background = $inactiveBrush
+            $button.BorderBrush = $inactiveBorderBrush
         }
     }
 
@@ -2154,7 +2158,7 @@ function Set-NetIPWPFStep {
 
 function Move-NetIPWPFStep {
     [CmdletBinding()]
-    param([Parameter(Mandatory)][ValidateSet(-1,1)][int] $Direction)
+    param([Parameter(Mandatory)][int] $Direction)
 
     $steps = @('Welcome','Connect','Discovery','Config','Plan','Apply','Handoff')
     $current = [string]$sync.UI.CurrentStep
@@ -2165,7 +2169,7 @@ function Move-NetIPWPFStep {
     if ($targetIndex -lt 0 -or $targetIndex -ge $steps.Count) { return }
 
     $targetStep = $steps[$targetIndex]
-    $targetButtonName = @{
+    $buttonMap = @{
         Welcome = 'WPFStepWelcome'
         Connect = 'WPFStepConnect'
         Discovery = 'WPFStepDiscovery'
@@ -2173,7 +2177,8 @@ function Move-NetIPWPFStep {
         Plan = 'WPFStepPlan'
         Apply = 'WPFStepApply'
         Handoff = 'WPFStepHandoff'
-    }[$targetStep]
+    }
+    $targetButtonName = [string]$buttonMap[$targetStep]
 
     if ($Direction -gt 0 -and $sync[$targetButtonName] -and -not [bool]$sync[$targetButtonName].IsEnabled) {
         [System.Windows.MessageBox]::Show('Dette trin er ikke klar endnu. Udfør først handlingen på den nuværende side.', $sync.App.Name, 'OK', 'Information') | Out-Null
@@ -2186,7 +2191,7 @@ function Move-NetIPWPFStep {
 $sync.configs.appsettings = @'
 {
   "name": "Entra Break Glass Configurator",
-  "version": "2.2.2",
+  "version": "2.2.3",
   "outputRoot": ".\\Output",
   "groupName": "CA-BreakGlass-Exclude",
   "groupDescription": "Security group used to exclude dedicated break-glass accounts from existing Conditional Access policies.",
@@ -2440,7 +2445,7 @@ $inputXML = @'
                             <TextBlock Text="Forbind" FontSize="22" FontWeight="SemiBold" Margin="0,0,0,12"/>
                             <TextBlock Text="Forbind én gang til Microsoft Graph. Samme session bruges til discovery, plan og udførsel."/>
                             <TextBlock Text="Requested Graph scopes:" FontWeight="SemiBold" Margin="0,16,0,4"/>
-                            <TextBox x:Name="WPFGraphScopes" IsReadOnly="True" AcceptsReturn="True" Height="100" FontFamily="Consolas"/>
+                            <TextBox x:Name="WPFGraphScopes" IsReadOnly="True" AcceptsReturn="True" Height="190" FontFamily="Consolas" VerticalScrollBarVisibility="Disabled"/>
                             <Button x:Name="WPFConnectTenant" Content="Forbind til Microsoft 365 tenant" Width="240" HorizontalAlignment="Left"/>
                             <UniformGrid Columns="2" Margin="0,14,0,0">
                                 <TextBlock Text="Forbundet:" FontWeight="SemiBold"/>
@@ -2673,5 +2678,5 @@ $sync.Form.Add_Closing({
     }
 })
 
-$sync.Form.ShowDialog() | Out-Null
+[void]$sync.Form.ShowDialog()
 

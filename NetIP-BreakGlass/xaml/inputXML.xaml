@@ -182,7 +182,7 @@
                             <TextBlock Text="Forbind" FontSize="22" FontWeight="SemiBold" Margin="0,0,0,12"/>
                             <TextBlock Text="Forbind én gang til Microsoft Graph. Samme session bruges til discovery, plan og udførsel."/>
                             <TextBlock Text="Requested Graph scopes:" FontWeight="SemiBold" Margin="0,16,0,4"/>
-                            <TextBox x:Name="WPFGraphScopes" IsReadOnly="True" AcceptsReturn="True" Height="100" FontFamily="Consolas"/>
+                            <TextBox x:Name="WPFGraphScopes" IsReadOnly="True" AcceptsReturn="True" Height="190" FontFamily="Consolas" VerticalScrollBarVisibility="Disabled"/>
                             <Button x:Name="WPFConnectTenant" Content="Forbind til Microsoft 365 tenant" Width="240" HorizontalAlignment="Left"/>
                             <UniformGrid Columns="2" Margin="0,14,0,0">
                                 <TextBlock Text="Forbundet:" FontWeight="SemiBold"/>

@@ -50,16 +50,20 @@ function Update-NetIPUIState {
         Apply = 'WPFStepApply'
         Handoff = 'WPFStepHandoff'
     }
+    $activeBrush = [System.Windows.Media.BrushConverter]::new().ConvertFromString('#0F3040')
+    $inactiveBrush = [System.Windows.Media.BrushConverter]::new().ConvertFromString('#181B1F')
+    $activeBorderBrush = [System.Windows.Media.BrushConverter]::new().ConvertFromString('#38BDF8')
+    $inactiveBorderBrush = [System.Windows.Media.BrushConverter]::new().ConvertFromString('#E5E7EB')
     foreach ($entry in $stepMap.GetEnumerator()) {
         $button = $sync[$entry.Value]
         if (-not $button) { continue }
         if ([string]$sync.UI.CurrentStep -eq [string]$entry.Key) {
-            $button.Background = [System.Windows.Media.BrushConverter]::new().ConvertFromString('#0F3040')
-            $button.BorderBrush = [System.Windows.Media.BrushConverter]::new().ConvertFromString('#38BDF8')
+            $button.Background = $activeBrush
+            $button.BorderBrush = $activeBorderBrush
         }
         else {
-            $button.Background = [System.Windows.Media.BrushConverter]::new().ConvertFromString('#181B1F')
-            $button.BorderBrush = [System.Windows.Media.BrushConverter]::new().ConvertFromString('#E5E7EB')
+            $button.Background = $inactiveBrush
+            $button.BorderBrush = $inactiveBorderBrush
         }
     }
 
