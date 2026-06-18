@@ -7,7 +7,13 @@ Describe 'NetIP-BreakGlass basic functions' {
         $script:sync.State = [Hashtable]::Synchronized(@{ OnMicrosoftDomain = 'contoso.onmicrosoft.com'; OutputFolder = ''; Warnings = @() })
         $script:sync.configs = @{
             defaults = [pscustomobject]@{}
-            appsettings = [pscustomobject]@{ groupName = 'CA-BreakGlass-Exclude'; groupDescription = 'Security group used to exclude dedicated break-glass accounts from existing Conditional Access policies.' }
+            appsettings = [pscustomobject]@{
+                groupName = 'CA-BreakGlass-Exclude'
+                groupDescription = 'Security group used to exclude dedicated break-glass accounts from existing Conditional Access policies.'
+                authenticationStrengthName = 'BreakGlass-FIDO2'
+                authenticationStrengthDescription = 'Requires passkeys (FIDO2) from approved attested security key AAGUIDs for break-glass accounts.'
+                breakGlassCAPolicyName = '[CA999] IdentityProtection-AnyApp-AnyPlatform-BreakGlass-FIDO2'
+            }
         }
     }
 
@@ -21,6 +27,12 @@ Describe 'NetIP-BreakGlass basic functions' {
         if ($actual -ne 'plane.model') { throw "Unexpected neutral prefix: $actual" }
     }
 
+    It 'extracts AAGUIDs from free text' {
+        $actual = @(ConvertFrom-NetIPAAGUIDText -Text 'Key: A4E9FC6D-4CBE-4758-B8BA-37598BB5BBAA, duplicate a4e9fc6d-4cbe-4758-b8ba-37598bb5bbaa')
+        if ($actual.Count -ne 1) { throw "Unexpected AAGUID count: $($actual.Count)" }
+        if ($actual[0] -ne 'a4e9fc6d-4cbe-4758-b8ba-37598bb5bbaa') { throw "Unexpected AAGUID: $($actual[0])" }
+    }
+
     It 'generates long password' {
         $password = New-NetIPRandomPassword
         if ($password.Length -lt 24) { throw 'Password is too short.' }
@@ -32,10 +44,15 @@ Describe 'NetIP-BreakGlass basic functions' {
             DisplayName1 = 'Horse Unit'; DisplayName2 = 'Master Player'
             GroupName = 'CA-BreakGlass-Exclude'; CreateUsers = $true; CreateGroup = $true
             AddUsersToGroup = $true; DisableAdminSSPR = $true; PatchCAPolicies = $false
+            CreateAuthenticationStrength = $true; CreateBreakGlassCAPolicy = $true; EnableBreakGlassCAPolicy = $false
+            AuthenticationStrengthName = 'BreakGlass-FIDO2'; BreakGlassCAPolicyName = '[CA999] IdentityProtection-AnyApp-AnyPlatform-BreakGlass-FIDO2'
+            AAGUIDs = @('a4e9fc6d-4cbe-4758-b8ba-37598bb5bbaa')
         }
         $plan = New-NetIPPlanObject -Config $config
         if ($plan.Account1UPN -ne 'horse.unit@contoso.onmicrosoft.com') { throw "Unexpected planned UPN: $($plan.Account1UPN)" }
         if ($plan.PlannedAdminSSPRStatus -ne 'Deaktiveres') { throw "Unexpected Admin SSPR plan: $($plan.PlannedAdminSSPRStatus)" }
+        if ($plan.AuthenticationStrengthStatus -ne 'Oprettes/opdateres') { throw "Unexpected auth strength plan: $($plan.AuthenticationStrengthStatus)" }
+        if ($plan.BreakGlassCAPolicyStatus -ne 'Oprettes report-only') { throw "Unexpected BG CA plan: $($plan.BreakGlassCAPolicyStatus)" }
     }
 
     It 'preserves existing CA exclusions in mock patch plan' {
@@ -59,6 +76,9 @@ Describe 'NetIP-BreakGlass basic functions' {
             DisplayName1 = 'Horse Unit'; DisplayName2 = 'Master Player'
             GroupName = 'CA-BreakGlass-Exclude'; CreateUsers = $true; CreateGroup = $true
             AddUsersToGroup = $true; DisableAdminSSPR = $true; PatchCAPolicies = $false
+            CreateAuthenticationStrength = $false; CreateBreakGlassCAPolicy = $false; EnableBreakGlassCAPolicy = $false
+            AuthenticationStrengthName = 'BreakGlass-FIDO2'; BreakGlassCAPolicyName = '[CA999] IdentityProtection-AnyApp-AnyPlatform-BreakGlass-FIDO2'
+            AAGUIDs = @()
         }
         $plan = New-NetIPPlanObject -Config $config
         if (-not $plan.AssignGlobalAdministrator) { throw 'Plan does not include Global Administrator assignment.' }
@@ -77,6 +97,13 @@ Describe 'NetIP-BreakGlass basic functions' {
         $result = Set-NetIPAdminSSPRDisabled -Apply $true
         if ($result.Status -ne 'Disabled') { throw "Unexpected Admin SSPR status: $($result.Status)" }
         if ($result.DesiredValue -ne $false) { throw "Unexpected Admin SSPR desired value: $($result.DesiredValue)" }
+    }
+
+    It 'handles authentication strength and dedicated CA policy in mock mode' {
+        $strength = Ensure-NetIPAuthenticationStrength -DisplayName 'BreakGlass-FIDO2' -Description 'Test' -AllowedAAGUIDs @('a4e9fc6d-4cbe-4758-b8ba-37598bb5bbaa') -Apply $true
+        if ($strength.Status -ne 'Created') { throw "Unexpected auth strength status: $($strength.Status)" }
+        $policy = Ensure-NetIPBreakGlassCAPolicy -DisplayName '[CA999] IdentityProtection-AnyApp-AnyPlatform-BreakGlass-FIDO2' -GroupId 'mock-ca-exclude-group' -AuthenticationStrengthId $strength.id -Enabled $false -Apply $true
+        if ($policy.state -ne 'enabledForReportingButNotEnforced') { throw "Unexpected CA policy state: $($policy.state)" }
     }
 
     It 'reads properties case-insensitively without numeric index binding' {
@@ -99,6 +126,8 @@ Describe 'NetIP-BreakGlass basic functions' {
             GroupMembership = @(@{ UserPrincipalName = 'svc_ea_01@contoso.onmicrosoft.com'; Group = 'CA-BreakGlass-Exclude'; Status = 'Added' })
             RoleAssignments = @(@{ UserPrincipalName = 'svc_ea_01@contoso.onmicrosoft.com'; Role = 'Global Administrator'; Scope = '/'; Status = 'Assigned' })
             AdminSSPR = @{ Setting = 'allowedToUseSSPR'; PreviousValue = $true; DesiredValue = $false; Status = 'Disabled'; Detail = 'Policy changes can take up to 60 minutes to take effect.' }
+            AuthenticationStrength = @{ id = 'auth-strength-id'; displayName = 'BreakGlass-FIDO2'; Status = 'Created'; allowedAAGUIDs = @('a4e9fc6d-4cbe-4758-b8ba-37598bb5bbaa') }
+            BreakGlassCAPolicy = @{ id = 'ca-policy-id'; displayName = '[CA999] IdentityProtection-AnyApp-AnyPlatform-BreakGlass-FIDO2'; state = 'enabledForReportingButNotEnforced'; Status = 'Created' }
             CAExclusionsEnabled = $false
             CAPoliciesChangedCount = 0
             CABackupPath = ''
@@ -113,5 +142,7 @@ Describe 'NetIP-BreakGlass basic functions' {
         if ($html -notmatch 'svc_ea_01@contoso.onmicrosoft.com') { throw 'Handoff missing account UPN.' }
         if ($html -notmatch 'Global Administrator') { throw 'Handoff missing Global Administrator assignment.' }
         if ($html -notmatch 'allowedToUseSSPR') { throw 'Handoff missing Admin SSPR result.' }
+        if ($html -notmatch 'BreakGlass-FIDO2') { throw 'Handoff missing authentication strength result.' }
+        if ($html -notmatch 'a4e9fc6d-4cbe-4758-b8ba-37598bb5bbaa') { throw 'Handoff missing AAGUID.' }
     }
 }

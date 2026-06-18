@@ -10,11 +10,18 @@ function Get-NetIPConfigFromUI {
             UserPrefix2      = $sync.WPFUserPrefix2.Text.Trim()
             GroupName        = $sync.WPFGroupName.Text.Trim()
             GroupDescription = $sync.WPFGroupDescription.Text.Trim()
+            AuthenticationStrengthName = $sync.WPFAuthenticationStrengthName.Text.Trim()
+            AuthenticationStrengthDescription = [string]$sync.configs.appsettings.authenticationStrengthDescription
+            BreakGlassCAPolicyName = $sync.WPFBreakGlassCAPolicyName.Text.Trim()
+            AAGUIDs = @(ConvertFrom-NetIPAAGUIDText -Text $sync.WPFAAGUIDs.Text)
             CreateUsers      = [bool]$sync.WPFCreateUsers.IsChecked
             CreateGroup      = [bool]$sync.WPFCreateGroup.IsChecked
             AddUsersToGroup  = [bool]$sync.WPFAddUsersToGroup.IsChecked
             DisableAdminSSPR = [bool]$sync.WPFDisableAdminSSPR.IsChecked
             PatchCAPolicies  = [bool]$sync.WPFPatchCAPolicies.IsChecked
+            CreateAuthenticationStrength = [bool]$sync.WPFCreateAuthenticationStrength.IsChecked
+            CreateBreakGlassCAPolicy = [bool]$sync.WPFCreateBreakGlassCAPolicy.IsChecked
+            EnableBreakGlassCAPolicy = [bool]$sync.WPFEnableBreakGlassCAPolicy.IsChecked
         }
     })
 }

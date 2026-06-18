@@ -34,6 +34,9 @@ function New-NetIPPlanObject {
     $warnings += 'Begge break-glass konti får direkte Global Administrator rolle på tenant scope (/).'
     if ($Config.DisableAdminSSPR) { $warnings += 'Administrator-SSPR deaktiveres tenant-wide og kan tage op til 60 minutter at slå igennem.' }
     if ($Config.PatchCAPolicies) { $warnings += 'Eksisterende Conditional Access-politikker ændres. Backup oprettes før ændringer.' }
+    if ($Config.CreateAuthenticationStrength -and @($Config.AAGUIDs).Count -lt 1) { $warnings += 'Authentication strength er valgt, men der er ikke angivet AAGUIDs endnu.' }
+    if ($Config.CreateBreakGlassCAPolicy -and -not $Config.CreateAuthenticationStrength) { $warnings += 'Dedikeret BG CA-policy kræver at authentication strength også oprettes eller findes.' }
+    if ($Config.CreateBreakGlassCAPolicy -and -not $Config.EnableBreakGlassCAPolicy) { $warnings += 'Dedikeret BG CA-policy oprettes som report-only som sikker default.' }
 
     $outputFolder = if ($sync.State.OutputFolder) { $sync.State.OutputFolder } else { Join-Path $sync.App.OutputRoot ('BreakGlass-{0}-<timestamp>' -f $tenant.TenantId) }
     $plan = [pscustomobject]@{
@@ -54,6 +57,11 @@ function New-NetIPPlanObject {
         DisableAdminSSPR          = [bool]$Config.DisableAdminSSPR
         CurrentAdminSSPREnabled   = $adminSSPREnabled
         PlannedAdminSSPRStatus    = if ($Config.DisableAdminSSPR) { if ($adminSSPREnabled) { 'Deaktiveres' } else { 'Allerede deaktiveret' } } else { 'Uændret' }
+        AuthenticationStrengthName = $Config.AuthenticationStrengthName
+        AuthenticationStrengthAAGUIDs = @($Config.AAGUIDs)
+        AuthenticationStrengthStatus = if ($Config.CreateAuthenticationStrength) { if (@($Config.AAGUIDs).Count -gt 0) { 'Oprettes/opdateres' } else { 'Mangler AAGUID' } } else { 'Springes over' }
+        BreakGlassCAPolicyName    = $Config.BreakGlassCAPolicyName
+        BreakGlassCAPolicyStatus  = if ($Config.CreateBreakGlassCAPolicy) { if ($Config.EnableBreakGlassCAPolicy) { 'Oprettes enabled' } else { 'Oprettes report-only' } } else { 'Springes over' }
         ConditionalAccessCount    = @($policies).Count
         PatchConditionalAccess    = [bool]$Config.PatchCAPolicies
         CAPoliciesToChange        = @($toPatch | Select-Object id,displayName,state)

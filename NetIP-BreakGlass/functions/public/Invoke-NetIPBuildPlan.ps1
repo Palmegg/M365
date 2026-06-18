@@ -30,6 +30,10 @@ Tildel Global Administrator: $($plan.AssignGlobalAdministrator) / scope $($plan.
 Administrator-SSPR enabled nu: $($plan.CurrentAdminSSPREnabled)
 Administrator-SSPR plan: $($plan.PlannedAdminSSPRStatus)
 
+Authentication strength: $($plan.AuthenticationStrengthName) / $($plan.AuthenticationStrengthStatus)
+AAGUIDs: $(@($plan.AuthenticationStrengthAAGUIDs) -join ', ')
+Dedikeret BG CA policy: $($plan.BreakGlassCAPolicyName) / $($plan.BreakGlassCAPolicyStatus)
+
 Conditional Access policies fundet: $($plan.ConditionalAccessCount)
 Patch CA policies: $($plan.PatchConditionalAccess)
 Policies der ændres: $(@($plan.CAPoliciesToChange).Count)

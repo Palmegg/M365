@@ -8,6 +8,9 @@
   "addUsersToGroup": true,
   "disableAdminSSPR": true,
   "patchCAPolicies": false,
+  "createAuthenticationStrength": false,
+  "createBreakGlassCAPolicy": false,
+  "enableBreakGlassCAPolicy": false,
   "neutralNamePairs": [
     { "account1": "Horse Unit", "account2": "Master Player" },
     { "account1": "Car Engine", "account2": "Plane Model" },

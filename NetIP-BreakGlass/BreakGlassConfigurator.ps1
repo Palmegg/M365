@@ -123,6 +123,17 @@ function Backup-NetIPConditionalAccessPolicies {
     return Export-NetIPJsonSafe -InputObject $Policies -Path (Join-Path $OutputFolder 'ca-policies-before.json') -Depth 50
 }
 
+function ConvertFrom-NetIPAAGUIDText {
+    [CmdletBinding()]
+    param([AllowNull()][string] $Text)
+
+    if ([string]::IsNullOrWhiteSpace($Text)) { return @() }
+
+    $matches = [regex]::Matches($Text, '[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}')
+    $values = @($matches | ForEach-Object { $_.Value.ToLowerInvariant() } | Select-Object -Unique)
+    return $values
+}
+
 function ConvertTo-BreakGlassUpn {
     [CmdletBinding()]
     param(
@@ -182,6 +193,141 @@ function ConvertTo-NetIPRedactedError {
         $text = [regex]::Replace($text, $pattern, '[REDACTED]')
     }
     return $text
+}
+
+function Ensure-NetIPAuthenticationStrength {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string] $DisplayName,
+        [Parameter(Mandatory)][string] $Description,
+        [Parameter(Mandatory)][string[]] $AllowedAAGUIDs,
+        [Parameter(Mandatory)][bool] $Apply
+    )
+
+    $allowed = @($AllowedAAGUIDs | Where-Object { $_ } | ForEach-Object { $_.ToLowerInvariant() } | Select-Object -Unique)
+    if ($allowed.Count -lt 1) {
+        throw 'Der skal mindst være ét AAGUID før authentication strength kan oprettes.'
+    }
+
+    if (-not $Apply -or $sync.App.Mock) {
+        return [pscustomobject]@{
+            id = 'planned-auth-strength'
+            displayName = $DisplayName
+            allowedAAGUIDs = $allowed
+            Status = if ($Apply) { 'Created' } else { 'PlannedCreate' }
+        }
+    }
+
+    $existing = Get-NetIPAuthenticationStrengthByName -DisplayName $DisplayName
+    if (-not $existing) {
+        Write-NetIPLog -Message "Opretter authentication strength: $DisplayName"
+        $body = @{
+            displayName = $DisplayName
+            description = $Description
+            requirementsSatisfied = 'mfa'
+            allowedCombinations = @('fido2')
+            combinationConfigurations = @(
+                @{
+                    '@odata.type' = '#microsoft.graph.fido2CombinationConfiguration'
+                    allowedAAGUIDs = $allowed
+                    appliesToCombinations = @('fido2')
+                }
+            )
+        }
+        $created = Invoke-NetIPGraphRequest -Method POST -Uri 'https://graph.microsoft.com/v1.0/identity/conditionalAccess/authenticationStrength/policies' -Body $body
+        $created | Add-Member -MemberType NoteProperty -Name Status -Value 'Created' -Force
+        $created | Add-Member -MemberType NoteProperty -Name allowedAAGUIDs -Value $allowed -Force
+        return $created
+    }
+
+    $strengthId = [string](Get-NetIPObjectPropertyValue -InputObject $existing -Name 'id')
+    $configs = @(Get-NetIPGraphCollection -Uri "https://graph.microsoft.com/v1.0/identity/conditionalAccess/authenticationStrength/policies/$strengthId/combinationConfigurations")
+    $fidoConfig = $configs | Where-Object {
+        $type = [string](Get-NetIPObjectPropertyValue -InputObject $_ -Name '@odata.type')
+        $applies = @(Get-NetIPObjectPropertyValue -InputObject $_ -Name 'appliesToCombinations')
+        $type -match 'fido2CombinationConfiguration' -or $applies -contains 'fido2'
+    } | Select-Object -First 1
+
+    if (-not $fidoConfig) {
+        Write-NetIPLog -Message "Tilføjer FIDO2 AAGUID restriction til authentication strength: $DisplayName"
+        $body = @{
+            '@odata.type' = '#microsoft.graph.fido2CombinationConfiguration'
+            allowedAAGUIDs = $allowed
+            appliesToCombinations = @('fido2')
+        }
+        Invoke-NetIPGraphRequest -Method POST -Uri "https://graph.microsoft.com/v1.0/identity/conditionalAccess/authenticationStrength/policies/$strengthId/combinationConfigurations" -Body $body | Out-Null
+        $existing | Add-Member -MemberType NoteProperty -Name Status -Value 'Updated' -Force
+        $existing | Add-Member -MemberType NoteProperty -Name allowedAAGUIDs -Value $allowed -Force
+        return $existing
+    }
+
+    $existingAAGUIDs = @(Get-NetIPObjectPropertyValue -InputObject $fidoConfig -Name 'allowedAAGUIDs') | ForEach-Object { [string]$_ }
+    $merged = @($existingAAGUIDs + $allowed | Where-Object { $_ } | ForEach-Object { $_.ToLowerInvariant() } | Select-Object -Unique)
+    if (@($merged | Where-Object { $existingAAGUIDs -notcontains $_ }).Count -gt 0) {
+        $configId = [string](Get-NetIPObjectPropertyValue -InputObject $fidoConfig -Name 'id')
+        Write-NetIPLog -Message "Opdaterer AAGUID-listen på authentication strength: $DisplayName"
+        Invoke-NetIPGraphRequest -Method PATCH -Uri "https://graph.microsoft.com/v1.0/identity/conditionalAccess/authenticationStrength/policies/$strengthId/combinationConfigurations/$configId" -Body @{ allowedAAGUIDs = $merged } | Out-Null
+        $status = 'Updated'
+    }
+    else {
+        $status = 'AlreadyExists'
+    }
+
+    $existing | Add-Member -MemberType NoteProperty -Name Status -Value $status -Force
+    $existing | Add-Member -MemberType NoteProperty -Name allowedAAGUIDs -Value $merged -Force
+    return $existing
+}
+
+function Ensure-NetIPBreakGlassCAPolicy {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string] $DisplayName,
+        [Parameter(Mandatory)][string] $GroupId,
+        [Parameter(Mandatory)][string] $AuthenticationStrengthId,
+        [Parameter(Mandatory)][bool] $Enabled,
+        [Parameter(Mandatory)][bool] $Apply
+    )
+
+    if ([string]::IsNullOrWhiteSpace($GroupId)) { throw 'CA-BreakGlass-Exclude gruppen skal have et Object ID før CA-politikken kan oprettes.' }
+    if ([string]::IsNullOrWhiteSpace($AuthenticationStrengthId)) { throw 'Authentication strength skal have et Object ID før CA-politikken kan oprettes.' }
+
+    $state = if ($Enabled) { 'enabled' } else { 'enabledForReportingButNotEnforced' }
+    if (-not $Apply -or $sync.App.Mock) {
+        return [pscustomobject]@{ id='planned-ca-policy'; displayName=$DisplayName; state=$state; Status=if($Apply){'Created'}else{'PlannedCreate'} }
+    }
+
+    $existing = @(Get-NetIPConditionalAccessPolicies | Where-Object { [string](Get-NetIPObjectPropertyValue -InputObject $_ -Name 'displayName') -eq $DisplayName }) | Select-Object -First 1
+    if ($existing) {
+        $existing | Add-Member -MemberType NoteProperty -Name Status -Value 'AlreadyExists' -Force
+        return $existing
+    }
+
+    Write-NetIPLog -Message "Opretter dedikeret BreakGlass FIDO2 CA-policy: $DisplayName"
+    $body = @{
+        displayName = $DisplayName
+        state = $state
+        conditions = @{
+            users = @{
+                includeGroups = @($GroupId)
+                excludeUsers = @()
+                excludeGroups = @()
+            }
+            applications = @{
+                includeApplications = @('All')
+                excludeApplications = @()
+            }
+            clientAppTypes = @('all')
+        }
+        grantControls = @{
+            operator = 'OR'
+            authenticationStrength = @{
+                id = $AuthenticationStrengthId
+            }
+        }
+    }
+    $created = Invoke-NetIPGraphRequest -Method POST -Uri 'https://graph.microsoft.com/v1.0/identity/conditionalAccess/policies' -Body $body
+    $created | Add-Member -MemberType NoteProperty -Name Status -Value 'Created' -Force
+    return $created
 }
 
 function Ensure-NetIPGlobalAdministratorAssignment {
@@ -349,6 +495,22 @@ function Export-NetIPJsonSafe {
     return $Path
 }
 
+function Get-NetIPAuthenticationStrengthByName {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string] $DisplayName)
+
+    if ($sync.App.Mock) {
+        if ($DisplayName -eq $sync.configs.appsettings.authenticationStrengthName) {
+            return $null
+        }
+        return $null
+    }
+
+    $filter = [uri]::EscapeDataString("displayName eq '$($DisplayName.Replace("'", "''"))'")
+    $policies = @(Get-NetIPGraphCollection -Uri "https://graph.microsoft.com/v1.0/identity/conditionalAccess/authenticationStrength/policies?`$filter=$filter")
+    return $policies | Select-Object -First 1
+}
+
 function Get-NetIPAuthorizationPolicy {
     [CmdletBinding()]
     param()
@@ -394,13 +556,42 @@ function Get-NetIPConfigFromUI {
             UserPrefix2      = $sync.WPFUserPrefix2.Text.Trim()
             GroupName        = $sync.WPFGroupName.Text.Trim()
             GroupDescription = $sync.WPFGroupDescription.Text.Trim()
+            AuthenticationStrengthName = $sync.WPFAuthenticationStrengthName.Text.Trim()
+            AuthenticationStrengthDescription = [string]$sync.configs.appsettings.authenticationStrengthDescription
+            BreakGlassCAPolicyName = $sync.WPFBreakGlassCAPolicyName.Text.Trim()
+            AAGUIDs = @(ConvertFrom-NetIPAAGUIDText -Text $sync.WPFAAGUIDs.Text)
             CreateUsers      = [bool]$sync.WPFCreateUsers.IsChecked
             CreateGroup      = [bool]$sync.WPFCreateGroup.IsChecked
             AddUsersToGroup  = [bool]$sync.WPFAddUsersToGroup.IsChecked
             DisableAdminSSPR = [bool]$sync.WPFDisableAdminSSPR.IsChecked
             PatchCAPolicies  = [bool]$sync.WPFPatchCAPolicies.IsChecked
+            CreateAuthenticationStrength = [bool]$sync.WPFCreateAuthenticationStrength.IsChecked
+            CreateBreakGlassCAPolicy = [bool]$sync.WPFCreateBreakGlassCAPolicy.IsChecked
+            EnableBreakGlassCAPolicy = [bool]$sync.WPFEnableBreakGlassCAPolicy.IsChecked
         }
     })
+}
+
+function Get-NetIPFido2MethodsForUser {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string] $UserPrincipalName)
+
+    if ($sync.App.Mock) {
+        return @(
+            [pscustomobject]@{
+                id = 'mock-fido2-1'
+                displayName = 'YubiKey Security Key NFC'
+                model = 'Security Key NFC by Yubico'
+                aaGuid = 'a4e9fc6d-4cbe-4758-b8ba-37598bb5bbaa'
+                attestationLevel = 'attested'
+                passkeyType = 'deviceBound'
+                createdDateTime = (Get-Date).ToString('o')
+            }
+        )
+    }
+
+    $encoded = [uri]::EscapeDataString($UserPrincipalName)
+    return Get-NetIPGraphCollection -Uri "https://graph.microsoft.com/v1.0/users/$encoded/authentication/fido2Methods"
 }
 
 function Get-NetIPGlobalAdministratorRoleDefinition {
@@ -536,6 +727,25 @@ function Get-NetIPUserByUpn {
         if ([string]$_ -match '404|Request_ResourceNotFound|Resource .* does not exist') { return $null }
         throw
     }
+}
+
+function Get-NetIPAAGUIDSourceUserPrincipalName {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][hashtable] $Config)
+
+    $tenant = Get-NetIPTenantInfo
+    return $sync.Form.Dispatcher.Invoke([func[string]]{
+        $selectedIndex = if ($sync.WPFAAGUIDSourceUser) { [int]$sync.WPFAAGUIDSourceUser.SelectedIndex } else { 0 }
+        switch ($selectedIndex) {
+            0 { ConvertTo-BreakGlassUpn -Prefix $Config.UserPrefix1 -OnMicrosoftDomain $tenant.OnMicrosoftDomain }
+            1 { ConvertTo-BreakGlassUpn -Prefix $Config.UserPrefix2 -OnMicrosoftDomain $tenant.OnMicrosoftDomain }
+            default {
+                $custom = if ($sync.WPFAAGUIDCustomUser) { $sync.WPFAAGUIDCustomUser.Text.Trim() } else { '' }
+                if ([string]::IsNullOrWhiteSpace($custom)) { throw 'Angiv en custom UPN, eller vælg Account 1/2 som AAGUID kildebruger.' }
+                $custom
+            }
+        }
+    })
 }
 
 function Invoke-NetIPGraphRequest {
@@ -682,6 +892,8 @@ function New-NetIPHandoffHtml {
     $memberships = @(Get-NetIPObjectPropertyValue -InputObject $Result -Name 'GroupMembership')
     $roleAssignments = @(Get-NetIPObjectPropertyValue -InputObject $Result -Name 'RoleAssignments')
     $adminSSPR = Get-NetIPObjectPropertyValue -InputObject $Result -Name 'AdminSSPR'
+    $authenticationStrength = Get-NetIPObjectPropertyValue -InputObject $Result -Name 'AuthenticationStrength'
+    $breakGlassCAPolicy = Get-NetIPObjectPropertyValue -InputObject $Result -Name 'BreakGlassCAPolicy'
     $resultWarnings = @(Get-NetIPObjectPropertyValue -InputObject $Result -Name 'Warnings')
     $changedTable = Rows $changed
     $alreadyTable = Rows $already
@@ -745,6 +957,21 @@ function New-NetIPHandoffHtml {
     <tr><th>Detail</th><td>$(ConvertTo-NetIPHtmlValue (Get-NetIPObjectPropertyValue -InputObject $adminSSPR -Name 'Detail'))</td></tr>
   </table>
   <h2>Conditional Access</h2>
+  <h3>BreakGlass-FIDO2 authentication strength</h3>
+  <table>
+    <tr><th>Navn</th><td>$(ConvertTo-NetIPHtmlValue (Get-NetIPObjectPropertyValue -InputObject $authenticationStrength -Name 'displayName'))</td></tr>
+    <tr><th>Object ID</th><td>$(ConvertTo-NetIPHtmlValue (Get-NetIPObjectPropertyValue -InputObject $authenticationStrength -Name 'id'))</td></tr>
+    <tr><th>Status</th><td>$(ConvertTo-NetIPHtmlValue (Get-NetIPObjectPropertyValue -InputObject $authenticationStrength -Name 'Status'))</td></tr>
+    <tr><th>Tilladte AAGUIDs</th><td>$(ConvertTo-NetIPHtmlValue (@(Get-NetIPObjectPropertyValue -InputObject $authenticationStrength -Name 'allowedAAGUIDs') -join ', '))</td></tr>
+  </table>
+  <h3>Dedikeret BreakGlass FIDO2 CA-policy</h3>
+  <table>
+    <tr><th>Navn</th><td>$(ConvertTo-NetIPHtmlValue (Get-NetIPObjectPropertyValue -InputObject $breakGlassCAPolicy -Name 'displayName'))</td></tr>
+    <tr><th>Object ID</th><td>$(ConvertTo-NetIPHtmlValue (Get-NetIPObjectPropertyValue -InputObject $breakGlassCAPolicy -Name 'id'))</td></tr>
+    <tr><th>State</th><td>$(ConvertTo-NetIPHtmlValue (Get-NetIPObjectPropertyValue -InputObject $breakGlassCAPolicy -Name 'state'))</td></tr>
+    <tr><th>Status</th><td>$(ConvertTo-NetIPHtmlValue (Get-NetIPObjectPropertyValue -InputObject $breakGlassCAPolicy -Name 'Status'))</td></tr>
+  </table>
+  <h3>Eksisterende Conditional Access exclusions</h3>
   <table>
     <tr><th>CA exclusions valgt</th><td>$(ConvertTo-NetIPHtmlValue (Get-NetIPObjectPropertyValue -InputObject $Result -Name 'CAExclusionsEnabled'))</td></tr>
     <tr><th>Antal policies ændret</th><td>$(ConvertTo-NetIPHtmlValue (Get-NetIPObjectPropertyValue -InputObject $Result -Name 'CAPoliciesChangedCount'))</td></tr>
@@ -765,6 +992,7 @@ function New-NetIPHandoffHtml {
     <li>Verificér at begge break-glass konti har direkte Global Administrator rolle.</li>
     <li>Hvis administrator-SSPR blev deaktiveret, vent op til 60 minutter og test derefter FIDO2/TAP onboarding igen.</li>
     <li>Verificér at begge break-glass konti kan logge ind.</li>
+    <li>Hvis den dedikerede BreakGlass FIDO2 CA-policy er report-only, valider sign-in logs før den sættes til enabled.</li>
     <li>Verificér at kontiene er medlem af CA-BreakGlass-Exclude.</li>
     <li>Verificér at gruppen er ekskluderet fra de ønskede Conditional Access-politikker, hvis funktionen blev valgt.</li>
     <li>Dokumentér hvor credentials opbevares.</li>
@@ -825,6 +1053,9 @@ function New-NetIPPlanObject {
     $warnings += 'Begge break-glass konti får direkte Global Administrator rolle på tenant scope (/).'
     if ($Config.DisableAdminSSPR) { $warnings += 'Administrator-SSPR deaktiveres tenant-wide og kan tage op til 60 minutter at slå igennem.' }
     if ($Config.PatchCAPolicies) { $warnings += 'Eksisterende Conditional Access-politikker ændres. Backup oprettes før ændringer.' }
+    if ($Config.CreateAuthenticationStrength -and @($Config.AAGUIDs).Count -lt 1) { $warnings += 'Authentication strength er valgt, men der er ikke angivet AAGUIDs endnu.' }
+    if ($Config.CreateBreakGlassCAPolicy -and -not $Config.CreateAuthenticationStrength) { $warnings += 'Dedikeret BG CA-policy kræver at authentication strength også oprettes eller findes.' }
+    if ($Config.CreateBreakGlassCAPolicy -and -not $Config.EnableBreakGlassCAPolicy) { $warnings += 'Dedikeret BG CA-policy oprettes som report-only som sikker default.' }
 
     $outputFolder = if ($sync.State.OutputFolder) { $sync.State.OutputFolder } else { Join-Path $sync.App.OutputRoot ('BreakGlass-{0}-<timestamp>' -f $tenant.TenantId) }
     $plan = [pscustomobject]@{
@@ -845,6 +1076,11 @@ function New-NetIPPlanObject {
         DisableAdminSSPR          = [bool]$Config.DisableAdminSSPR
         CurrentAdminSSPREnabled   = $adminSSPREnabled
         PlannedAdminSSPRStatus    = if ($Config.DisableAdminSSPR) { if ($adminSSPREnabled) { 'Deaktiveres' } else { 'Allerede deaktiveret' } } else { 'Uændret' }
+        AuthenticationStrengthName = $Config.AuthenticationStrengthName
+        AuthenticationStrengthAAGUIDs = @($Config.AAGUIDs)
+        AuthenticationStrengthStatus = if ($Config.CreateAuthenticationStrength) { if (@($Config.AAGUIDs).Count -gt 0) { 'Oprettes/opdateres' } else { 'Mangler AAGUID' } } else { 'Springes over' }
+        BreakGlassCAPolicyName    = $Config.BreakGlassCAPolicyName
+        BreakGlassCAPolicyStatus  = if ($Config.CreateBreakGlassCAPolicy) { if ($Config.EnableBreakGlassCAPolicy) { 'Oprettes enabled' } else { 'Oprettes report-only' } } else { 'Springes over' }
         ConditionalAccessCount    = @($policies).Count
         PatchConditionalAccess    = [bool]$Config.PatchCAPolicies
         CAPoliciesToChange        = @($toPatch | Select-Object id,displayName,state)
@@ -1009,6 +1245,16 @@ function Set-NetIPLanguage {
         @{ Da = 'Final UPN preview'; En = 'Final UPN preview' }
         @{ Da = 'Security group name'; En = 'Security group name' }
         @{ Da = 'Security group description'; En = 'Security group description' }
+        @{ Da = 'FIDO2 authentication strength'; En = 'FIDO2 authentication strength' }
+        @{ Da = 'AAGUID kildebruger'; En = 'AAGUID source user' }
+        @{ Da = 'Hent AAGUID'; En = 'Fetch AAGUID' }
+        @{ Da = 'Tilladte AAGUIDs'; En = 'Allowed AAGUIDs' }
+        @{ Da = 'Auth strength navn'; En = 'Auth strength name' }
+        @{ Da = 'BG CA policy navn'; En = 'BG CA policy name' }
+        @{ Da = 'Opret/opdater BreakGlass-FIDO2 authentication strength med AAGUID-restriction'; En = 'Create/update BreakGlass-FIDO2 authentication strength with AAGUID restriction' }
+        @{ Da = 'Opret dedikeret CA-policy der kræver BreakGlass-FIDO2 for CA-BreakGlass-Exclude'; En = 'Create dedicated CA policy requiring BreakGlass-FIDO2 for CA-BreakGlass-Exclude' }
+        @{ Da = 'Opret CA-policy som enabled i stedet for report-only'; En = 'Create CA policy as enabled instead of report-only' }
+        @{ Da = 'Anbefaling: lad CA-politikken være report-only indtil begge konti har to registrerede og testede FIDO2 keys.'; En = 'Recommendation: keep the CA policy in report-only until both accounts have two registered and tested FIDO2 keys.' }
         @{ Da = 'Opret brugere hvis de ikke findes'; En = 'Create users if missing' }
         @{ Da = 'Opret gruppen CA-BreakGlass-Exclude hvis den ikke findes'; En = 'Create CA-BreakGlass-Exclude if missing' }
         @{ Da = 'Tilføj break-glass konti til CA-BreakGlass-Exclude'; En = 'Add break-glass accounts to CA-BreakGlass-Exclude' }
@@ -1278,11 +1524,16 @@ function Initialize-NetIPWPFUI {
     $sync.WPFUserPrefix2.Text = [string]$defaults.account2Prefix
     $sync.WPFGroupName.Text = [string]$settings.groupName
     $sync.WPFGroupDescription.Text = [string]$settings.groupDescription
+    $sync.WPFAuthenticationStrengthName.Text = [string]$settings.authenticationStrengthName
+    $sync.WPFBreakGlassCAPolicyName.Text = [string]$settings.breakGlassCAPolicyName
     $sync.WPFCreateUsers.IsChecked = [bool]$defaults.createUsers
     $sync.WPFCreateGroup.IsChecked = [bool]$defaults.createGroup
     $sync.WPFAddUsersToGroup.IsChecked = [bool]$defaults.addUsersToGroup
     $sync.WPFDisableAdminSSPR.IsChecked = [bool]$defaults.disableAdminSSPR
     $sync.WPFPatchCAPolicies.IsChecked = [bool]$defaults.patchCAPolicies
+    $sync.WPFCreateAuthenticationStrength.IsChecked = [bool]$defaults.createAuthenticationStrength
+    $sync.WPFCreateBreakGlassCAPolicy.IsChecked = [bool]$defaults.createBreakGlassCAPolicy
+    $sync.WPFEnableBreakGlassCAPolicy.IsChecked = [bool]$defaults.enableBreakGlassCAPolicy
     if ($sync.WPFLanguageSelector) { $sync.WPFLanguageSelector.SelectedIndex = 0 }
     Set-NetIPLanguage -Language $sync.State.Language
 
@@ -1308,6 +1559,10 @@ function Invoke-NetIPApplyConfiguration {
         return
     }
     $config = Get-NetIPConfigFromUI
+    if ($config.CreateAuthenticationStrength -and @($config.AAGUIDs).Count -lt 1) {
+        [System.Windows.MessageBox]::Show('Hent eller indtast mindst ét AAGUID før du opretter BreakGlass-FIDO2 authentication strength.', $sync.App.Name, 'OK', 'Warning') | Out-Null
+        return
+    }
     $plan = $sync.State.Plan
     $summary = @"
 Følgende udføres:
@@ -1321,6 +1576,9 @@ Gruppe: $($plan.GroupName) / $($plan.GroupStatus)
 Medlemskab opdateres: $($plan.AddAccountsToGroup)
 Global Administrator tildeles direkte til begge konti: Ja
 Administrator-SSPR deaktiveres tenant-wide: $($config.DisableAdminSSPR)
+Authentication strength: $($config.AuthenticationStrengthName) / opret-opdater: $($config.CreateAuthenticationStrength)
+AAGUIDs: $(@($config.AAGUIDs) -join ', ')
+Dedikeret BG FIDO2 CA-policy: $($config.BreakGlassCAPolicyName) / opret: $($config.CreateBreakGlassCAPolicy) / enabled: $($config.EnableBreakGlassCAPolicy)
 Conditional Access policies patches: $($plan.PatchConditionalAccess)
 Antal policies der patches: $(@($plan.CAPoliciesToChange).Count)
 
@@ -1335,18 +1593,21 @@ Vil du fortsætte?
     Invoke-NetIPRunspace -ArgumentList @($config) -ScriptBlock {
         param($config)
         Write-NetIPStatus -Busy -Message 'Anvender konfiguration...'
-        Write-NetIPLog -Message 'Step 1/8: Henter tenant og klargør outputmappe...'
+        Write-NetIPLog -Message 'Step 1/11: Henter tenant og klargør outputmappe...'
         $tenant = Get-NetIPTenantInfo
         $output = if ($sync.State.OutputFolder) { $sync.State.OutputFolder } else { New-NetIPOutputFolder -TenantId $tenant.TenantId }
         New-Item -ItemType Directory -Force -Path $output | Out-Null
 
         $upn1 = ConvertTo-BreakGlassUpn -Prefix $config.UserPrefix1 -OnMicrosoftDomain $tenant.OnMicrosoftDomain
         $upn2 = ConvertTo-BreakGlassUpn -Prefix $config.UserPrefix2 -OnMicrosoftDomain $tenant.OnMicrosoftDomain
-        Write-NetIPLog -Message 'Step 2/8: Sikrer CA-exclude gruppe...'
+        Write-NetIPLog -Message 'Step 2/11: Sikrer CA-exclude gruppe...'
         $group = Ensure-NetIPSecurityGroup -DisplayName $config.GroupName -Description $config.GroupDescription -CreateIfMissing ([bool]$config.CreateGroup) -Apply $true
         Write-NetIPLog -Level PASS -Message "Gruppe håndteret: $($config.GroupName)"
+        $groupId = [string](Get-NetIPObjectPropertyValue -InputObject $group -Name 'id')
+        $groupDisplayName = [string](Get-NetIPObjectPropertyValue -InputObject $group -Name 'displayName')
+        $groupStatus = [string](Get-NetIPObjectPropertyValue -InputObject $group -Name 'EnsureStatus')
 
-        Write-NetIPLog -Message 'Step 3/8: Sikrer break-glass brugere...'
+        Write-NetIPLog -Message 'Step 3/11: Sikrer break-glass brugere...'
         $createdPasswords = @()
         $users = [System.Collections.Generic.List[object]]::new()
         foreach ($item in @(
@@ -1372,7 +1633,7 @@ Vil du fortsætte?
             Write-NetIPLog -Level PASS -Message "Bruger oprettet: $($item.Upn)"
         }
 
-        Write-NetIPLog -Message 'Step 4/8: Sikrer gruppemedlemskab...'
+        Write-NetIPLog -Message 'Step 4/11: Sikrer gruppemedlemskab...'
         $membership = @()
         if ($config.AddUsersToGroup) {
             foreach ($user in $users | Where-Object { Get-NetIPObjectPropertyValue -InputObject $_ -Name 'id' }) {
@@ -1383,14 +1644,14 @@ Vil du fortsætte?
             $membership += [pscustomobject]@{ Status='Skipped'; Detail='Gruppemedlemskab er fravalgt.' }
         }
 
-        Write-NetIPLog -Message 'Step 5/8: Sikrer direkte Global Administrator rolle...'
+        Write-NetIPLog -Message 'Step 5/11: Sikrer direkte Global Administrator rolle...'
         $roleDefinition = Get-NetIPGlobalAdministratorRoleDefinition
         $roleAssignments = @()
         foreach ($user in $users | Where-Object { Get-NetIPObjectPropertyValue -InputObject $_ -Name 'id' }) {
             $roleAssignments += Ensure-NetIPGlobalAdministratorAssignment -User $user -RoleDefinition $roleDefinition -Apply $true
         }
 
-        Write-NetIPLog -Message 'Step 6/9: Håndterer administrator-SSPR...'
+        Write-NetIPLog -Message 'Step 6/11: Håndterer administrator-SSPR...'
         $adminSSPRResult = if ($config.DisableAdminSSPR) {
             Set-NetIPAdminSSPRDisabled -Apply $true
         }
@@ -1405,14 +1666,35 @@ Vil du fortsætte?
             }
         }
 
-        Write-NetIPLog -Message 'Step 7/9: Henter Conditional Access policies...'
+        Write-NetIPLog -Message 'Step 7/11: Håndterer BreakGlass-FIDO2 authentication strength...'
+        $authenticationStrengthResult = if ($config.CreateAuthenticationStrength) {
+            Ensure-NetIPAuthenticationStrength -DisplayName $config.AuthenticationStrengthName -Description $config.AuthenticationStrengthDescription -AllowedAAGUIDs @($config.AAGUIDs) -Apply $true
+        }
+        else {
+            $existingStrength = Get-NetIPAuthenticationStrengthByName -DisplayName $config.AuthenticationStrengthName
+            if ($existingStrength) {
+                $existingStrength | Add-Member -MemberType NoteProperty -Name Status -Value 'AlreadyExists' -Force
+                $existingStrength
+            }
+            else {
+                [pscustomobject]@{ id=''; displayName=$config.AuthenticationStrengthName; Status='Skipped' }
+            }
+        }
+
+        Write-NetIPLog -Message 'Step 8/11: Håndterer dedikeret BreakGlass FIDO2 CA-policy...'
+        $breakGlassCAPolicyResult = if ($config.CreateBreakGlassCAPolicy) {
+            $strengthId = [string](Get-NetIPObjectPropertyValue -InputObject $authenticationStrengthResult -Name 'id')
+            Ensure-NetIPBreakGlassCAPolicy -DisplayName $config.BreakGlassCAPolicyName -GroupId $groupId -AuthenticationStrengthId $strengthId -Enabled ([bool]$config.EnableBreakGlassCAPolicy) -Apply $true
+        }
+        else {
+            [pscustomobject]@{ id=''; displayName=$config.BreakGlassCAPolicyName; state='notConfigured'; Status='Skipped' }
+        }
+
+        Write-NetIPLog -Message 'Step 9/11: Henter Conditional Access policies...'
         $policies = @(Get-NetIPConditionalAccessPolicies)
         $backupPath = ''
         $caResults = @()
         $alreadyExcluded = @()
-        $groupId = [string](Get-NetIPObjectPropertyValue -InputObject $group -Name 'id')
-        $groupDisplayName = [string](Get-NetIPObjectPropertyValue -InputObject $group -Name 'displayName')
-        $groupStatus = [string](Get-NetIPObjectPropertyValue -InputObject $group -Name 'EnsureStatus')
         if ($group -and $groupId) {
             foreach ($policy in $policies) {
                 $excludeGroups = @(Get-NetIPObjectPropertyValue -InputObject (Get-NetIPObjectPropertyValue -InputObject (Get-NetIPObjectPropertyValue -InputObject $policy -Name 'conditions') -Name 'users') -Name 'excludeGroups')
@@ -1426,15 +1708,15 @@ Vil du fortsætte?
             }
         }
         if ($config.PatchCAPolicies -and $group -and $groupId) {
-            Write-NetIPLog -Message 'Step 8/9: Backupper og opdaterer Conditional Access policies...'
+            Write-NetIPLog -Message 'Step 10/11: Backupper og opdaterer eksisterende Conditional Access policies...'
             $backupPath = Backup-NetIPConditionalAccessPolicies -Policies $policies -OutputFolder $output
             $caResults = Add-NetIPGroupExclusionToCAPolicies -Policies $policies -GroupId $groupId -Apply $true
         }
         else {
-            Write-NetIPLog -Message 'Step 8/9: Conditional Access patching er fravalgt.'
+            Write-NetIPLog -Message 'Step 10/11: Conditional Access patching er fravalgt.'
         }
 
-        Write-NetIPLog -Message 'Step 9/9: Gemmer resultat og genererer handoff...'
+        Write-NetIPLog -Message 'Step 11/11: Gemmer resultat og genererer handoff...'
         $changed = @($caResults | Where-Object Status -eq 'Patched')
         $failed = @($caResults | Where-Object Status -eq 'Failed')
         $account1Status = [string](Get-NetIPObjectPropertyValue -InputObject $users[0] -Name 'EnsureStatus')
@@ -1451,6 +1733,8 @@ Vil du fortsætte?
             GroupMembership = $membership
             RoleAssignments = $roleAssignments
             AdminSSPR = $adminSSPRResult
+            AuthenticationStrength = $authenticationStrengthResult
+            BreakGlassCAPolicy = $breakGlassCAPolicyResult
             CAExclusionsEnabled = [bool]$config.PatchCAPolicies
             CAPoliciesChangedCount = $changed.Count
             CAPoliciesChanged = $changed
@@ -1508,6 +1792,10 @@ Tilføj konti til gruppe: $($plan.AddAccountsToGroup)
 Tildel Global Administrator: $($plan.AssignGlobalAdministrator) / scope $($plan.RoleAssignmentScope)
 Administrator-SSPR enabled nu: $($plan.CurrentAdminSSPREnabled)
 Administrator-SSPR plan: $($plan.PlannedAdminSSPRStatus)
+
+Authentication strength: $($plan.AuthenticationStrengthName) / $($plan.AuthenticationStrengthStatus)
+AAGUIDs: $(@($plan.AuthenticationStrengthAAGUIDs) -join ', ')
+Dedikeret BG CA policy: $($plan.BreakGlassCAPolicyName) / $($plan.BreakGlassCAPolicyStatus)
 
 Conditional Access policies fundet: $($plan.ConditionalAccessCount)
 Patch CA policies: $($plan.PatchConditionalAccess)
@@ -1674,6 +1962,61 @@ function Invoke-NetIPDiscovery {
     }
 }
 
+function Invoke-NetIPFetchAAGUIDs {
+    [CmdletBinding()]
+    param()
+
+    if (-not $sync.State.GraphConnected -and -not $sync.App.Mock) {
+        [System.Windows.MessageBox]::Show("Du skal først forbinde til Microsoft Graph under trinnet 'Forbind'.", $sync.App.Name, 'OK', 'Warning') | Out-Null
+        return
+    }
+
+    $config = Get-NetIPConfigFromUI
+    Invoke-NetIPRunspace -ArgumentList @($config) -ScriptBlock {
+        param($config)
+        Write-NetIPStatus -Busy -Message 'Henter FIDO2 AAGUID...'
+        $sourceUpn = Get-NetIPAAGUIDSourceUserPrincipalName -Config $config
+        Write-NetIPLog -Message "Henter FIDO2 methods fra: $sourceUpn"
+        $methods = @(Get-NetIPFido2MethodsForUser -UserPrincipalName $sourceUpn)
+        if ($methods.Count -lt 1) {
+            Write-NetIPStatus -Message 'Ingen FIDO2 methods fundet.'
+            $sync.Form.Dispatcher.Invoke([System.Action]{
+                [System.Windows.MessageBox]::Show("Der blev ikke fundet registrerede FIDO2/passkey methods på $sourceUpn.", $sync.App.Name, 'OK', 'Warning') | Out-Null
+            })
+            return
+        }
+
+        $aaGuids = @($methods | ForEach-Object {
+            [string](Get-NetIPObjectPropertyValue -InputObject $_ -Name 'aaGuid')
+        } | Where-Object { $_ -match '^[0-9a-fA-F-]{36}$' } | ForEach-Object { $_.ToLowerInvariant() } | Select-Object -Unique)
+
+        $details = @($methods | ForEach-Object {
+            $name = [string](Get-NetIPObjectPropertyValue -InputObject $_ -Name 'displayName')
+            $model = [string](Get-NetIPObjectPropertyValue -InputObject $_ -Name 'model')
+            $guid = [string](Get-NetIPObjectPropertyValue -InputObject $_ -Name 'aaGuid')
+            $attestation = [string](Get-NetIPObjectPropertyValue -InputObject $_ -Name 'attestationLevel')
+            $type = [string](Get-NetIPObjectPropertyValue -InputObject $_ -Name 'passkeyType')
+            "$name / $model / $guid / attestation=$attestation / type=$type"
+        })
+
+        foreach ($detail in $details) { Write-NetIPLog -Level PASS -Message "FIDO2 method: $detail" }
+        if ($aaGuids.Count -lt 1) {
+            Write-NetIPStatus -Message 'Ingen gyldige AAGUIDs fundet.'
+            $sync.Form.Dispatcher.Invoke([System.Action]{
+                [System.Windows.MessageBox]::Show("FIDO2 methods blev fundet, men ingen gyldige AAGUIDs kunne læses.", $sync.App.Name, 'OK', 'Warning') | Out-Null
+            })
+            return
+        }
+
+        $sync.Form.Dispatcher.Invoke([System.Action]{
+            $existing = @(ConvertFrom-NetIPAAGUIDText -Text $sync.WPFAAGUIDs.Text)
+            $merged = @($existing + $aaGuids | Select-Object -Unique)
+            $sync.WPFAAGUIDs.Text = ($merged -join [Environment]::NewLine)
+        })
+        Write-NetIPStatus -Message "AAGUID hentet fra $sourceUpn."
+    }
+}
+
 function Invoke-NetIPOpenOutputFolder {
     [CmdletBinding()]
     param()
@@ -1715,6 +2058,7 @@ function Invoke-NetIPWPFButton {
         'WPFBuildPlan' { Invoke-NetIPBuildPlan }
         'WPFApplyConfiguration' { Invoke-NetIPApplyConfiguration }
         'WPFCycleNeutralNames' { Set-NetIPNeutralAccountNamePair }
+        'WPFFetchAAGUIDs' { Invoke-NetIPFetchAAGUIDs }
         'WPFOpenOutputFolder' { Invoke-NetIPOpenOutputFolder }
         'WPFOpenHandoff' { Invoke-NetIPOpenHandoff }
         default { Write-NetIPLog -Level WARN -Message "Ukendt UI handling: $Name" }
@@ -1748,10 +2092,13 @@ function Set-NetIPWPFStep {
 $sync.configs.appsettings = @'
 {
   "name": "Entra Break Glass Configurator",
-  "version": "2.1.1",
+  "version": "2.2.0",
   "outputRoot": ".\\Output",
   "groupName": "CA-BreakGlass-Exclude",
-  "groupDescription": "Security group used to exclude dedicated break-glass accounts from existing Conditional Access policies."
+  "groupDescription": "Security group used to exclude dedicated break-glass accounts from existing Conditional Access policies.",
+  "authenticationStrengthName": "BreakGlass-FIDO2",
+  "authenticationStrengthDescription": "Requires passkeys (FIDO2) from approved attested security key AAGUIDs for break-glass accounts.",
+  "breakGlassCAPolicyName": "[CA999] IdentityProtection-AnyApp-AnyPlatform-BreakGlass-FIDO2"
 }
 
 '@ | ConvertFrom-Json
@@ -1766,6 +2113,9 @@ $sync.configs.defaults = @'
   "addUsersToGroup": true,
   "disableAdminSSPR": true,
   "patchCAPolicies": false,
+  "createAuthenticationStrength": false,
+  "createBreakGlassCAPolicy": false,
+  "enableBreakGlassCAPolicy": false,
   "neutralNamePairs": [
     { "account1": "Horse Unit", "account2": "Master Player" },
     { "account1": "Car Engine", "account2": "Plane Model" },
@@ -1802,8 +2152,10 @@ $sync.configs.graphScopes = @'
   "Group.ReadWrite.All",
   "Directory.Read.All",
   "Organization.Read.All",
+  "UserAuthenticationMethod.Read.All",
   "RoleManagement.ReadWrite.Directory",
   "Policy.Read.All",
+  "Policy.ReadWrite.AuthenticationMethod",
   "Policy.ReadWrite.Authorization",
   "Policy.ReadWrite.ConditionalAccess"
 ]
@@ -1943,7 +2295,9 @@ $inputXML = @'
                                 <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
                                 <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
                                 <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
-                                <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/><RowDefinition Height="Auto"/><RowDefinition Height="Auto"/>
+                                <RowDefinition Height="Auto"/>
                             </Grid.RowDefinitions>
                             <TextBlock Grid.Row="0" Grid.ColumnSpan="4" Text="Konfiguration" FontSize="22" FontWeight="SemiBold" Margin="0,0,0,12"/>
                             <TextBlock Grid.Row="1" Grid.Column="0" Text="Account 1 display name"/>
@@ -1969,7 +2323,30 @@ $inputXML = @'
                             <TextBox x:Name="WPFGroupName" Grid.Row="6" Grid.Column="1" Grid.ColumnSpan="3" IsReadOnly="True"/>
                             <TextBlock Grid.Row="7" Grid.Column="0" Text="Security group description"/>
                             <TextBox x:Name="WPFGroupDescription" Grid.Row="7" Grid.Column="1" Grid.ColumnSpan="3" IsReadOnly="True" TextWrapping="Wrap" Height="58"/>
-                            <StackPanel Grid.Row="8" Grid.Column="0" Grid.ColumnSpan="4" Margin="0,10,0,0">
+                            <TextBlock Grid.Row="8" Grid.ColumnSpan="4" Text="FIDO2 authentication strength" FontSize="16" FontWeight="SemiBold" Margin="0,14,0,8"/>
+                            <TextBlock Grid.Row="9" Grid.Column="0" Text="AAGUID kildebruger"/>
+                            <StackPanel Grid.Row="9" Grid.Column="1" Grid.ColumnSpan="3" Orientation="Horizontal">
+                                <ComboBox x:Name="WPFAAGUIDSourceUser" Width="170" SelectedIndex="0" Margin="0,2,8,8">
+                                    <ComboBoxItem Content="Account 1"/>
+                                    <ComboBoxItem Content="Account 2"/>
+                                    <ComboBoxItem Content="Custom UPN"/>
+                                </ComboBox>
+                                <TextBox x:Name="WPFAAGUIDCustomUser" Width="310" Margin="0,2,8,8"/>
+                                <Button x:Name="WPFFetchAAGUIDs" Content="Hent AAGUID" Width="130" Margin="0,0,0,8"/>
+                            </StackPanel>
+                            <TextBlock Grid.Row="10" Grid.Column="0" Text="Tilladte AAGUIDs"/>
+                            <TextBox x:Name="WPFAAGUIDs" Grid.Row="10" Grid.Column="1" Grid.ColumnSpan="3" AcceptsReturn="True" TextWrapping="Wrap" Height="62"/>
+                            <TextBlock Grid.Row="11" Grid.Column="0" Text="Auth strength navn"/>
+                            <TextBox x:Name="WPFAuthenticationStrengthName" Grid.Row="11" Grid.Column="1" IsReadOnly="True" Margin="0,2,16,8"/>
+                            <TextBlock Grid.Row="11" Grid.Column="2" Text="BG CA policy navn"/>
+                            <TextBox x:Name="WPFBreakGlassCAPolicyName" Grid.Row="11" Grid.Column="3" IsReadOnly="True"/>
+                            <StackPanel Grid.Row="12" Grid.Column="0" Grid.ColumnSpan="4">
+                                <CheckBox x:Name="WPFCreateAuthenticationStrength" Content="Opret/opdater BreakGlass-FIDO2 authentication strength med AAGUID-restriction"/>
+                                <CheckBox x:Name="WPFCreateBreakGlassCAPolicy" Content="Opret dedikeret CA-policy der kræver BreakGlass-FIDO2 for CA-BreakGlass-Exclude"/>
+                                <CheckBox x:Name="WPFEnableBreakGlassCAPolicy" Content="Opret CA-policy som enabled i stedet for report-only"/>
+                                <TextBlock Foreground="#92400E" Text="Anbefaling: lad CA-politikken være report-only indtil begge konti har to registrerede og testede FIDO2 keys."/>
+                            </StackPanel>
+                            <StackPanel Grid.Row="13" Grid.Column="0" Grid.ColumnSpan="4" Margin="0,10,0,0">
                                 <CheckBox x:Name="WPFCreateUsers" Content="Opret brugere hvis de ikke findes"/>
                                 <CheckBox x:Name="WPFCreateGroup" Content="Opret gruppen CA-BreakGlass-Exclude hvis den ikke findes"/>
                                 <CheckBox x:Name="WPFAddUsersToGroup" Content="Tilføj break-glass konti til CA-BreakGlass-Exclude"/>

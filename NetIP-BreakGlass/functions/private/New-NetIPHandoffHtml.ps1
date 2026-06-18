@@ -34,6 +34,8 @@ function New-NetIPHandoffHtml {
     $memberships = @(Get-NetIPObjectPropertyValue -InputObject $Result -Name 'GroupMembership')
     $roleAssignments = @(Get-NetIPObjectPropertyValue -InputObject $Result -Name 'RoleAssignments')
     $adminSSPR = Get-NetIPObjectPropertyValue -InputObject $Result -Name 'AdminSSPR'
+    $authenticationStrength = Get-NetIPObjectPropertyValue -InputObject $Result -Name 'AuthenticationStrength'
+    $breakGlassCAPolicy = Get-NetIPObjectPropertyValue -InputObject $Result -Name 'BreakGlassCAPolicy'
     $resultWarnings = @(Get-NetIPObjectPropertyValue -InputObject $Result -Name 'Warnings')
     $changedTable = Rows $changed
     $alreadyTable = Rows $already
@@ -97,6 +99,21 @@ function New-NetIPHandoffHtml {
     <tr><th>Detail</th><td>$(ConvertTo-NetIPHtmlValue (Get-NetIPObjectPropertyValue -InputObject $adminSSPR -Name 'Detail'))</td></tr>
   </table>
   <h2>Conditional Access</h2>
+  <h3>BreakGlass-FIDO2 authentication strength</h3>
+  <table>
+    <tr><th>Navn</th><td>$(ConvertTo-NetIPHtmlValue (Get-NetIPObjectPropertyValue -InputObject $authenticationStrength -Name 'displayName'))</td></tr>
+    <tr><th>Object ID</th><td>$(ConvertTo-NetIPHtmlValue (Get-NetIPObjectPropertyValue -InputObject $authenticationStrength -Name 'id'))</td></tr>
+    <tr><th>Status</th><td>$(ConvertTo-NetIPHtmlValue (Get-NetIPObjectPropertyValue -InputObject $authenticationStrength -Name 'Status'))</td></tr>
+    <tr><th>Tilladte AAGUIDs</th><td>$(ConvertTo-NetIPHtmlValue (@(Get-NetIPObjectPropertyValue -InputObject $authenticationStrength -Name 'allowedAAGUIDs') -join ', '))</td></tr>
+  </table>
+  <h3>Dedikeret BreakGlass FIDO2 CA-policy</h3>
+  <table>
+    <tr><th>Navn</th><td>$(ConvertTo-NetIPHtmlValue (Get-NetIPObjectPropertyValue -InputObject $breakGlassCAPolicy -Name 'displayName'))</td></tr>
+    <tr><th>Object ID</th><td>$(ConvertTo-NetIPHtmlValue (Get-NetIPObjectPropertyValue -InputObject $breakGlassCAPolicy -Name 'id'))</td></tr>
+    <tr><th>State</th><td>$(ConvertTo-NetIPHtmlValue (Get-NetIPObjectPropertyValue -InputObject $breakGlassCAPolicy -Name 'state'))</td></tr>
+    <tr><th>Status</th><td>$(ConvertTo-NetIPHtmlValue (Get-NetIPObjectPropertyValue -InputObject $breakGlassCAPolicy -Name 'Status'))</td></tr>
+  </table>
+  <h3>Eksisterende Conditional Access exclusions</h3>
   <table>
     <tr><th>CA exclusions valgt</th><td>$(ConvertTo-NetIPHtmlValue (Get-NetIPObjectPropertyValue -InputObject $Result -Name 'CAExclusionsEnabled'))</td></tr>
     <tr><th>Antal policies ændret</th><td>$(ConvertTo-NetIPHtmlValue (Get-NetIPObjectPropertyValue -InputObject $Result -Name 'CAPoliciesChangedCount'))</td></tr>
@@ -117,6 +134,7 @@ function New-NetIPHandoffHtml {
     <li>Verificér at begge break-glass konti har direkte Global Administrator rolle.</li>
     <li>Hvis administrator-SSPR blev deaktiveret, vent op til 60 minutter og test derefter FIDO2/TAP onboarding igen.</li>
     <li>Verificér at begge break-glass konti kan logge ind.</li>
+    <li>Hvis den dedikerede BreakGlass FIDO2 CA-policy er report-only, valider sign-in logs før den sættes til enabled.</li>
     <li>Verificér at kontiene er medlem af CA-BreakGlass-Exclude.</li>
     <li>Verificér at gruppen er ekskluderet fra de ønskede Conditional Access-politikker, hvis funktionen blev valgt.</li>
     <li>Dokumentér hvor credentials opbevares.</li>

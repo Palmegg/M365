@@ -49,6 +49,16 @@ function Set-NetIPLanguage {
         @{ Da = 'Final UPN preview'; En = 'Final UPN preview' }
         @{ Da = 'Security group name'; En = 'Security group name' }
         @{ Da = 'Security group description'; En = 'Security group description' }
+        @{ Da = 'FIDO2 authentication strength'; En = 'FIDO2 authentication strength' }
+        @{ Da = 'AAGUID kildebruger'; En = 'AAGUID source user' }
+        @{ Da = 'Hent AAGUID'; En = 'Fetch AAGUID' }
+        @{ Da = 'Tilladte AAGUIDs'; En = 'Allowed AAGUIDs' }
+        @{ Da = 'Auth strength navn'; En = 'Auth strength name' }
+        @{ Da = 'BG CA policy navn'; En = 'BG CA policy name' }
+        @{ Da = 'Opret/opdater BreakGlass-FIDO2 authentication strength med AAGUID-restriction'; En = 'Create/update BreakGlass-FIDO2 authentication strength with AAGUID restriction' }
+        @{ Da = 'Opret dedikeret CA-policy der kræver BreakGlass-FIDO2 for CA-BreakGlass-Exclude'; En = 'Create dedicated CA policy requiring BreakGlass-FIDO2 for CA-BreakGlass-Exclude' }
+        @{ Da = 'Opret CA-policy som enabled i stedet for report-only'; En = 'Create CA policy as enabled instead of report-only' }
+        @{ Da = 'Anbefaling: lad CA-politikken være report-only indtil begge konti har to registrerede og testede FIDO2 keys.'; En = 'Recommendation: keep the CA policy in report-only until both accounts have two registered and tested FIDO2 keys.' }
         @{ Da = 'Opret brugere hvis de ikke findes'; En = 'Create users if missing' }
         @{ Da = 'Opret gruppen CA-BreakGlass-Exclude hvis den ikke findes'; En = 'Create CA-BreakGlass-Exclude if missing' }
         @{ Da = 'Tilføj break-glass konti til CA-BreakGlass-Exclude'; En = 'Add break-glass accounts to CA-BreakGlass-Exclude' }

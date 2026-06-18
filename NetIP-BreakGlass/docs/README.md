@@ -14,13 +14,16 @@ PowerShell 7/WPF værktøj til en simpel Microsoft Graph-baseret v1 opsætning a
 - Tilføjer kontiene til gruppen, hvis valgt.
 - Tildeler begge break-glass konti direkte `Global Administrator` på tenant scope (`/`).
 - Kan deaktivere administrator-SSPR tenant-wide, hvis valgt. Dette kan ikke begrænses til kun de to break-glass konti.
+- Kan hente AAGUID fra en allerede registreret FIDO2/passkey på en valgt bruger.
+- Kan oprette/opdatere custom authentication strength `BreakGlass-FIDO2` med FIDO2 og tilladte AAGUIDs.
+- Kan oprette en dedikeret Conditional Access-politik, der kræver `BreakGlass-FIDO2` for `CA-BreakGlass-Exclude`.
 - Kan valgfrit ekskludere gruppen fra eksisterende Conditional Access-politikker.
 - Backupper CA policies før valgfri patching.
 - Genererer `plan.json`, `result.json`, `handoff.html` og `app.log`.
 
 ## Hvad værktøjet ikke gør
 
-Det bruger ikke Azure login, Az-moduler, PIM, RMAU, FIDO2, AAGUIDs, authentication strengths, Log Analytics, Azure Monitor, Sentinel, Intune, app registrations, service principals eller cleanup/delete workflows.
+Det bruger ikke Azure login, Az-moduler, PIM, RMAU, Log Analytics, Azure Monitor, Sentinel, Intune, app registrations, service principals eller cleanup/delete workflows.
 
 ## Hvorfor kun Microsoft Graph
 
@@ -61,8 +64,10 @@ Default scopes ligger i `config/graphScopes.json`:
 - `Group.ReadWrite.All`
 - `Directory.Read.All`
 - `Organization.Read.All`
+- `UserAuthenticationMethod.Read.All`
 - `RoleManagement.ReadWrite.Directory`
 - `Policy.Read.All`
+- `Policy.ReadWrite.AuthenticationMethod`
 - `Policy.ReadWrite.Authorization`
 - `Policy.ReadWrite.ConditionalAccess`
 
@@ -70,7 +75,7 @@ Admin consent kan være nødvendig i kundens tenant.
 
 ## Krævede roller
 
-Den indloggede konto skal have rettigheder til at oprette brugere/grupper, tildele directory roles, læse/opdatere authorization policy hvis Admin SSPR deaktiveres og, hvis CA patching vælges, læse og opdatere Conditional Access-politikker. Typisk kræves Global Administrator eller en kombination med Privileged Role Administrator, User Administrator, Groups Administrator og Conditional Access Administrator.
+Den indloggede konto skal have rettigheder til at oprette brugere/grupper, tildele directory roles, læse FIDO2 authentication methods, læse/opdatere authentication strengths, læse/opdatere authorization policy hvis Admin SSPR deaktiveres og, hvis CA vælges, læse og opdatere Conditional Access-politikker. Typisk kræves Global Administrator eller en kombination med Privileged Role Administrator, Authentication Administrator, Security Administrator, User Administrator, Groups Administrator og Conditional Access Administrator.
 
 ## Password-håndtering
 
@@ -85,6 +90,8 @@ Passwords:
 - skrives ikke til `handoff.html`
 
 ## Conditional Access advarsel
+
+Den dedikerede BreakGlass FIDO2 CA-policy oprettes som report-only som standard. Sæt den først til enabled, når begge break-glass konti har registreret og testet de ønskede FIDO2 keys.
 
 CA exclusion patching er valgfri og slået fra som standard. Hvis funktionen vælges, backuppes policies til `ca-policies-before.json`, og værktøjet tilføjer kun gruppens object ID til `conditions.users.excludeGroups`. Eksisterende exclusions og øvrige policy-indstillinger bevares.
 

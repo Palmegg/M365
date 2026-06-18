@@ -3,8 +3,10 @@
   "Group.ReadWrite.All",
   "Directory.Read.All",
   "Organization.Read.All",
+  "UserAuthenticationMethod.Read.All",
   "RoleManagement.ReadWrite.Directory",
   "Policy.Read.All",
+  "Policy.ReadWrite.AuthenticationMethod",
   "Policy.ReadWrite.Authorization",
   "Policy.ReadWrite.ConditionalAccess"
 ]

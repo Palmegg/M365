@@ -15,6 +15,7 @@ function Invoke-NetIPWPFButton {
         'WPFBuildPlan' { Invoke-NetIPBuildPlan }
         'WPFApplyConfiguration' { Invoke-NetIPApplyConfiguration }
         'WPFCycleNeutralNames' { Set-NetIPNeutralAccountNamePair }
+        'WPFFetchAAGUIDs' { Invoke-NetIPFetchAAGUIDs }
         'WPFOpenOutputFolder' { Invoke-NetIPOpenOutputFolder }
         'WPFOpenHandoff' { Invoke-NetIPOpenHandoff }
         default { Write-NetIPLog -Level WARN -Message "Ukendt UI handling: $Name" }

@@ -18,11 +18,16 @@ function Initialize-NetIPWPFUI {
     $sync.WPFUserPrefix2.Text = [string]$defaults.account2Prefix
     $sync.WPFGroupName.Text = [string]$settings.groupName
     $sync.WPFGroupDescription.Text = [string]$settings.groupDescription
+    $sync.WPFAuthenticationStrengthName.Text = [string]$settings.authenticationStrengthName
+    $sync.WPFBreakGlassCAPolicyName.Text = [string]$settings.breakGlassCAPolicyName
     $sync.WPFCreateUsers.IsChecked = [bool]$defaults.createUsers
     $sync.WPFCreateGroup.IsChecked = [bool]$defaults.createGroup
     $sync.WPFAddUsersToGroup.IsChecked = [bool]$defaults.addUsersToGroup
     $sync.WPFDisableAdminSSPR.IsChecked = [bool]$defaults.disableAdminSSPR
     $sync.WPFPatchCAPolicies.IsChecked = [bool]$defaults.patchCAPolicies
+    $sync.WPFCreateAuthenticationStrength.IsChecked = [bool]$defaults.createAuthenticationStrength
+    $sync.WPFCreateBreakGlassCAPolicy.IsChecked = [bool]$defaults.createBreakGlassCAPolicy
+    $sync.WPFEnableBreakGlassCAPolicy.IsChecked = [bool]$defaults.enableBreakGlassCAPolicy
     if ($sync.WPFLanguageSelector) { $sync.WPFLanguageSelector.SelectedIndex = 0 }
     Set-NetIPLanguage -Language $sync.State.Language
 
