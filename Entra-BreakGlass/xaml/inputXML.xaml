@@ -523,6 +523,10 @@
                         <TextBlock Text="Phase 1b - Manuel FIDO2 opsætning" FontSize="22" FontWeight="SemiBold" Margin="0,0,0,12"/>
                         <TextBlock Text="Log ind på begge break-glass konti med de Temporary Access Pass-koder fra handoff/credential-vinduet."/>
                         <TextBlock Margin="0,12,0,0" Text="Registrer to separate FIDO2 security keys pr. konto. Opbevar keys fysisk adskilt og sikkert."/>
+                        <StackPanel Orientation="Horizontal" Margin="0,16,0,0">
+                            <Button x:Name="WPFOpenMfaSetup" Content="Åbn MFA setup" Width="160" Margin="0,0,12,0"/>
+                            <TextBlock VerticalAlignment="Center" Text="https://aka.ms/mfasetup" Foreground="{StaticResource TextSecondary}"/>
+                        </StackPanel>
                         <TextBlock Margin="0,12,0,0" Text="Når FIDO2 keys er registreret på begge konti, fortsæt til Phase 2. Configuratoren refresher derefter kontiene og henter AAGUIDs fra de registrerede FIDO2 methods."/>
                         <TextBlock Foreground="#FBBF24" Margin="0,20,0,0" Text="Spring ikke dette trin over. Phase 2 fejler, hvis der ikke findes FIDO2 methods på kontiene."/>
                     </StackPanel>

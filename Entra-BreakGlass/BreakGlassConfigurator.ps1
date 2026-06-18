@@ -3103,6 +3103,21 @@ function Invoke-EbgOpenHandoff {
         [System.Windows.MessageBox]::Show('Handoff-dokumentet er ikke genereret endnu.', $sync.App.Name, 'OK', 'Information') | Out-Null
     }
 }
+function Invoke-EbgOpenUrl {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string] $Url)
+
+    try {
+        Start-Process -FilePath $Url | Out-Null
+        Write-EbgLog -Message "Åbnede link: $Url"
+    }
+    catch {
+        $message = ConvertTo-EbgRedactedError -ErrorRecord $_
+        Write-EbgLog -Level ERROR -Message $message
+        [System.Windows.MessageBox]::Show("Kunne ikke åbne linket: $Url`n`n$message", $sync.App.Name, 'OK', 'Error') | Out-Null
+    }
+}
+
 function Invoke-EbgWPFButton {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string] $Name)
@@ -3127,6 +3142,7 @@ function Invoke-EbgWPFButton {
         'WPFApplyPhase2' { Invoke-EbgApplyPhase2 }
         'WPFCycleNeutralNames' { Set-EbgNeutralAccountNamePair }
         'WPFFetchAAGUIDs' { Invoke-EbgFetchAAGUIDs }
+        'WPFOpenMfaSetup' { Invoke-EbgOpenUrl -Url 'https://aka.ms/mfasetup' }
         'WPFOpenOutputFolder' { Invoke-EbgOpenOutputFolder }
         'WPFOpenHandoff' { Invoke-EbgOpenHandoff }
         default { Write-EbgLog -Level WARN -Message "Ukendt UI handling: $Name" }
@@ -3237,7 +3253,7 @@ function Stop-EbgCurrentTask {
 $sync.configs.appsettings = @'
 {
   "name": "Entra Break Glass Configurator",
-  "version": "2.4.12",
+  "version": "2.4.13",
   "outputRoot": ".\\Output",
   "groupName": "CA-BreakGlass-Exclude",
   "groupDescription": "Security group used to exclude dedicated break-glass accounts from existing Conditional Access policies.",
@@ -3833,6 +3849,10 @@ $inputXML = @'
                         <TextBlock Text="Phase 1b - Manuel FIDO2 opsætning" FontSize="22" FontWeight="SemiBold" Margin="0,0,0,12"/>
                         <TextBlock Text="Log ind på begge break-glass konti med de Temporary Access Pass-koder fra handoff/credential-vinduet."/>
                         <TextBlock Margin="0,12,0,0" Text="Registrer to separate FIDO2 security keys pr. konto. Opbevar keys fysisk adskilt og sikkert."/>
+                        <StackPanel Orientation="Horizontal" Margin="0,16,0,0">
+                            <Button x:Name="WPFOpenMfaSetup" Content="Åbn MFA setup" Width="160" Margin="0,0,12,0"/>
+                            <TextBlock VerticalAlignment="Center" Text="https://aka.ms/mfasetup" Foreground="{StaticResource TextSecondary}"/>
+                        </StackPanel>
                         <TextBlock Margin="0,12,0,0" Text="Når FIDO2 keys er registreret på begge konti, fortsæt til Phase 2. Configuratoren refresher derefter kontiene og henter AAGUIDs fra de registrerede FIDO2 methods."/>
                         <TextBlock Foreground="#FBBF24" Margin="0,20,0,0" Text="Spring ikke dette trin over. Phase 2 fejler, hvis der ikke findes FIDO2 methods på kontiene."/>
                     </StackPanel>
