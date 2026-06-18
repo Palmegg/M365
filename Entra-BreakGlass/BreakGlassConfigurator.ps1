@@ -2707,7 +2707,7 @@ function Invoke-EbgDiscovery {
         }
         $sync.State.Discovery = $discovery
         $summary = "Aktive Global Admins: $($activeGlobalAdmins.Count); Target user1: $(if($user1){'findes'}else{'mangler'}); Target user2: $(if($user2){'findes'}else{'mangler'}); Gruppe: $(if($group){'findes'}else{'mangler'}); CA policies: $($policies.Count)"
-        $userMissingSeverity = if ($config.CreateUsers) { 'Warning' } else { 'Bad' }
+        $userMissingSeverity = if ($config.CreateUsers) { 'Info' } else { 'Bad' }
         $groupMissingSeverity = if ($config.CreateGroup) { 'Warning' } else { 'Bad' }
         $excludedSeverity = if ($policies.Count -eq 0) {
             'Good'
@@ -2724,7 +2724,7 @@ function Invoke-EbgDiscovery {
         $summarySeverity = if ((-not $user1 -and -not $config.CreateUsers) -or (-not $user2 -and -not $config.CreateUsers) -or (-not $group -and -not $config.CreateGroup) -or $excludedSeverity -eq 'Bad') {
             'Bad'
         }
-        elseif (-not $user1 -or -not $user2 -or -not $group -or $excludedSeverity -eq 'Warning') {
+        elseif ((-not $group -and $config.CreateGroup) -or $excludedSeverity -eq 'Warning') {
             'Warning'
         }
         else {
@@ -3004,7 +3004,7 @@ function Stop-EbgCurrentTask {
 $sync.configs.appsettings = @'
 {
   "name": "Entra Break Glass Configurator",
-  "version": "2.4.6",
+  "version": "2.4.7",
   "outputRoot": ".\\Output",
   "groupName": "CA-BreakGlass-Exclude",
   "groupDescription": "Security group used to exclude dedicated break-glass accounts from existing Conditional Access policies.",
