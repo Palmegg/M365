@@ -13,6 +13,10 @@ function Invoke-EbgApplyPhase1 {
         [System.Windows.MessageBox]::Show('Generér en plan før du udfører Phase 1.', $sync.App.Name, 'OK', 'Warning') | Out-Null
         return
     }
+    if ($sync.UI.ProcessRunning) {
+        [System.Windows.MessageBox]::Show('Der kører allerede en opgave. Vent til den er færdig.', $sync.App.Name, 'OK', 'Information') | Out-Null
+        return
+    }
 
     $config = Get-EbgConfigFromUI
     $plan = $sync.State.Plan
@@ -35,10 +39,21 @@ Vil du fortsætte?
     $answer = [System.Windows.MessageBox]::Show($summary, $sync.App.Name, 'YesNo', 'Warning')
     if ($answer -ne 'Yes') { return }
 
-    Invoke-EbgRunspace -ArgumentList @($config) -ScriptBlock {
-        param($config)
+    $sync.UI.ProcessRunning = $true
+    if ($sync.WPFApplyConfiguration) { $sync.WPFApplyConfiguration.IsEnabled = $false }
+    if ($sync.WPFProgressBar) { $sync.WPFProgressBar.IsIndeterminate = $true }
+    Update-EbgUIState | Out-Null
+
+    try {
         Write-EbgStatus -Busy -Message 'Phase 1a: anvender grundopsætning...'
+        [System.Windows.Forms.Application]::DoEvents()
+
+        Ensure-EbgGraphContext
+        [System.Windows.Forms.Application]::DoEvents()
+
         Write-EbgLog -Message 'Phase 1a step 1/10: Henter tenant og klargør outputmappe...'
+        Write-EbgStatus -Busy -Message 'Phase 1a step 1/10: henter tenant og klargør outputmappe...'
+        [System.Windows.Forms.Application]::DoEvents()
         $tenant = Get-EbgTenantInfo
         $output = if ($sync.State.OutputFolder) { $sync.State.OutputFolder } else { New-EbgOutputFolder -TenantId $tenant.TenantId }
         $sync.State.OutputFolder = $output
@@ -48,6 +63,8 @@ Vil du fortsætte?
         $upn2 = ConvertTo-BreakGlassUpn -Prefix $config.UserPrefix2 -OnMicrosoftDomain $tenant.OnMicrosoftDomain
 
         Write-EbgLog -Message 'Phase 1a step 2/10: Sikrer CA-BreakGlass-Exclude security group...'
+        Write-EbgStatus -Busy -Message 'Phase 1a step 2/10: sikrer CA-BreakGlass-Exclude security group...'
+        [System.Windows.Forms.Application]::DoEvents()
         $group = Ensure-EbgSecurityGroup -DisplayName $config.GroupName -Description $config.GroupDescription -CreateIfMissing ([bool]$config.CreateGroup) -Apply $true
         Write-EbgLog -Level PASS -Message "Gruppe håndteret: $($config.GroupName)"
         $groupId = [string](Get-EbgObjectPropertyValue -InputObject $group -Name 'id')
@@ -55,6 +72,8 @@ Vil du fortsætte?
         $groupStatus = [string](Get-EbgObjectPropertyValue -InputObject $group -Name 'EnsureStatus')
 
         Write-EbgLog -Message 'Phase 1a step 3/10: Sikrer de to break-glass konti...'
+        Write-EbgStatus -Busy -Message 'Phase 1a step 3/10: sikrer de to break-glass konti...'
+        [System.Windows.Forms.Application]::DoEvents()
         $createdPasswords = @()
         $users = [System.Collections.Generic.List[object]]::new()
         foreach ($item in @(
@@ -81,6 +100,8 @@ Vil du fortsætte?
         }
 
         Write-EbgLog -Message 'Phase 1a step 4/10: Tildeler direkte Global Administrator rolle...'
+        Write-EbgStatus -Busy -Message 'Phase 1a step 4/10: tildeler direkte Global Administrator rolle...'
+        [System.Windows.Forms.Application]::DoEvents()
         $roleDefinition = Get-EbgGlobalAdministratorRoleDefinition
         $roleAssignments = @()
         foreach ($user in $users | Where-Object { Get-EbgObjectPropertyValue -InputObject $_ -Name 'id' }) {
@@ -88,6 +109,8 @@ Vil du fortsætte?
         }
 
         Write-EbgLog -Message 'Phase 1a step 5/10: Håndterer administrator-SSPR...'
+        Write-EbgStatus -Busy -Message 'Phase 1a step 5/10: håndterer administrator-SSPR...'
+        [System.Windows.Forms.Application]::DoEvents()
         $adminSSPRResult = if ($config.DisableAdminSSPR) {
             $result = Set-EbgAdminSSPRDisabled -Apply $true
             Write-EbgLog -Level WARN -Message 'Admin SSPR ændringen kan tage op til 60 minutter før den slår igennem.'
@@ -105,12 +128,16 @@ Vil du fortsætte?
         }
 
         Write-EbgLog -Message 'Phase 1a step 6/10: Opretter Temporary Access Pass for begge konti...'
+        Write-EbgStatus -Busy -Message 'Phase 1a step 6/10: opretter Temporary Access Pass for begge konti...'
+        [System.Windows.Forms.Application]::DoEvents()
         $temporaryAccessPasses = @()
         foreach ($user in $users | Where-Object { Get-EbgObjectPropertyValue -InputObject $_ -Name 'id' }) {
             $temporaryAccessPasses += New-EbgTemporaryAccessPass -User $user -LifetimeInMinutes 120 -IsUsableOnce $true -Apply $true
         }
 
         Write-EbgLog -Message 'Phase 1a step 7/10: Sikrer gruppemedlemskab...'
+        Write-EbgStatus -Busy -Message 'Phase 1a step 7/10: sikrer gruppemedlemskab...'
+        [System.Windows.Forms.Application]::DoEvents()
         $membership = @()
         if ($config.AddUsersToGroup) {
             foreach ($user in $users | Where-Object { Get-EbgObjectPropertyValue -InputObject $_ -Name 'id' }) {
@@ -122,6 +149,8 @@ Vil du fortsætte?
         }
 
         Write-EbgLog -Message 'Phase 1a step 8/10: Henter eksisterende Conditional Access policies...'
+        Write-EbgStatus -Busy -Message 'Phase 1a step 8/10: henter eksisterende Conditional Access policies...'
+        [System.Windows.Forms.Application]::DoEvents()
         $policies = @(Get-EbgConditionalAccessPolicies)
         $backupPath = ''
         $caResults = @()
@@ -141,14 +170,20 @@ Vil du fortsætte?
 
         if ($config.PatchCAPolicies -and $group -and $groupId) {
             Write-EbgLog -Message 'Phase 1a step 9/10: Backupper og ekskluderer CA-BreakGlass-Exclude fra eksisterende CA policies...'
+            Write-EbgStatus -Busy -Message 'Phase 1a step 9/10: backupper og ekskluderer gruppen fra CA policies...'
+            [System.Windows.Forms.Application]::DoEvents()
             $backupPath = Backup-EbgConditionalAccessPolicies -Policies $policies -OutputFolder $output
             $caResults = Add-EbgGroupExclusionToCAPolicies -Policies $policies -GroupId $groupId -Apply $true
         }
         else {
             Write-EbgLog -Message 'Phase 1a step 9/10: Conditional Access patching er fravalgt.'
+            Write-EbgStatus -Busy -Message 'Phase 1a step 9/10: Conditional Access patching er fravalgt.'
+            [System.Windows.Forms.Application]::DoEvents()
         }
 
         Write-EbgLog -Message 'Phase 1a step 10/10: Gemmer Phase 1-resultat og genererer handoff...'
+        Write-EbgStatus -Busy -Message 'Phase 1a step 10/10: gemmer resultat og genererer handoff...'
+        [System.Windows.Forms.Application]::DoEvents()
         $changed = @($caResults | Where-Object Status -eq 'Patched')
         $failed = @($caResults | Where-Object Status -eq 'Failed')
         $result = [pscustomobject]@{
@@ -212,12 +247,22 @@ Vil du fortsætte?
             Write-EbgLog -Message 'Viser initiale passwords/TAP i separat vindue. De bliver ikke skrevet til almindelig log.'
             Show-EbgCreatedPasswordsOnce -CreatedPasswords $secretsToShow
         }
-        $sync.Form.Dispatcher.Invoke([System.Action]{
-            $sync.WPFOutputFolder.Text = $sync.State.OutputFolder
-            $sync.WPFHandoffPath.Text = $sync.State.HandoffPath
-            Invoke-EbgWPFButton -Name 'WPFStepManualFido'
-        })
+        $sync.WPFOutputFolder.Text = $sync.State.OutputFolder
+        $sync.WPFHandoffPath.Text = $sync.State.HandoffPath
+        Invoke-EbgWPFButton -Name 'WPFStepManualFido'
         Write-EbgStatus -Message 'Phase 1a er færdig. Fortsæt med manuel FIDO2-registrering.'
+    }
+    catch {
+        $message = ConvertTo-EbgRedactedError -ErrorRecord $_
+        Write-EbgLog -Level ERROR -Message $message
+        Write-EbgStatus -Message 'Phase 1a fejlede.'
+        [System.Windows.MessageBox]::Show($message, $sync.App.Name, 'OK', 'Error') | Out-Null
+    }
+    finally {
+        $sync.UI.ProcessRunning = $false
+        if ($sync.WPFProgressBar) { $sync.WPFProgressBar.IsIndeterminate = $false }
+        if ($sync.WPFApplyConfiguration) { $sync.WPFApplyConfiguration.IsEnabled = $true }
+        Update-EbgUIState | Out-Null
     }
 }
 

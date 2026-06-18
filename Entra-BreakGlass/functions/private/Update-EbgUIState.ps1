@@ -224,4 +224,13 @@ function Update-EbgUIState {
     if ($sync.WPFRunDiscovery) {
         $sync.WPFRunDiscovery.IsEnabled = -not [bool]$sync.UI.ProcessRunning
     }
+    if ($sync.WPFBuildPlan) {
+        $sync.WPFBuildPlan.IsEnabled = (-not [bool]$sync.UI.ProcessRunning) -and $hasDiscovery -and $hasVisitedConfig
+    }
+    if ($sync.WPFApplyConfiguration) {
+        $sync.WPFApplyConfiguration.IsEnabled = (-not [bool]$sync.UI.ProcessRunning) -and $hasPlan -and (-not $hasPhase1)
+    }
+    if ($sync.WPFApplyPhase2) {
+        $sync.WPFApplyPhase2.IsEnabled = (-not [bool]$sync.UI.ProcessRunning) -and $hasPhase1
+    }
 }
