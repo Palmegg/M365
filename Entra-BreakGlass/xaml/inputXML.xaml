@@ -368,6 +368,15 @@
                             <TextBlock Margin="0,12,0,0" Text="Værktøjet forbinder kun til Microsoft Graph. Det bruger ikke Azure, PIM, RMAU, Log Analytics eller Sentinel."/>
                             <TextBlock Margin="0,12,0,0" Text="Discovery og Plan foretager ingen ændringer. Ændringer udføres først i Phase 1 og Phase 2."/>
                             <TextBlock Margin="0,12,0,0" Text="Initiale passwords og TAP-koder skrives ikke til almindelig log. TAP-koder kan bruges flere gange inden for 2 timer."/>
+                            <Border Margin="0,22,0,0" Padding="16" Background="{StaticResource PanelRaised}" BorderBrush="{StaticResource BorderSoft}" BorderThickness="1" CornerRadius="10">
+                                <StackPanel>
+                                    <TextBlock Text="Hvor vil du starte?" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,10"/>
+                                    <RadioButton x:Name="WPFStartPhase1" GroupName="StartMode" Content="Start fra Phase 1 - opret konti, gruppe, TAP og CA exclusions" IsChecked="True"/>
+                                    <TextBlock Text="Brug denne når tenant'en skal have grundopsætningen lavet fra start." Foreground="{StaticResource TextMuted}" Margin="24,4,0,12"/>
+                                    <RadioButton x:Name="WPFResumePhase2" GroupName="StartMode" Content="Fortsæt fra Phase 2 - FIDO2 keys er allerede registreret manuelt"/>
+                                    <TextBlock Text="Brug denne hvis Phase 1 allerede er kørt, programmet blev lukket, og du kun mangler AAGUID, authentication strength, CA-policy og handoff." Foreground="{StaticResource TextMuted}" Margin="24,4,0,0"/>
+                                </StackPanel>
+                            </Border>
                             <CheckBox x:Name="WPFWelcomeRiskAccepted" Margin="0,24,0,0" Content="Jeg forstår at dette script ændrer sikkerhedskritisk tenant-konfiguration."/>
                         </StackPanel>
                     </ScrollViewer>

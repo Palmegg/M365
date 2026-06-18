@@ -60,7 +60,7 @@ function Move-EbgWPFStep {
     [CmdletBinding()]
     param([Parameter(Mandatory)][int] $Direction)
 
-    $steps = @('Welcome','Connect','Discovery','Config','Plan','Apply','ManualFido','Phase2','Handoff')
+    $steps = @(Get-EbgWorkflowSteps)
     $current = [string]$sync.UI.CurrentStep
     $index = [array]::IndexOf($steps, $current)
     if ($index -lt 0) { $index = 0 }

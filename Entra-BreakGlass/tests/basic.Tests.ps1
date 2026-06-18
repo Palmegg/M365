@@ -33,6 +33,16 @@ Describe 'Ebg-BreakGlass basic functions' {
         if ($actual[0] -ne 'a4e9fc6d-4cbe-4758-b8ba-37598bb5bbaa') { throw "Unexpected AAGUID: $($actual[0])" }
     }
 
+    It 'uses shortened wizard flow when resuming Phase 2' {
+        $sync.State.StartMode = 'Phase2'
+        $steps = @(Get-EbgWorkflowSteps)
+        if ($steps -contains 'Plan') { throw 'Resume flow should not include Plan.' }
+        if ($steps -contains 'Apply') { throw 'Resume flow should not include Phase 1a Apply.' }
+        if ($steps -contains 'ManualFido') { throw 'Resume flow should not include ManualFido.' }
+        if (($steps -join ',') -ne 'Welcome,Connect,Discovery,Config,Phase2,Handoff') { throw "Unexpected resume steps: $($steps -join ',')" }
+        $sync.State.StartMode = 'Phase1'
+    }
+
     It 'generates long password' {
         $password = New-EbgRandomPassword
         if ($password.Length -lt 24) { throw 'Password is too short.' }

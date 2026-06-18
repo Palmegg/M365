@@ -28,6 +28,9 @@ function Initialize-EbgWPFUI {
     if ($sync['WPFCreateAuthenticationStrength']) { $sync['WPFCreateAuthenticationStrength'].IsChecked = [bool]$defaults.createAuthenticationStrength }
     if ($sync['WPFCreateBreakGlassCAPolicy']) { $sync['WPFCreateBreakGlassCAPolicy'].IsChecked = [bool]$defaults.createBreakGlassCAPolicy }
     if ($sync['WPFEnableBreakGlassCAPolicy']) { $sync['WPFEnableBreakGlassCAPolicy'].IsChecked = [bool]$defaults.enableBreakGlassCAPolicy }
+    $sync.State.StartMode = 'Phase1'
+    if ($sync['WPFStartPhase1']) { $sync['WPFStartPhase1'].IsChecked = $true }
+    if ($sync['WPFResumePhase2']) { $sync['WPFResumePhase2'].IsChecked = $false }
     if ($sync.WPFLanguageSelector) { $sync.WPFLanguageSelector.SelectedIndex = 0 }
     Set-EbgNeutralAccountNamePair -Random
     Set-EbgLanguage -Language $sync.State.Language

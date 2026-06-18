@@ -300,7 +300,8 @@ function Invoke-EbgApplyPhase2 {
     [CmdletBinding()]
     param()
 
-    if (-not $sync.State.Plan) {
+    $resumePhase2 = [string]$sync.State.StartMode -eq 'Phase2'
+    if (-not $sync.State.Plan -and -not $resumePhase2) {
         [System.Windows.MessageBox]::Show('Generér en plan før Phase 2.', $sync.App.Name, 'OK', 'Warning') | Out-Null
         return
     }

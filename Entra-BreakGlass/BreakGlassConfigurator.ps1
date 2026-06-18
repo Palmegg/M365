@@ -73,6 +73,7 @@ $sync.State = [Hashtable]::Synchronized(@{
     Errors             = @()
     Language           = 'da-DK'
     NeutralNameIndex   = 0
+    StartMode          = 'Phase1'
 })
 
 $sync.UI = [Hashtable]::Synchronized(@{
@@ -1259,6 +1260,17 @@ function Get-EbgUserByUpn {
         throw
     }
 }
+function Get-EbgWorkflowSteps {
+    [CmdletBinding()]
+    param()
+
+    if ([string]$sync.State.StartMode -eq 'Phase2') {
+        return @('Welcome','Connect','Discovery','Config','Phase2','Handoff')
+    }
+
+    return @('Welcome','Connect','Discovery','Config','Plan','Apply','ManualFido','Phase2','Handoff')
+}
+
 function Get-EbgAAGUIDSourceUserPrincipalName {
     [CmdletBinding()]
     param([Parameter(Mandatory)][hashtable] $Config)
@@ -1919,6 +1931,11 @@ function Set-EbgLanguage {
         @{ Da = 'Værktøjet forbinder kun til Microsoft Graph. Det bruger ikke Azure, PIM, RMAU, Log Analytics eller Sentinel.'; En = 'The tool connects only to Microsoft Graph. It does not use Azure, PIM, RMAU, Log Analytics, or Sentinel.' }
         @{ Da = 'Discovery og Plan foretager ingen ændringer. Ændringer udføres først i trinnet Udfør.'; En = 'Discovery and Plan make no changes. Changes are performed only in the Apply step.' }
         @{ Da = 'Midlertidige adgangskoder vises kun én gang og gemmes ikke i log, JSON eller handoff dokument.'; En = 'Temporary passwords are shown only once and are not saved to logs, JSON, or the handoff document.' }
+        @{ Da = 'Hvor vil du starte?'; En = 'Where do you want to start?' }
+        @{ Da = 'Start fra Phase 1 - opret konti, gruppe, TAP og CA exclusions'; En = 'Start from Phase 1 - create accounts, group, TAP, and CA exclusions' }
+        @{ Da = "Brug denne når tenant'en skal have grundopsætningen lavet fra start."; En = 'Use this when the tenant needs the baseline setup from the beginning.' }
+        @{ Da = 'Fortsæt fra Phase 2 - FIDO2 keys er allerede registreret manuelt'; En = 'Resume from Phase 2 - FIDO2 keys are already registered manually' }
+        @{ Da = 'Brug denne hvis Phase 1 allerede er kørt, programmet blev lukket, og du kun mangler AAGUID, authentication strength, CA-policy og handoff.'; En = 'Use this when Phase 1 has already run, the program was closed, and only AAGUID, authentication strength, CA policy, and handoff remain.' }
         @{ Da = 'Jeg forstår at dette script ændrer sikkerhedskritisk tenant-konfiguration.'; En = 'I understand that this script changes security-critical tenant configuration.' }
         @{ Da = 'Forbind'; En = 'Connect' }
         @{ Da = 'Forbind én gang til Microsoft Graph. Samme session bruges til discovery, plan og udførsel.'; En = 'Connect once to Microsoft Graph. The same session is used for discovery, plan, and apply.' }
@@ -2292,15 +2309,22 @@ function Update-EbgUIState {
     $hasPlan = $null -ne $sync.State.Plan
     $hasPhase1 = $null -ne $sync.State.Phase1Result
     $hasHandoff = -not [string]::IsNullOrWhiteSpace([string]$sync.State.HandoffPath)
+    $resumePhase2 = [string]$sync.State.StartMode -eq 'Phase2'
+    $canPhase2 = if ($resumePhase2) {
+        $risk -and $hasGraph -and $hasDiscovery -and $hasVisitedConfig
+    }
+    else {
+        $risk -and $hasGraph -and $hasPhase1
+    }
 
     $sync.WPFStepWelcome.IsEnabled = $true
     $sync.WPFStepConnect.IsEnabled = $risk
     $sync.WPFStepDiscovery.IsEnabled = $risk -and $hasGraph
     $sync.WPFStepConfig.IsEnabled = $risk -and $hasGraph -and $hasDiscovery
-    $sync.WPFStepPlan.IsEnabled = $risk -and $hasGraph -and $hasDiscovery -and $hasVisitedConfig
-    $sync.WPFStepApply.IsEnabled = $risk -and $hasGraph -and $hasPlan
-    $sync.WPFStepManualFido.IsEnabled = $risk -and $hasPhase1
-    $sync.WPFStepPhase2.IsEnabled = $risk -and $hasGraph -and $hasPhase1
+    $sync.WPFStepPlan.IsEnabled = (-not $resumePhase2) -and $risk -and $hasGraph -and $hasDiscovery -and $hasVisitedConfig
+    $sync.WPFStepApply.IsEnabled = (-not $resumePhase2) -and $risk -and $hasGraph -and $hasPlan
+    $sync.WPFStepManualFido.IsEnabled = (-not $resumePhase2) -and $risk -and $hasPhase1
+    $sync.WPFStepPhase2.IsEnabled = $canPhase2
     $sync.WPFStepHandoff.IsEnabled = $risk -and $hasHandoff
 
     $stepMap = @{
@@ -2331,7 +2355,7 @@ function Update-EbgUIState {
         }
     }
 
-    $steps = @('Welcome','Connect','Discovery','Config','Plan','Apply','ManualFido','Phase2','Handoff')
+    $steps = @(Get-EbgWorkflowSteps)
     $titles = @{
         Welcome = 'Start'
         Connect = 'Forbind'
@@ -2366,7 +2390,7 @@ function Update-EbgUIState {
         @{
             Key='Prep'; Card='WPFPhasePrepCard'; Title='WPFPhasePrepTitle'; Status='WPFPhasePrepStatus'
             IsActive=($current -in @('Welcome','Connect','Discovery','Config','Plan'))
-            IsDone=($index -gt 4)
+            IsDone=($current -in @('Apply','ManualFido','Phase2','Handoff'))
             IsAvailable=$true
             ActiveText='Aktiv: start, connect, discovery og plan'
             DoneText='Færdig'
@@ -2376,20 +2400,20 @@ function Update-EbgUIState {
         @{
             Key='Phase1'; Card='WPFPhase1Card'; Title='WPFPhase1Title'; Status='WPFPhase1Status'
             IsActive=($current -eq 'Apply')
-            IsDone=$hasPhase1
-            IsAvailable=$hasPlan
+            IsDone=($hasPhase1 -or $resumePhase2)
+            IsAvailable=($hasPlan -or $resumePhase2)
             ActiveText='Aktiv: opretter konti, TAP og CA exclusions'
-            DoneText='Færdig'
+            DoneText=$(if ($resumePhase2) { 'Springes over - Phase 1 er allerede udført' } else { 'Færdig' })
             LockedText='Låst indtil plan er genereret'
             ReadyText='Klar til kørsel'
         },
         @{
             Key='Manual'; Card='WPFPhaseManualCard'; Title='WPFPhaseManualTitle'; Status='WPFPhaseManualStatus'
             IsActive=($current -eq 'ManualFido')
-            IsDone=($current -in @('Phase2','Handoff'))
-            IsAvailable=$hasPhase1
+            IsDone=($current -in @('Phase2','Handoff') -or ($resumePhase2 -and $current -notin @('Welcome','Connect','Discovery','Config')))
+            IsAvailable=($hasPhase1 -or $resumePhase2)
             ActiveText='Aktiv: registrer 2 FIDO2 keys pr. konto'
-            DoneText='Færdig eller bekræftet'
+            DoneText=$(if ($resumePhase2) { 'Bekræftet før resume' } else { 'Færdig eller bekræftet' })
             LockedText='Låst indtil Phase 1a er færdig'
             ReadyText='Klar efter Phase 1a'
         },
@@ -2397,7 +2421,7 @@ function Update-EbgUIState {
             Key='Phase2'; Card='WPFPhase2Card'; Title='WPFPhase2Title'; Status='WPFPhase2Status'
             IsActive=($current -eq 'Phase2')
             IsDone=($current -eq 'Handoff' -and $hasHandoff)
-            IsAvailable=$hasPhase1
+            IsAvailable=$canPhase2
             ActiveText='Aktiv: AAGUID, auth strength og disabled CA policy'
             DoneText='Færdig'
             LockedText='Låst indtil FIDO2 er registreret manuelt'
@@ -2484,13 +2508,13 @@ function Update-EbgUIState {
         $sync.WPFRunDiscovery.IsEnabled = -not [bool]$sync.UI.ProcessRunning
     }
     if ($sync.WPFBuildPlan) {
-        $sync.WPFBuildPlan.IsEnabled = (-not [bool]$sync.UI.ProcessRunning) -and $hasDiscovery -and $hasVisitedConfig
+        $sync.WPFBuildPlan.IsEnabled = (-not [bool]$sync.UI.ProcessRunning) -and (-not $resumePhase2) -and $hasDiscovery -and $hasVisitedConfig
     }
     if ($sync.WPFApplyConfiguration) {
-        $sync.WPFApplyConfiguration.IsEnabled = (-not [bool]$sync.UI.ProcessRunning) -and $hasPlan -and (-not $hasPhase1)
+        $sync.WPFApplyConfiguration.IsEnabled = (-not [bool]$sync.UI.ProcessRunning) -and (-not $resumePhase2) -and $hasPlan -and (-not $hasPhase1)
     }
     if ($sync.WPFApplyPhase2) {
-        $sync.WPFApplyPhase2.IsEnabled = (-not [bool]$sync.UI.ProcessRunning) -and $hasPhase1
+        $sync.WPFApplyPhase2.IsEnabled = (-not [bool]$sync.UI.ProcessRunning) -and $canPhase2
     }
     if ($sync.WPFFetchAAGUIDs) {
         $sync.WPFFetchAAGUIDs.IsEnabled = (-not [bool]$sync.UI.ProcessRunning) -and $hasGraph
@@ -2601,6 +2625,9 @@ function Initialize-EbgWPFUI {
     if ($sync['WPFCreateAuthenticationStrength']) { $sync['WPFCreateAuthenticationStrength'].IsChecked = [bool]$defaults.createAuthenticationStrength }
     if ($sync['WPFCreateBreakGlassCAPolicy']) { $sync['WPFCreateBreakGlassCAPolicy'].IsChecked = [bool]$defaults.createBreakGlassCAPolicy }
     if ($sync['WPFEnableBreakGlassCAPolicy']) { $sync['WPFEnableBreakGlassCAPolicy'].IsChecked = [bool]$defaults.enableBreakGlassCAPolicy }
+    $sync.State.StartMode = 'Phase1'
+    if ($sync['WPFStartPhase1']) { $sync['WPFStartPhase1'].IsChecked = $true }
+    if ($sync['WPFResumePhase2']) { $sync['WPFResumePhase2'].IsChecked = $false }
     if ($sync.WPFLanguageSelector) { $sync.WPFLanguageSelector.SelectedIndex = 0 }
     Set-EbgNeutralAccountNamePair -Random
     Set-EbgLanguage -Language $sync.State.Language
@@ -2920,7 +2947,8 @@ function Invoke-EbgApplyPhase2 {
     [CmdletBinding()]
     param()
 
-    if (-not $sync.State.Plan) {
+    $resumePhase2 = [string]$sync.State.StartMode -eq 'Phase2'
+    if (-not $sync.State.Plan -and -not $resumePhase2) {
         [System.Windows.MessageBox]::Show('Generér en plan før Phase 2.', $sync.App.Name, 'OK', 'Warning') | Out-Null
         return
     }
@@ -3547,7 +3575,7 @@ function Move-EbgWPFStep {
     [CmdletBinding()]
     param([Parameter(Mandatory)][int] $Direction)
 
-    $steps = @('Welcome','Connect','Discovery','Config','Plan','Apply','ManualFido','Phase2','Handoff')
+    $steps = @(Get-EbgWorkflowSteps)
     $current = [string]$sync.UI.CurrentStep
     $index = [array]::IndexOf($steps, $current)
     if ($index -lt 0) { $index = 0 }
@@ -3620,7 +3648,7 @@ function Stop-EbgCurrentTask {
 $sync.configs.appsettings = @'
 {
   "name": "Entra Break Glass Configurator",
-  "version": "2.4.19",
+  "version": "2.4.20",
   "outputRoot": ".\\Output",
   "groupName": "CA-BreakGlass-Exclude",
   "groupDescription": "Security group used to exclude dedicated break-glass accounts from existing Conditional Access policies.",
@@ -4061,6 +4089,15 @@ $inputXML = @'
                             <TextBlock Margin="0,12,0,0" Text="Værktøjet forbinder kun til Microsoft Graph. Det bruger ikke Azure, PIM, RMAU, Log Analytics eller Sentinel."/>
                             <TextBlock Margin="0,12,0,0" Text="Discovery og Plan foretager ingen ændringer. Ændringer udføres først i Phase 1 og Phase 2."/>
                             <TextBlock Margin="0,12,0,0" Text="Initiale passwords og TAP-koder skrives ikke til almindelig log. TAP-koder kan bruges flere gange inden for 2 timer."/>
+                            <Border Margin="0,22,0,0" Padding="16" Background="{StaticResource PanelRaised}" BorderBrush="{StaticResource BorderSoft}" BorderThickness="1" CornerRadius="10">
+                                <StackPanel>
+                                    <TextBlock Text="Hvor vil du starte?" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,10"/>
+                                    <RadioButton x:Name="WPFStartPhase1" GroupName="StartMode" Content="Start fra Phase 1 - opret konti, gruppe, TAP og CA exclusions" IsChecked="True"/>
+                                    <TextBlock Text="Brug denne når tenant'en skal have grundopsætningen lavet fra start." Foreground="{StaticResource TextMuted}" Margin="24,4,0,12"/>
+                                    <RadioButton x:Name="WPFResumePhase2" GroupName="StartMode" Content="Fortsæt fra Phase 2 - FIDO2 keys er allerede registreret manuelt"/>
+                                    <TextBlock Text="Brug denne hvis Phase 1 allerede er kørt, programmet blev lukket, og du kun mangler AAGUID, authentication strength, CA-policy og handoff." Foreground="{StaticResource TextMuted}" Margin="24,4,0,0"/>
+                                </StackPanel>
+                            </Border>
                             <CheckBox x:Name="WPFWelcomeRiskAccepted" Margin="0,24,0,0" Content="Jeg forstår at dette script ændrer sikkerhedskritisk tenant-konfiguration."/>
                         </StackPanel>
                     </ScrollViewer>
@@ -4368,6 +4405,18 @@ foreach ($box in @('WPFDisplayName1','WPFUserPrefix1','WPFDisplayName2','WPFUser
 
 $sync.WPFWelcomeRiskAccepted.Add_Checked({ Update-EbgUIState | Out-Null })
 $sync.WPFWelcomeRiskAccepted.Add_Unchecked({ Update-EbgUIState | Out-Null })
+if ($sync.WPFStartPhase1) {
+    $sync.WPFStartPhase1.Add_Checked({
+        $sync.State.StartMode = 'Phase1'
+        Update-EbgUIState | Out-Null
+    })
+}
+if ($sync.WPFResumePhase2) {
+    $sync.WPFResumePhase2.Add_Checked({
+        $sync.State.StartMode = 'Phase2'
+        Update-EbgUIState | Out-Null
+    })
+}
 if ($sync.WPFLanguageSelector) {
     $sync.WPFLanguageSelector.Add_SelectionChanged({
         $selected = $sync.WPFLanguageSelector.SelectedItem

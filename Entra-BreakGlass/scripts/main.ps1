@@ -49,6 +49,18 @@ foreach ($box in @('WPFDisplayName1','WPFUserPrefix1','WPFDisplayName2','WPFUser
 
 $sync.WPFWelcomeRiskAccepted.Add_Checked({ Update-EbgUIState | Out-Null })
 $sync.WPFWelcomeRiskAccepted.Add_Unchecked({ Update-EbgUIState | Out-Null })
+if ($sync.WPFStartPhase1) {
+    $sync.WPFStartPhase1.Add_Checked({
+        $sync.State.StartMode = 'Phase1'
+        Update-EbgUIState | Out-Null
+    })
+}
+if ($sync.WPFResumePhase2) {
+    $sync.WPFResumePhase2.Add_Checked({
+        $sync.State.StartMode = 'Phase2'
+        Update-EbgUIState | Out-Null
+    })
+}
 if ($sync.WPFLanguageSelector) {
     $sync.WPFLanguageSelector.Add_SelectionChanged({
         $selected = $sync.WPFLanguageSelector.SelectedItem

@@ -69,6 +69,7 @@ $sync.State = [Hashtable]::Synchronized(@{
     Errors             = @()
     Language           = 'da-DK'
     NeutralNameIndex   = 0
+    StartMode          = 'Phase1'
 })
 
 $sync.UI = [Hashtable]::Synchronized(@{

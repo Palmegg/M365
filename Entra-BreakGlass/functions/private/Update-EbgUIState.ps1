@@ -34,15 +34,22 @@ function Update-EbgUIState {
     $hasPlan = $null -ne $sync.State.Plan
     $hasPhase1 = $null -ne $sync.State.Phase1Result
     $hasHandoff = -not [string]::IsNullOrWhiteSpace([string]$sync.State.HandoffPath)
+    $resumePhase2 = [string]$sync.State.StartMode -eq 'Phase2'
+    $canPhase2 = if ($resumePhase2) {
+        $risk -and $hasGraph -and $hasDiscovery -and $hasVisitedConfig
+    }
+    else {
+        $risk -and $hasGraph -and $hasPhase1
+    }
 
     $sync.WPFStepWelcome.IsEnabled = $true
     $sync.WPFStepConnect.IsEnabled = $risk
     $sync.WPFStepDiscovery.IsEnabled = $risk -and $hasGraph
     $sync.WPFStepConfig.IsEnabled = $risk -and $hasGraph -and $hasDiscovery
-    $sync.WPFStepPlan.IsEnabled = $risk -and $hasGraph -and $hasDiscovery -and $hasVisitedConfig
-    $sync.WPFStepApply.IsEnabled = $risk -and $hasGraph -and $hasPlan
-    $sync.WPFStepManualFido.IsEnabled = $risk -and $hasPhase1
-    $sync.WPFStepPhase2.IsEnabled = $risk -and $hasGraph -and $hasPhase1
+    $sync.WPFStepPlan.IsEnabled = (-not $resumePhase2) -and $risk -and $hasGraph -and $hasDiscovery -and $hasVisitedConfig
+    $sync.WPFStepApply.IsEnabled = (-not $resumePhase2) -and $risk -and $hasGraph -and $hasPlan
+    $sync.WPFStepManualFido.IsEnabled = (-not $resumePhase2) -and $risk -and $hasPhase1
+    $sync.WPFStepPhase2.IsEnabled = $canPhase2
     $sync.WPFStepHandoff.IsEnabled = $risk -and $hasHandoff
 
     $stepMap = @{
@@ -73,7 +80,7 @@ function Update-EbgUIState {
         }
     }
 
-    $steps = @('Welcome','Connect','Discovery','Config','Plan','Apply','ManualFido','Phase2','Handoff')
+    $steps = @(Get-EbgWorkflowSteps)
     $titles = @{
         Welcome = 'Start'
         Connect = 'Forbind'
@@ -108,7 +115,7 @@ function Update-EbgUIState {
         @{
             Key='Prep'; Card='WPFPhasePrepCard'; Title='WPFPhasePrepTitle'; Status='WPFPhasePrepStatus'
             IsActive=($current -in @('Welcome','Connect','Discovery','Config','Plan'))
-            IsDone=($index -gt 4)
+            IsDone=($current -in @('Apply','ManualFido','Phase2','Handoff'))
             IsAvailable=$true
             ActiveText='Aktiv: start, connect, discovery og plan'
             DoneText='Færdig'
@@ -118,20 +125,20 @@ function Update-EbgUIState {
         @{
             Key='Phase1'; Card='WPFPhase1Card'; Title='WPFPhase1Title'; Status='WPFPhase1Status'
             IsActive=($current -eq 'Apply')
-            IsDone=$hasPhase1
-            IsAvailable=$hasPlan
+            IsDone=($hasPhase1 -or $resumePhase2)
+            IsAvailable=($hasPlan -or $resumePhase2)
             ActiveText='Aktiv: opretter konti, TAP og CA exclusions'
-            DoneText='Færdig'
+            DoneText=$(if ($resumePhase2) { 'Springes over - Phase 1 er allerede udført' } else { 'Færdig' })
             LockedText='Låst indtil plan er genereret'
             ReadyText='Klar til kørsel'
         },
         @{
             Key='Manual'; Card='WPFPhaseManualCard'; Title='WPFPhaseManualTitle'; Status='WPFPhaseManualStatus'
             IsActive=($current -eq 'ManualFido')
-            IsDone=($current -in @('Phase2','Handoff'))
-            IsAvailable=$hasPhase1
+            IsDone=($current -in @('Phase2','Handoff') -or ($resumePhase2 -and $current -notin @('Welcome','Connect','Discovery','Config')))
+            IsAvailable=($hasPhase1 -or $resumePhase2)
             ActiveText='Aktiv: registrer 2 FIDO2 keys pr. konto'
-            DoneText='Færdig eller bekræftet'
+            DoneText=$(if ($resumePhase2) { 'Bekræftet før resume' } else { 'Færdig eller bekræftet' })
             LockedText='Låst indtil Phase 1a er færdig'
             ReadyText='Klar efter Phase 1a'
         },
@@ -139,7 +146,7 @@ function Update-EbgUIState {
             Key='Phase2'; Card='WPFPhase2Card'; Title='WPFPhase2Title'; Status='WPFPhase2Status'
             IsActive=($current -eq 'Phase2')
             IsDone=($current -eq 'Handoff' -and $hasHandoff)
-            IsAvailable=$hasPhase1
+            IsAvailable=$canPhase2
             ActiveText='Aktiv: AAGUID, auth strength og disabled CA policy'
             DoneText='Færdig'
             LockedText='Låst indtil FIDO2 er registreret manuelt'
@@ -226,13 +233,13 @@ function Update-EbgUIState {
         $sync.WPFRunDiscovery.IsEnabled = -not [bool]$sync.UI.ProcessRunning
     }
     if ($sync.WPFBuildPlan) {
-        $sync.WPFBuildPlan.IsEnabled = (-not [bool]$sync.UI.ProcessRunning) -and $hasDiscovery -and $hasVisitedConfig
+        $sync.WPFBuildPlan.IsEnabled = (-not [bool]$sync.UI.ProcessRunning) -and (-not $resumePhase2) -and $hasDiscovery -and $hasVisitedConfig
     }
     if ($sync.WPFApplyConfiguration) {
-        $sync.WPFApplyConfiguration.IsEnabled = (-not [bool]$sync.UI.ProcessRunning) -and $hasPlan -and (-not $hasPhase1)
+        $sync.WPFApplyConfiguration.IsEnabled = (-not [bool]$sync.UI.ProcessRunning) -and (-not $resumePhase2) -and $hasPlan -and (-not $hasPhase1)
     }
     if ($sync.WPFApplyPhase2) {
-        $sync.WPFApplyPhase2.IsEnabled = (-not [bool]$sync.UI.ProcessRunning) -and $hasPhase1
+        $sync.WPFApplyPhase2.IsEnabled = (-not [bool]$sync.UI.ProcessRunning) -and $canPhase2
     }
     if ($sync.WPFFetchAAGUIDs) {
         $sync.WPFFetchAAGUIDs.IsEnabled = (-not [bool]$sync.UI.ProcessRunning) -and $hasGraph
