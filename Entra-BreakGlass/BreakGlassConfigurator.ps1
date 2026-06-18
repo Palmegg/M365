@@ -2335,11 +2335,9 @@ function Invoke-EbgConnectTenant {
         $workerScript = Join-Path $workerRoot 'Connect-MgGraph-Login.ps1'
         $resultPath = Join-Path $workerRoot 'result.json'
         $scopeLiteral = (($scopes | ForEach-Object { "'$($_.Replace("'", "''"))'" }) -join ', ')
-        $graphPowerShellClientId = '14d82eec-204b-4c2f-b7e8-296a70dab67e'
         $workerCode = @"
 `$ErrorActionPreference = 'Stop'
 `$resultPath = '$($resultPath.Replace("'", "''"))'
-`$clientId = '$graphPowerShellClientId'
 `$result = [ordered]@{
     Success = `$false
     Account = ''
@@ -2359,7 +2357,7 @@ try {
     try { Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null } catch {}
     try { Set-MgGraphOption -DisableLoginByWAM `$true -ErrorAction SilentlyContinue | Out-Null } catch {}
     `$scopes = @($scopeLiteral)
-    Connect-MgGraph -ClientId `$clientId -Scopes `$scopes -ContextScope CurrentUser -NoWelcome -ErrorAction Stop | Out-Null
+    Connect-MgGraph -Scopes `$scopes -ContextScope CurrentUser -NoWelcome -ErrorAction Stop | Out-Null
     `$context = Get-MgContext -ErrorAction Stop
     if (-not `$context -or [string]::IsNullOrWhiteSpace([string]`$context.Account)) {
         throw 'Microsoft Graph login returnerede ingen aktiv konto.'
@@ -2408,7 +2406,7 @@ finally {
         }
 
         try { Set-MgGraphOption -DisableLoginByWAM $true -ErrorAction SilentlyContinue | Out-Null } catch {}
-        Connect-MgGraph -ClientId $graphPowerShellClientId -ContextScope CurrentUser -NoWelcome -ErrorAction Stop | Out-Null
+        Connect-MgGraph -ContextScope CurrentUser -NoWelcome -ErrorAction Stop | Out-Null
         $context = Get-MgContext -ErrorAction Stop
         if (-not $context -or [string]::IsNullOrWhiteSpace([string]$context.Account)) {
             throw 'Microsoft Graph login returnerede ingen aktiv konto.'
