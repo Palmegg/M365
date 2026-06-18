@@ -465,6 +465,42 @@ function Ensure-EbgGlobalAdministratorAssignment {
         throw
     }
 }
+function Ensure-EbgGraphContext {
+    [CmdletBinding()]
+    param()
+
+    if ($sync.App.Mock) { return }
+
+    Import-Module Microsoft.Graph.Authentication -ErrorAction Stop
+
+    $context = $null
+    try {
+        $context = Get-MgContext -ErrorAction Stop
+    }
+    catch {
+        $context = $null
+    }
+
+    if (-not $context -or [string]::IsNullOrWhiteSpace([string]$context.Account)) {
+        $scopes = @($sync.State.GraphScopes)
+        if ($scopes.Count -eq 0) {
+            $scopes = @($sync.configs.graphScopes)
+        }
+
+        Write-EbgLog -Message 'Graph context mangler i worker-runspace. Forsøger at genbruge aktuel Graph PowerShell login-session...'
+        Connect-MgGraph -Scopes $scopes -NoWelcome -ErrorAction Stop | Out-Null
+        $context = Get-MgContext -ErrorAction Stop
+    }
+
+    if (-not $context -or [string]::IsNullOrWhiteSpace([string]$context.Account)) {
+        throw 'Microsoft Graph context er ikke aktiv i denne PowerShell runspace. Gå tilbage til Forbind og log på igen.'
+    }
+
+    $sync.State.GraphConnected = $true
+    $sync.State.GraphAccount = [string]$context.Account
+    $sync.State.GraphScopes = @($context.Scopes)
+}
+
 function Ensure-EbgGroupMember {
     [CmdletBinding()]
     param(
@@ -880,6 +916,7 @@ function Invoke-EbgGraphRequest {
     if ($sync.App.Mock) {
         throw 'Mock mode should not call Microsoft Graph.'
     }
+    Ensure-EbgGraphContext
     $params = @{
         Method      = $Method
         Uri         = $Uri
@@ -901,6 +938,7 @@ function Invoke-EbgGraphRequest {
         throw
     }
 }
+
 function Invoke-EbgRunspace {
     [CmdletBinding()]
     param(
@@ -2484,14 +2522,22 @@ function Invoke-EbgDiscovery {
     Invoke-EbgRunspace -ArgumentList @($config) -ScriptBlock {
         param($config)
         Write-EbgStatus -Busy -Message 'Kører discovery...'
+        Ensure-EbgGraphContext
+        Write-EbgStatus -Busy -Message 'Discovery: henter tenant information...'
         $tenant = Get-EbgTenantInfo
         $upn1 = ConvertTo-BreakGlassUpn -Prefix $config.UserPrefix1 -OnMicrosoftDomain $tenant.OnMicrosoftDomain
         $upn2 = ConvertTo-BreakGlassUpn -Prefix $config.UserPrefix2 -OnMicrosoftDomain $tenant.OnMicrosoftDomain
+        Write-EbgStatus -Busy -Message "Discovery: tjekker target user 1 ($upn1)..."
         $user1 = Get-EbgUserByUpn -UserPrincipalName $upn1
+        Write-EbgStatus -Busy -Message "Discovery: tjekker target user 2 ($upn2)..."
         $user2 = Get-EbgUserByUpn -UserPrincipalName $upn2
+        Write-EbgStatus -Busy -Message "Discovery: tjekker security group ($($config.GroupName))..."
         $group = Get-EbgGroupByDisplayName -DisplayName $config.GroupName
+        Write-EbgStatus -Busy -Message 'Discovery: henter Conditional Access policies...'
         $policies = @(Get-EbgConditionalAccessPolicies)
+        Write-EbgStatus -Busy -Message 'Discovery: henter aktive Global Administrator assignments...'
         $activeGlobalAdmins = @(Get-EbgActiveGlobalAdministrators)
+        Write-EbgStatus -Busy -Message 'Discovery: analyserer CA exclusions...'
         $already = @()
         $groupId = [string](Get-EbgObjectPropertyValue -InputObject $group -Name 'id')
         if ($group -and $groupId) {
@@ -2587,6 +2633,7 @@ function Invoke-EbgDiscovery {
         Write-EbgStatus -Message 'Discovery er færdig.'
     }
 }
+
 function Invoke-EbgFetchAAGUIDs {
     [CmdletBinding()]
     param()
@@ -2756,7 +2803,7 @@ function Move-EbgWPFStep {
 $sync.configs.appsettings = @'
 {
   "name": "Entra Break Glass Configurator",
-  "version": "2.3.9",
+  "version": "2.4.0",
   "outputRoot": ".\\Output",
   "groupName": "CA-BreakGlass-Exclude",
   "groupDescription": "Security group used to exclude dedicated break-glass accounts from existing Conditional Access policies.",

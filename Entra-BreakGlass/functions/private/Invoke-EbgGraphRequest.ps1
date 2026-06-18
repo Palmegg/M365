@@ -10,6 +10,7 @@ function Invoke-EbgGraphRequest {
     if ($sync.App.Mock) {
         throw 'Mock mode should not call Microsoft Graph.'
     }
+    Ensure-EbgGraphContext
     $params = @{
         Method      = $Method
         Uri         = $Uri

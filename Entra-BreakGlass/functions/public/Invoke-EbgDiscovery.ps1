@@ -10,14 +10,22 @@ function Invoke-EbgDiscovery {
     Invoke-EbgRunspace -ArgumentList @($config) -ScriptBlock {
         param($config)
         Write-EbgStatus -Busy -Message 'Kører discovery...'
+        Ensure-EbgGraphContext
+        Write-EbgStatus -Busy -Message 'Discovery: henter tenant information...'
         $tenant = Get-EbgTenantInfo
         $upn1 = ConvertTo-BreakGlassUpn -Prefix $config.UserPrefix1 -OnMicrosoftDomain $tenant.OnMicrosoftDomain
         $upn2 = ConvertTo-BreakGlassUpn -Prefix $config.UserPrefix2 -OnMicrosoftDomain $tenant.OnMicrosoftDomain
+        Write-EbgStatus -Busy -Message "Discovery: tjekker target user 1 ($upn1)..."
         $user1 = Get-EbgUserByUpn -UserPrincipalName $upn1
+        Write-EbgStatus -Busy -Message "Discovery: tjekker target user 2 ($upn2)..."
         $user2 = Get-EbgUserByUpn -UserPrincipalName $upn2
+        Write-EbgStatus -Busy -Message "Discovery: tjekker security group ($($config.GroupName))..."
         $group = Get-EbgGroupByDisplayName -DisplayName $config.GroupName
+        Write-EbgStatus -Busy -Message 'Discovery: henter Conditional Access policies...'
         $policies = @(Get-EbgConditionalAccessPolicies)
+        Write-EbgStatus -Busy -Message 'Discovery: henter aktive Global Administrator assignments...'
         $activeGlobalAdmins = @(Get-EbgActiveGlobalAdministrators)
+        Write-EbgStatus -Busy -Message 'Discovery: analyserer CA exclusions...'
         $already = @()
         $groupId = [string](Get-EbgObjectPropertyValue -InputObject $group -Name 'id')
         if ($group -and $groupId) {
