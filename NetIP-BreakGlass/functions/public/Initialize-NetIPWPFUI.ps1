@@ -29,7 +29,6 @@ function Initialize-NetIPWPFUI {
     $sync.WPFCreateBreakGlassCAPolicy.IsChecked = [bool]$defaults.createBreakGlassCAPolicy
     $sync.WPFEnableBreakGlassCAPolicy.IsChecked = [bool]$defaults.enableBreakGlassCAPolicy
     if ($sync.WPFLanguageSelector) { $sync.WPFLanguageSelector.SelectedIndex = 0 }
-    Set-NetIPTheme -Theme $sync.State.Theme
     Set-NetIPLanguage -Language $sync.State.Language
 
     if ($sync.App.Mock) {

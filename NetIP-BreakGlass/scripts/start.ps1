@@ -39,7 +39,6 @@ $sync.State = [Hashtable]::Synchronized(@{
     Errors             = @()
     Language           = 'da-DK'
     NeutralNameIndex   = 0
-    Theme              = 'Dark'
 })
 
 $sync.UI = [Hashtable]::Synchronized(@{
