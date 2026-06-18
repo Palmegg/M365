@@ -3065,9 +3065,14 @@ $inputXML = @'
                         <TextBlock Grid.Row="0" Grid.ColumnSpan="3" Text="Forbind" FontSize="22" FontWeight="SemiBold" Margin="0,0,0,12"/>
                         <TextBlock Grid.Row="1" Grid.ColumnSpan="3" Text="Forbind én gang til Microsoft Graph. Samme session bruges til discovery, plan og udførsel." Margin="0,0,0,18"/>
                         <StackPanel Grid.Row="2" Grid.Column="0">
-                            <TextBlock Text="Requested Graph scopes:" FontWeight="SemiBold" Margin="0,0,0,4"/>
-                            <TextBox x:Name="WPFGraphScopes" IsReadOnly="True" AcceptsReturn="True" Height="190" FontFamily="Consolas" VerticalScrollBarVisibility="Disabled" HorizontalScrollBarVisibility="Disabled"/>
-                            <Button x:Name="WPFConnectTenant" Content="Forbind til Microsoft 365 tenant" Width="260" HorizontalAlignment="Left"/>
+                            <Border Background="{StaticResource PanelRaised}" BorderBrush="{StaticResource BorderSoft}" BorderThickness="1" CornerRadius="10" Padding="18,16" VerticalAlignment="Top">
+                                <StackPanel>
+                                    <TextBlock Text="Graph scopes" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,8"/>
+                                    <TextBlock Text="Requested permissions ved Microsoft Graph sign-in." Foreground="{StaticResource TextMuted}" Margin="0,0,0,10"/>
+                                    <TextBox x:Name="WPFGraphScopes" IsReadOnly="True" AcceptsReturn="True" Height="150" FontFamily="Consolas" Background="Transparent" BorderThickness="0" Padding="0" VerticalScrollBarVisibility="Disabled" HorizontalScrollBarVisibility="Disabled"/>
+                                </StackPanel>
+                            </Border>
+                            <Button x:Name="WPFConnectTenant" Content="Forbind til Microsoft 365 tenant" Width="260" HorizontalAlignment="Left" Margin="0,10,0,0"/>
                         </StackPanel>
                         <Border Grid.Row="2" Grid.Column="2" Background="{StaticResource PanelRaised}" BorderBrush="{StaticResource BorderSoft}" BorderThickness="1" CornerRadius="10" Padding="18,16" VerticalAlignment="Top">
                             <Grid>
