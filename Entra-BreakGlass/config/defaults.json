@@ -8,6 +8,7 @@
   "addUsersToGroup": true,
   "disableAdminSSPR": true,
   "patchCAPolicies": true,
+  "createRegularSSPRScopeGroup": true,
   "createAuthenticationStrength": false,
   "createBreakGlassCAPolicy": false,
   "enableBreakGlassCAPolicy": false,

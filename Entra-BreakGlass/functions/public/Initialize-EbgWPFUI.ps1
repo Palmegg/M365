@@ -18,6 +18,9 @@ function Initialize-EbgWPFUI {
     $sync.WPFUserPrefix2.Text = [string]$defaults.account2Prefix
     $sync.WPFGroupName.Text = [string]$settings.groupName
     $sync.WPFGroupDescription.Text = [string]$settings.groupDescription
+    $sync.WPFRegularSSPRGroupName.Text = [string]$settings.regularSSPRGroupName
+    $sync.WPFRegularSSPRGroupDescription.Text = [string]$settings.regularSSPRGroupDescription
+    $sync.WPFRegularSSPRRulePreview.Text = '(user.accountEnabled -eq true) -and (user.userType -eq "Member") -and (user.objectId -notIn ["<Account 1 objectId>","<Account 2 objectId>"])'
     $sync.WPFAuthenticationStrengthName.Text = [string]$settings.authenticationStrengthName
     $sync.WPFBreakGlassCAPolicyName.Text = [string]$settings.breakGlassCAPolicyName
     $sync.WPFCreateUsers.IsChecked = [bool]$defaults.createUsers
@@ -25,6 +28,7 @@ function Initialize-EbgWPFUI {
     $sync.WPFAddUsersToGroup.IsChecked = [bool]$defaults.addUsersToGroup
     $sync.WPFDisableAdminSSPR.IsChecked = [bool]$defaults.disableAdminSSPR
     $sync.WPFPatchCAPolicies.IsChecked = [bool]$defaults.patchCAPolicies
+    $sync.WPFCreateRegularSSPRScopeGroup.IsChecked = [bool]$defaults.createRegularSSPRScopeGroup
     if ($sync['WPFCreateAuthenticationStrength']) { $sync['WPFCreateAuthenticationStrength'].IsChecked = [bool]$defaults.createAuthenticationStrength }
     if ($sync['WPFCreateBreakGlassCAPolicy']) { $sync['WPFCreateBreakGlassCAPolicy'].IsChecked = [bool]$defaults.createBreakGlassCAPolicy }
     if ($sync['WPFEnableBreakGlassCAPolicy']) { $sync['WPFEnableBreakGlassCAPolicy'].IsChecked = [bool]$defaults.enableBreakGlassCAPolicy }

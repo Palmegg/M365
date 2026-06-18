@@ -10,6 +10,8 @@ Describe 'Ebg-BreakGlass basic functions' {
             appsettings = [pscustomobject]@{
                 groupName = 'CA-BreakGlass-Exclude'
                 groupDescription = 'Security group used to exclude dedicated break-glass accounts from existing Conditional Access policies.'
+                regularSSPRGroupName = 'SG-SSPR-AllUsers-Except-BreakGlass'
+                regularSSPRGroupDescription = 'Dynamic security group for regular SSPR targeting. Includes enabled member users except the two dedicated break-glass accounts.'
                 authenticationStrengthName = 'BreakGlass-FIDO2'
                 authenticationStrengthDescription = 'Requires passkeys (FIDO2) from approved attested security key AAGUIDs for break-glass accounts.'
                 breakGlassCAPolicyName = '[CA999] IdentityProtection-AnyApp-AnyPlatform-BreakGlass-FIDO2'
@@ -56,6 +58,7 @@ Describe 'Ebg-BreakGlass basic functions' {
             DisplayName1 = 'Horse Unit'; DisplayName2 = 'Master Player'
             GroupName = 'CA-BreakGlass-Exclude'; CreateUsers = $true; CreateGroup = $true
             AddUsersToGroup = $true; DisableAdminSSPR = $true; PatchCAPolicies = $false
+            CreateRegularSSPRScopeGroup = $true; RegularSSPRGroupName = 'SG-SSPR-AllUsers-Except-BreakGlass'; RegularSSPRGroupDescription = 'Test'
             CreateAuthenticationStrength = $true; CreateBreakGlassCAPolicy = $true; EnableBreakGlassCAPolicy = $false
             AuthenticationStrengthName = 'BreakGlass-FIDO2'; BreakGlassCAPolicyName = '[CA999] IdentityProtection-AnyApp-AnyPlatform-BreakGlass-FIDO2'
             AAGUIDs = @('a4e9fc6d-4cbe-4758-b8ba-37598bb5bbaa')
@@ -66,6 +69,7 @@ Describe 'Ebg-BreakGlass basic functions' {
         if ($plan.TemporaryAccessPassStatus -ne 'Phase 1: oprettes for begge konti, genanvendelig i 2 timer') { throw "Unexpected TAP plan: $($plan.TemporaryAccessPassStatus)" }
         if ($plan.Fido2AuthenticationMethodPolicyStatus -ne 'Phase 1: enables FIDO2/passkey for CA-BreakGlass-Exclude') { throw "Unexpected FIDO2 method policy plan: $($plan.Fido2AuthenticationMethodPolicyStatus)" }
         if ($plan.RegistrationCampaignStatus -ne 'Phase 1: excludes CA-BreakGlass-Exclude from authentication methods registration campaign') { throw "Unexpected registration campaign plan: $($plan.RegistrationCampaignStatus)" }
+        if ($plan.RegularSSPRGroupName -ne 'SG-SSPR-AllUsers-Except-BreakGlass') { throw "Unexpected regular SSPR group: $($plan.RegularSSPRGroupName)" }
         if ($plan.AuthenticationStrengthStatus -ne 'Phase 2: oprettes/opdateres med angivne + fundne AAGUIDs') { throw "Unexpected auth strength plan: $($plan.AuthenticationStrengthStatus)" }
         if ($plan.BreakGlassCAPolicyStatus -ne 'Phase 2: oprettes disabled og tildeles direkte til de 2 konti') { throw "Unexpected BG CA plan: $($plan.BreakGlassCAPolicyStatus)" }
     }
@@ -107,6 +111,7 @@ Describe 'Ebg-BreakGlass basic functions' {
             DisplayName1 = 'Horse Unit'; DisplayName2 = 'Master Player'
             GroupName = 'CA-BreakGlass-Exclude'; CreateUsers = $true; CreateGroup = $true
             AddUsersToGroup = $true; DisableAdminSSPR = $true; PatchCAPolicies = $false
+            CreateRegularSSPRScopeGroup = $true; RegularSSPRGroupName = 'SG-SSPR-AllUsers-Except-BreakGlass'; RegularSSPRGroupDescription = 'Test'
             CreateAuthenticationStrength = $false; CreateBreakGlassCAPolicy = $false; EnableBreakGlassCAPolicy = $false
             AuthenticationStrengthName = 'BreakGlass-FIDO2'; BreakGlassCAPolicyName = '[CA999] IdentityProtection-AnyApp-AnyPlatform-BreakGlass-FIDO2'
             AAGUIDs = @()
@@ -128,6 +133,18 @@ Describe 'Ebg-BreakGlass basic functions' {
         $result = Set-EbgAdminSSPRDisabled -Apply $true
         if ($result.Status -ne 'Disabled') { throw "Unexpected Admin SSPR status: $($result.Status)" }
         if ($result.DesiredValue -ne $false) { throw "Unexpected Admin SSPR desired value: $($result.DesiredValue)" }
+    }
+
+    It 'creates regular SSPR dynamic group rule in mock mode' {
+        $users = @(
+            @{ id = '11111111-1111-1111-1111-111111111111'; userPrincipalName = 'account1@contoso.onmicrosoft.com' },
+            @{ id = '22222222-2222-2222-2222-222222222222'; userPrincipalName = 'account2@contoso.onmicrosoft.com' }
+        )
+        $result = Ensure-EbgRegularSSPRScopeGroup -DisplayName 'SG-SSPR-AllUsers-Except-BreakGlass' -Description 'Test' -BreakGlassUsers $users -CreateOrUpdate $true -Apply $true
+        if ($result.Status -ne 'CreatedOrUpdated') { throw "Unexpected regular SSPR group status: $($result.Status)" }
+        if ($result.MembershipRule -notmatch '11111111-1111-1111-1111-111111111111') { throw 'Rule missing first account object ID.' }
+        if ($result.MembershipRule -notmatch '22222222-2222-2222-2222-222222222222') { throw 'Rule missing second account object ID.' }
+        if ($result.MembershipRule -notmatch 'user.objectId -notIn') { throw "Unexpected dynamic rule: $($result.MembershipRule)" }
     }
 
     It 'handles authentication strength and dedicated CA policy in mock mode' {
@@ -179,6 +196,7 @@ Describe 'Ebg-BreakGlass basic functions' {
             Group = @{ DisplayName = 'CA-BreakGlass-Exclude'; Id = 'group-id'; Status = 'Created' }
             Fido2AuthenticationMethodPolicy = @{ displayName = 'FIDO2/passkey authentication method policy'; state = 'enabled'; TargetGroupName = 'CA-BreakGlass-Exclude'; Status = 'Updated'; Detail = 'FIDO2/passkey enabled for group CA-BreakGlass-Exclude.' }
             RegistrationCampaign = @{ TargetGroupName = 'CA-BreakGlass-Exclude'; Status = 'Excluded'; Detail = 'Group CA-BreakGlass-Exclude is excluded from authentication methods registration campaign.' }
+            RegularSSPR = @{ DisplayName = 'SG-SSPR-AllUsers-Except-BreakGlass'; Id = 'sspr-group-id'; Status = 'Created'; MembershipRule = '(user.accountEnabled -eq true)'; ManualAction = 'Set regular SSPR to Selected and choose SG-SSPR-AllUsers-Except-BreakGlass in Entra Password reset settings.' }
             GroupMembership = @(@{ UserPrincipalName = 'svc_ea_01@contoso.onmicrosoft.com'; Group = 'CA-BreakGlass-Exclude'; Status = 'Added' })
             RoleAssignments = @(@{ UserPrincipalName = 'svc_ea_01@contoso.onmicrosoft.com'; Role = 'Global Administrator'; Scope = '/'; Status = 'Assigned' })
             AdminSSPR = @{ Setting = 'allowedToUseSSPR'; PreviousValue = $true; DesiredValue = $false; Status = 'Disabled'; Detail = 'Policy changes can take up to 60 minutes to take effect.' }
@@ -200,6 +218,7 @@ Describe 'Ebg-BreakGlass basic functions' {
         if ($html -notmatch 'allowedToUseSSPR') { throw 'Handoff missing Admin SSPR result.' }
         if ($html -notmatch 'BreakGlass-FIDO2') { throw 'Handoff missing authentication strength result.' }
         if ($html -notmatch 'Authentication Methods registration campaign') { throw 'Handoff missing registration campaign result.' }
+        if ($html -notmatch 'SG-SSPR-AllUsers-Except-BreakGlass') { throw 'Handoff missing regular SSPR scope group.' }
         if ($html -notmatch 'a4e9fc6d-4cbe-4758-b8ba-37598bb5bbaa') { throw 'Handoff missing AAGUID.' }
     }
 }

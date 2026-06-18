@@ -392,7 +392,7 @@
                             <StackPanel>
                                 <TextBlock Text="Hvor vil du starte?" FontSize="17" FontWeight="SemiBold" Margin="0,0,0,12"/>
                                 <RadioButton x:Name="WPFStartPhase1" GroupName="StartMode" Content="Start fra Phase 1" FontSize="14" FontWeight="SemiBold" IsChecked="True"/>
-                                <TextBlock Text="Opret konti, gruppe, TAP og CA exclusions fra start." Foreground="{StaticResource TextSecondary}" Margin="24,4,0,14"/>
+                                <TextBlock Text="Opret konti, grupper, TAP, SSPR-scope og CA exclusions fra start." Foreground="{StaticResource TextSecondary}" Margin="24,4,0,14"/>
                                 <RadioButton x:Name="WPFResumePhase2" GroupName="StartMode" Content="Fortsæt fra Phase 2" FontSize="14" FontWeight="SemiBold"/>
                                 <TextBlock Text="Brug hvis Phase 1 allerede er kørt, og FIDO2 keys er registreret manuelt." Foreground="{StaticResource TextSecondary}" Margin="24,4,0,0"/>
                             </StackPanel>
@@ -517,9 +517,17 @@
                                 <CheckBox x:Name="WPFAddUsersToGroup" Content="Tilføj break-glass konti til CA-BreakGlass-Exclude"/>
                                 <CheckBox x:Name="WPFDisableAdminSSPR" Content="Deaktivér administrator-SSPR tenant-wide"/>
                                 <TextBlock Foreground="#FBBF24" Text="Admin SSPR kan ikke slås fra kun for de to konti. Hvis valgt, deaktiveres administrator-SSPR for alle administratorroller i tenant'en."/>
+                                <CheckBox x:Name="WPFCreateRegularSSPRScopeGroup" Content="Opret/opdatér regular SSPR scope-gruppe: alle brugere undtagen break-glass konti"/>
+                                <TextBlock Foreground="#FBBF24" Text="Configuratoren opretter gruppen og reglen. Vælg derefter gruppen manuelt under Entra Password reset &gt; Properties &gt; Selected." TextWrapping="Wrap"/>
                                 <CheckBox x:Name="WPFPatchCAPolicies" Content="Phase 1: Ekskludér CA-BreakGlass-Exclude fra alle eksisterende Conditional Access-politikker"/>
                                 <TextBlock Foreground="#FBBF24" Text="Dette ændrer eksisterende Conditional Access-politikker. Der oprettes backup før ændringerne udføres."/>
                             </StackPanel>
+                            <TextBlock Grid.Row="9" Grid.Column="0" Text="Regular SSPR group"/>
+                            <TextBox x:Name="WPFRegularSSPRGroupName" Grid.Row="9" Grid.Column="1" Grid.ColumnSpan="3"/>
+                            <TextBlock Grid.Row="10" Grid.Column="0" Text="Regular SSPR description"/>
+                            <TextBox x:Name="WPFRegularSSPRGroupDescription" Grid.Row="10" Grid.Column="1" Grid.ColumnSpan="3" TextWrapping="Wrap" Height="58"/>
+                            <TextBlock Grid.Row="11" Grid.Column="0" Text="Dynamic rule preview"/>
+                            <TextBox x:Name="WPFRegularSSPRRulePreview" Grid.Row="11" Grid.Column="1" Grid.ColumnSpan="3" IsReadOnly="True" TextWrapping="Wrap" Height="74" FontFamily="Consolas"/>
                         </Grid>
                     </ScrollViewer>
                 </Grid>
@@ -538,7 +546,7 @@
                     <DockPanel>
                         <StackPanel DockPanel.Dock="Top">
                             <TextBlock Text="Phase 1a - Grundopsætning" FontSize="22" FontWeight="SemiBold" Margin="0,0,0,12"/>
-                            <TextBlock Text="Dette trin opretter/genbruger CA-BreakGlass-Exclude, de to konti, Global Administrator assignments, Admin SSPR, TAP, gruppemedlemskab, FIDO2/passkey method policy, registration campaign exclusion og CA exclusions."/>
+                            <TextBlock Text="Dette trin opretter/genbruger CA-BreakGlass-Exclude, de to konti, regular SSPR scope-gruppe, Global Administrator assignments, Admin SSPR, TAP, gruppemedlemskab, FIDO2/passkey method policy, registration campaign exclusion og CA exclusions."/>
                             <TextBlock Foreground="#FBBF24" Margin="0,8,0,0" Text="Admin SSPR kan tage op til 60 minutter før ændringen slår igennem. TAP oprettes som genanvendelig i 2 timer."/>
                             <Button x:Name="WPFApplyConfiguration" Content="Kør Phase 1a" Width="180" HorizontalAlignment="Left" Margin="0,14,0,8"/>
                         </StackPanel>

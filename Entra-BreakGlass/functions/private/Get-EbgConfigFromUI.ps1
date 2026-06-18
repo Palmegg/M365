@@ -22,6 +22,9 @@ function Get-EbgConfigFromUI {
             AddUsersToGroup  = [bool]$sync.WPFAddUsersToGroup.IsChecked
             DisableAdminSSPR = [bool]$sync.WPFDisableAdminSSPR.IsChecked
             PatchCAPolicies  = [bool]$sync.WPFPatchCAPolicies.IsChecked
+            CreateRegularSSPRScopeGroup = [bool]$sync.WPFCreateRegularSSPRScopeGroup.IsChecked
+            RegularSSPRGroupName = $sync.WPFRegularSSPRGroupName.Text.Trim()
+            RegularSSPRGroupDescription = $sync.WPFRegularSSPRGroupDescription.Text.Trim()
             CreateAuthenticationStrength = $true
             CreateBreakGlassCAPolicy = $true
             EnableBreakGlassCAPolicy = $false

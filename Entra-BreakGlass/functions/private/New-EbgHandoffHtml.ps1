@@ -30,6 +30,7 @@ function New-EbgHandoffHtml {
     $group = Get-EbgObjectPropertyValue -InputObject $Result -Name 'Group'
     $fido2MethodPolicy = Get-EbgObjectPropertyValue -InputObject $Result -Name 'Fido2AuthenticationMethodPolicy'
     $registrationCampaign = Get-EbgObjectPropertyValue -InputObject $Result -Name 'RegistrationCampaign'
+    $regularSSPR = Get-EbgObjectPropertyValue -InputObject $Result -Name 'RegularSSPR'
     $changed = @(Get-EbgObjectPropertyValue -InputObject $Result -Name 'CAPoliciesChanged')
     $already = @(Get-EbgObjectPropertyValue -InputObject $Result -Name 'CAPoliciesAlreadyExcluded')
     $failed = @(Get-EbgObjectPropertyValue -InputObject $Result -Name 'CAPoliciesFailed')
@@ -123,6 +124,15 @@ function New-EbgHandoffHtml {
     <tr><th>Status</th><td>$(ConvertTo-EbgHtmlValue (Get-EbgObjectPropertyValue -InputObject $registrationCampaign -Name 'Status'))</td></tr>
     <tr><th>Detail</th><td>$(ConvertTo-EbgHtmlValue (Get-EbgObjectPropertyValue -InputObject $registrationCampaign -Name 'Detail'))</td></tr>
   </table>
+  <h2>Regular SSPR scope</h2>
+  <p>Regular SSPR kan scopes til én valgt gruppe i Entra Password reset. Configuratoren opretter/opdaterer gruppen nedenfor, men selve SSPR targeting skal verificeres manuelt i Entra admin center.</p>
+  <table>
+    <tr><th>Group name</th><td>$(ConvertTo-EbgHtmlValue (Get-EbgObjectPropertyValue -InputObject $regularSSPR -Name 'DisplayName'))</td></tr>
+    <tr><th>Object ID</th><td>$(ConvertTo-EbgHtmlValue (Get-EbgObjectPropertyValue -InputObject $regularSSPR -Name 'Id'))</td></tr>
+    <tr><th>Status</th><td>$(ConvertTo-EbgHtmlValue (Get-EbgObjectPropertyValue -InputObject $regularSSPR -Name 'Status'))</td></tr>
+    <tr><th>Dynamic membership rule</th><td><code>$(ConvertTo-EbgHtmlValue (Get-EbgObjectPropertyValue -InputObject $regularSSPR -Name 'MembershipRule'))</code></td></tr>
+    <tr><th>Manual action</th><td>$(ConvertTo-EbgHtmlValue (Get-EbgObjectPropertyValue -InputObject $regularSSPR -Name 'ManualAction'))</td></tr>
+  </table>
   <h2>Administratorrolle</h2>
   <p>Begge break-glass konti tildeles direkte Global Administrator på tenant scope (/).</p>
   $roleAssignmentTable
@@ -172,6 +182,7 @@ function New-EbgHandoffHtml {
     <li>Registrer to separate FIDO2 security keys pr. break-glass konto.</li>
     <li>Verificér at begge break-glass konti har direkte Global Administrator rolle.</li>
     <li>Hvis administrator-SSPR blev deaktiveret, vent op til 60 minutter og test derefter FIDO2/TAP onboarding igen.</li>
+    <li>Hvis regular SSPR bruges, sæt Self service password reset til Selected og vælg SSPR-scope-gruppen fra dokumentet.</li>
     <li>Verificér at begge break-glass konti kan logge ind.</li>
     <li>Den dedikerede BreakGlass FIDO2 CA-policy oprettes som disabled. Valider sign-in logs og authentication strength før den sættes til enabled.</li>
     <li>Verificér at kontiene er medlem af CA-BreakGlass-Exclude.</li>

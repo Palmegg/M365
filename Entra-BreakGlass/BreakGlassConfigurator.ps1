@@ -115,7 +115,7 @@ function Add-EbgGroupExclusionToCAPolicies {
         $index++
         $policyId = [string](Get-EbgObjectPropertyValue -InputObject $policy -Name 'id')
         $policyName = [string](Get-EbgObjectPropertyValue -InputObject $policy -Name 'displayName')
-        Write-EbgStatus -Busy -Message "Phase 1a step 9/10: CA policy $index/$total - $policyName"
+        Write-EbgStatus -Busy -Message "Phase 1a step 11/12: CA policy $index/$total - $policyName"
         Write-EbgLog -Message "CA exclusion $index/${total}: $policyName ($policyId)"
         [System.Windows.Forms.Application]::DoEvents()
 
@@ -861,6 +861,135 @@ function Ensure-EbgRegistrationCampaignExclusion {
     }
 }
 
+function ConvertTo-EbgMailNickname {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][string] $DisplayName)
+
+    $nickname = ($DisplayName -replace '[^a-zA-Z0-9]', '')
+    if ([string]::IsNullOrWhiteSpace($nickname)) { $nickname = 'BreakGlassSSPRScope' }
+    if ($nickname.Length -gt 64) { $nickname = $nickname.Substring(0, 64) }
+    return $nickname
+}
+
+function New-EbgRegularSSPRMembershipRule {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string] $Account1ObjectId,
+        [Parameter(Mandatory)][string] $Account2ObjectId
+    )
+
+    return '(user.accountEnabled -eq true) -and (user.userType -eq "Member") -and (user.objectId -notIn ["{0}","{1}"])' -f $Account1ObjectId, $Account2ObjectId
+}
+
+function Ensure-EbgRegularSSPRScopeGroup {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)][string] $DisplayName,
+        [Parameter(Mandatory)][string] $Description,
+        [Parameter(Mandatory)][object[]] $BreakGlassUsers,
+        [Parameter(Mandatory)][bool] $CreateOrUpdate,
+        [Parameter(Mandatory)][bool] $Apply
+    )
+
+    $validUsers = @($BreakGlassUsers | Where-Object { -not [string]::IsNullOrWhiteSpace([string](Get-EbgObjectPropertyValue -InputObject $_ -Name 'id')) })
+    if ($validUsers.Count -lt 2) {
+        throw 'Kan ikke oprette SSPR scope-gruppe, fordi begge break-glass konti skal have Object ID først.'
+    }
+
+    $account1Id = [string](Get-EbgObjectPropertyValue -InputObject $validUsers[0] -Name 'id')
+    $account2Id = [string](Get-EbgObjectPropertyValue -InputObject $validUsers[1] -Name 'id')
+    $membershipRule = New-EbgRegularSSPRMembershipRule -Account1ObjectId $account1Id -Account2ObjectId $account2Id
+
+    if (-not $CreateOrUpdate) {
+        return [pscustomobject]@{
+            DisplayName = $DisplayName
+            Id = ''
+            Status = 'Skipped'
+            MembershipRule = $membershipRule
+            ManualAction = 'Regular SSPR scoping was not selected.'
+        }
+    }
+
+    if ($sync.App.Mock) {
+        return [pscustomobject]@{
+            DisplayName = $DisplayName
+            Id = 'mock-sspr-scope-group'
+            Status = if ($Apply) { 'CreatedOrUpdated' } else { 'PlannedCreateOrUpdate' }
+            MembershipRule = $membershipRule
+            ManualAction = "Set regular SSPR to Selected and choose $DisplayName in Entra Password reset settings."
+        }
+    }
+
+    $group = Get-EbgGroupByDisplayName -DisplayName $DisplayName
+    $body = @{
+        description = $Description
+        membershipRule = $membershipRule
+        membershipRuleProcessingState = 'On'
+    }
+
+    if ($group) {
+        $groupId = [string](Get-EbgObjectPropertyValue -InputObject $group -Name 'id')
+        $groupTypes = @(Get-EbgObjectPropertyValue -InputObject $group -Name 'groupTypes')
+        $isDynamic = $groupTypes -contains 'DynamicMembership'
+        if (-not $isDynamic) {
+            throw "SSPR scope-gruppen '$DisplayName' findes allerede, men er ikke en dynamic membership group. Omdøb/slet den manuelt eller vælg et andet gruppenavn."
+        }
+        $currentRule = [string](Get-EbgObjectPropertyValue -InputObject $group -Name 'membershipRule')
+        $currentDescription = [string](Get-EbgObjectPropertyValue -InputObject $group -Name 'description')
+        $needsUpdate = ($currentRule -ne $membershipRule) -or ($currentDescription -ne $Description)
+        if ($Apply -and $needsUpdate) {
+            Write-EbgLog -Message "Opdaterer regular SSPR scope-gruppe: $DisplayName"
+            Invoke-EbgGraphRequest -Method PATCH -Uri "https://graph.microsoft.com/v1.0/groups/$groupId" -Body $body | Out-Null
+            $status = 'Updated'
+        }
+        elseif ($needsUpdate) {
+            $status = 'PlannedUpdate'
+        }
+        else {
+            $status = 'AlreadyCorrect'
+        }
+
+        return [pscustomobject]@{
+            DisplayName = $DisplayName
+            Id = $groupId
+            Status = $status
+            MembershipRule = $membershipRule
+            ManualAction = "Set regular SSPR to Selected and choose $DisplayName in Entra Password reset settings."
+        }
+    }
+
+    if (-not $Apply) {
+        return [pscustomobject]@{
+            DisplayName = $DisplayName
+            Id = 'planned-sspr-scope-group'
+            Status = 'PlannedCreate'
+            MembershipRule = $membershipRule
+            ManualAction = "Set regular SSPR to Selected and choose $DisplayName in Entra Password reset settings."
+        }
+    }
+
+    $createBody = @{
+        displayName = $DisplayName
+        description = $Description
+        mailEnabled = $false
+        mailNickname = ConvertTo-EbgMailNickname -DisplayName $DisplayName
+        securityEnabled = $true
+        groupTypes = @('DynamicMembership')
+        membershipRule = $membershipRule
+        membershipRuleProcessingState = 'On'
+    }
+    Write-EbgLog -Message "Opretter regular SSPR scope-gruppe: $DisplayName"
+    Invoke-EbgGraphRequest -Method POST -Uri 'https://graph.microsoft.com/v1.0/groups' -Body $createBody | Out-Null
+    $created = Get-EbgGroupByDisplayName -DisplayName $DisplayName
+    return [pscustomobject]@{
+        DisplayName = $DisplayName
+        Id = [string](Get-EbgObjectPropertyValue -InputObject $created -Name 'id')
+        Status = 'Created'
+        MembershipRule = $membershipRule
+        ManualAction = "Set regular SSPR to Selected and choose $DisplayName in Entra Password reset settings."
+    }
+}
+
 function Ensure-EbgSecurityGroup {
     [CmdletBinding()]
     param(
@@ -1057,6 +1186,9 @@ function Get-EbgConfigFromUI {
             AddUsersToGroup  = [bool]$sync.WPFAddUsersToGroup.IsChecked
             DisableAdminSSPR = [bool]$sync.WPFDisableAdminSSPR.IsChecked
             PatchCAPolicies  = [bool]$sync.WPFPatchCAPolicies.IsChecked
+            CreateRegularSSPRScopeGroup = [bool]$sync.WPFCreateRegularSSPRScopeGroup.IsChecked
+            RegularSSPRGroupName = $sync.WPFRegularSSPRGroupName.Text.Trim()
+            RegularSSPRGroupDescription = $sync.WPFRegularSSPRGroupDescription.Text.Trim()
             CreateAuthenticationStrength = $true
             CreateBreakGlassCAPolicy = $true
             EnableBreakGlassCAPolicy = $false
@@ -1154,8 +1286,9 @@ function Get-EbgGroupByDisplayName {
         return $null
     }
     $filter = [uri]::EscapeDataString("displayName eq '$($DisplayName.Replace("'", "''"))'")
-    return Get-EbgGraphCollection -Uri "https://graph.microsoft.com/v1.0/groups?`$filter=$filter&`$select=id,displayName,description,mailNickname,securityEnabled,mailEnabled,groupTypes" | Select-Object -First 1
+    return Get-EbgGraphCollection -Uri "https://graph.microsoft.com/v1.0/groups?`$filter=$filter&`$select=id,displayName,description,mailNickname,securityEnabled,mailEnabled,groupTypes,membershipRule,membershipRuleProcessingState" | Select-Object -First 1
 }
+
 function Get-EbgObjectPropertyValue {
     [CmdletBinding()]
     param(
@@ -1443,6 +1576,7 @@ function New-EbgHandoffHtml {
     $group = Get-EbgObjectPropertyValue -InputObject $Result -Name 'Group'
     $fido2MethodPolicy = Get-EbgObjectPropertyValue -InputObject $Result -Name 'Fido2AuthenticationMethodPolicy'
     $registrationCampaign = Get-EbgObjectPropertyValue -InputObject $Result -Name 'RegistrationCampaign'
+    $regularSSPR = Get-EbgObjectPropertyValue -InputObject $Result -Name 'RegularSSPR'
     $changed = @(Get-EbgObjectPropertyValue -InputObject $Result -Name 'CAPoliciesChanged')
     $already = @(Get-EbgObjectPropertyValue -InputObject $Result -Name 'CAPoliciesAlreadyExcluded')
     $failed = @(Get-EbgObjectPropertyValue -InputObject $Result -Name 'CAPoliciesFailed')
@@ -1536,6 +1670,15 @@ function New-EbgHandoffHtml {
     <tr><th>Status</th><td>$(ConvertTo-EbgHtmlValue (Get-EbgObjectPropertyValue -InputObject $registrationCampaign -Name 'Status'))</td></tr>
     <tr><th>Detail</th><td>$(ConvertTo-EbgHtmlValue (Get-EbgObjectPropertyValue -InputObject $registrationCampaign -Name 'Detail'))</td></tr>
   </table>
+  <h2>Regular SSPR scope</h2>
+  <p>Regular SSPR kan scopes til én valgt gruppe i Entra Password reset. Configuratoren opretter/opdaterer gruppen nedenfor, men selve SSPR targeting skal verificeres manuelt i Entra admin center.</p>
+  <table>
+    <tr><th>Group name</th><td>$(ConvertTo-EbgHtmlValue (Get-EbgObjectPropertyValue -InputObject $regularSSPR -Name 'DisplayName'))</td></tr>
+    <tr><th>Object ID</th><td>$(ConvertTo-EbgHtmlValue (Get-EbgObjectPropertyValue -InputObject $regularSSPR -Name 'Id'))</td></tr>
+    <tr><th>Status</th><td>$(ConvertTo-EbgHtmlValue (Get-EbgObjectPropertyValue -InputObject $regularSSPR -Name 'Status'))</td></tr>
+    <tr><th>Dynamic membership rule</th><td><code>$(ConvertTo-EbgHtmlValue (Get-EbgObjectPropertyValue -InputObject $regularSSPR -Name 'MembershipRule'))</code></td></tr>
+    <tr><th>Manual action</th><td>$(ConvertTo-EbgHtmlValue (Get-EbgObjectPropertyValue -InputObject $regularSSPR -Name 'ManualAction'))</td></tr>
+  </table>
   <h2>Administratorrolle</h2>
   <p>Begge break-glass konti tildeles direkte Global Administrator på tenant scope (/).</p>
   $roleAssignmentTable
@@ -1585,6 +1728,7 @@ function New-EbgHandoffHtml {
     <li>Registrer to separate FIDO2 security keys pr. break-glass konto.</li>
     <li>Verificér at begge break-glass konti har direkte Global Administrator rolle.</li>
     <li>Hvis administrator-SSPR blev deaktiveret, vent op til 60 minutter og test derefter FIDO2/TAP onboarding igen.</li>
+    <li>Hvis regular SSPR bruges, sæt Self service password reset til Selected og vælg SSPR-scope-gruppen fra dokumentet.</li>
     <li>Verificér at begge break-glass konti kan logge ind.</li>
     <li>Den dedikerede BreakGlass FIDO2 CA-policy oprettes som disabled. Valider sign-in logs og authentication strength før den sættes til enabled.</li>
     <li>Verificér at kontiene er medlem af CA-BreakGlass-Exclude.</li>
@@ -1648,6 +1792,9 @@ function New-EbgPlanObject {
     $warnings += 'Phase 1 opretter Temporary Access Pass for begge konti: one-time use = No, duration = 2 hours.'
     $warnings += 'Phase 1 sikrer at FIDO2/passkey Authentication Method policy er enabled for CA-BreakGlass-Exclude, så kontiene kan registrere security keys.'
     $warnings += 'Phase 1 ekskluderer CA-BreakGlass-Exclude fra Authentication Methods registration campaign, så break-glass konti ikke nudges til ekstra metoder.'
+    if ($Config.CreateRegularSSPRScopeGroup) {
+        $warnings += "Phase 1 opretter/opdaterer dynamic group '$($Config.RegularSSPRGroupName)' til regular SSPR targeting. Vælg gruppen manuelt under Entra Password reset > Properties > Selected."
+    }
     $warnings += 'Phase 1b kræver manuel registrering af to FIDO2 security keys pr. konto.'
     $warnings += 'Phase 2 opretter/opdaterer BreakGlass-FIDO2 authentication strength og en dedikeret CA-policy som disabled.'
     if ($Config.PatchCAPolicies) { $warnings += 'Eksisterende Conditional Access-politikker ændres. Backup oprettes før ændringer.' }
@@ -1677,6 +1824,10 @@ function New-EbgPlanObject {
         TemporaryAccessPassStatus    = 'Phase 1: oprettes for begge konti, genanvendelig i 2 timer'
         Fido2AuthenticationMethodPolicyStatus = 'Phase 1: enables FIDO2/passkey for CA-BreakGlass-Exclude'
         RegistrationCampaignStatus = 'Phase 1: excludes CA-BreakGlass-Exclude from authentication methods registration campaign'
+        RegularSSPRGroupName      = $Config.RegularSSPRGroupName
+        RegularSSPRGroupStatus    = if ($Config.CreateRegularSSPRScopeGroup) { 'Phase 1: oprettes/opdateres efter konti har Object ID' } else { 'Fravalgt' }
+        RegularSSPRGroupRule      = '(user.accountEnabled -eq true) -and (user.userType -eq "Member") -and (user.objectId -notIn ["<Account 1 objectId>","<Account 2 objectId>"])'
+        RegularSSPRManualAction   = if ($Config.CreateRegularSSPRScopeGroup) { "Manuelt step: Set regular SSPR to Selected and choose $($Config.RegularSSPRGroupName)." } else { 'Ikke valgt.' }
         AuthenticationStrengthStatus = if (@($Config.AAGUIDs).Count -gt 0) { 'Phase 2: oprettes/opdateres med angivne + fundne AAGUIDs' } else { 'Phase 2: oprettes/opdateres efter automatisk AAGUID refresh' }
         BreakGlassCAPolicyName    = $Config.BreakGlassCAPolicyName
         BreakGlassCAPolicyStatus  = 'Phase 2: oprettes disabled og tildeles direkte til de 2 konti'
@@ -1776,7 +1927,7 @@ function New-EbgTemporaryAccessPass {
     $lastError = $null
     for ($attempt = 1; $attempt -le $maxAttempts; $attempt++) {
         try {
-            Write-EbgStatus -Busy -Message "Phase 1a step 5/11: opretter TAP for $upn (forsøg $attempt/$maxAttempts)..."
+            Write-EbgStatus -Busy -Message "Phase 1a step 6/12: opretter TAP for $upn (forsøg $attempt/$maxAttempts)..."
             [System.Windows.Forms.Application]::DoEvents()
             if ($attempt -gt 1 -and -not [string]::IsNullOrWhiteSpace($upn)) {
                 $refreshedUser = Get-EbgUserByUpn -UserPrincipalName $upn
@@ -1806,7 +1957,7 @@ function New-EbgTemporaryAccessPass {
 
             $reason = if ($isBackendDelay) { '404/resourceNotFound' } else { '403/accessDenied' }
             Write-EbgLog -Level WARN -Message "TAP for $upn blev afvist med $reason på forsøg $attempt/$maxAttempts. Venter $delaySeconds sekunder og prøver igen; nye brugere kan være forsinket i authentication methods backend."
-            Write-EbgStatus -Busy -Message "Phase 1a step 5/11: venter på TAP backend for $upn ($attempt/$maxAttempts)..."
+            Write-EbgStatus -Busy -Message "Phase 1a step 6/12: venter på TAP backend for $upn ($attempt/$maxAttempts)..."
             $until = (Get-Date).AddSeconds($delaySeconds)
             while ((Get-Date) -lt $until) {
                 Start-Sleep -Milliseconds 250
@@ -2652,6 +2803,9 @@ function Initialize-EbgWPFUI {
     $sync.WPFUserPrefix2.Text = [string]$defaults.account2Prefix
     $sync.WPFGroupName.Text = [string]$settings.groupName
     $sync.WPFGroupDescription.Text = [string]$settings.groupDescription
+    $sync.WPFRegularSSPRGroupName.Text = [string]$settings.regularSSPRGroupName
+    $sync.WPFRegularSSPRGroupDescription.Text = [string]$settings.regularSSPRGroupDescription
+    $sync.WPFRegularSSPRRulePreview.Text = '(user.accountEnabled -eq true) -and (user.userType -eq "Member") -and (user.objectId -notIn ["<Account 1 objectId>","<Account 2 objectId>"])'
     $sync.WPFAuthenticationStrengthName.Text = [string]$settings.authenticationStrengthName
     $sync.WPFBreakGlassCAPolicyName.Text = [string]$settings.breakGlassCAPolicyName
     $sync.WPFCreateUsers.IsChecked = [bool]$defaults.createUsers
@@ -2659,6 +2813,7 @@ function Initialize-EbgWPFUI {
     $sync.WPFAddUsersToGroup.IsChecked = [bool]$defaults.addUsersToGroup
     $sync.WPFDisableAdminSSPR.IsChecked = [bool]$defaults.disableAdminSSPR
     $sync.WPFPatchCAPolicies.IsChecked = [bool]$defaults.patchCAPolicies
+    $sync.WPFCreateRegularSSPRScopeGroup.IsChecked = [bool]$defaults.createRegularSSPRScopeGroup
     if ($sync['WPFCreateAuthenticationStrength']) { $sync['WPFCreateAuthenticationStrength'].IsChecked = [bool]$defaults.createAuthenticationStrength }
     if ($sync['WPFCreateBreakGlassCAPolicy']) { $sync['WPFCreateBreakGlassCAPolicy'].IsChecked = [bool]$defaults.createBreakGlassCAPolicy }
     if ($sync['WPFEnableBreakGlassCAPolicy']) { $sync['WPFEnableBreakGlassCAPolicy'].IsChecked = [bool]$defaults.enableBreakGlassCAPolicy }
@@ -2710,13 +2865,15 @@ Phase 1a udfører:
 1. Sikrer CA-BreakGlass-Exclude security group
 2. Opretter/genbruger de 2 break-glass konti
 3. Deaktiverer Admin SSPR tenant-wide: $($config.DisableAdminSSPR)
-4. Opretter Temporary Access Pass: one-time use = No, duration = 2 hours
-5. Tildeler direkte Global Administrator rolle
-6. Melder konti ind i exclude-gruppen
-7. Aktiverer FIDO2/passkey for exclude-gruppen og ekskluderer den fra registration campaign
-8. Ekskluderer gruppen fra eksisterende CA policies: $($config.PatchCAPolicies)
+4. Opretter/opdaterer regular SSPR scope-gruppe: $($config.CreateRegularSSPRScopeGroup)
+5. Opretter Temporary Access Pass: one-time use = No, duration = 2 hours
+6. Tildeler direkte Global Administrator rolle
+7. Melder konti ind i exclude-gruppen
+8. Aktiverer FIDO2/passkey for exclude-gruppen og ekskluderer den fra registration campaign
+9. Ekskluderer gruppen fra eksisterende CA policies: $($config.PatchCAPolicies)
 
 Admin SSPR kan tage op til 60 minutter før ændringen slår igennem.
+Regular SSPR-gruppen skal vælges manuelt under Entra Password reset > Properties > Selected.
 Initial passwords og TAP-koder skrives ikke til almindelig log.
 
 Vil du fortsætte?
@@ -2750,8 +2907,8 @@ Vil du fortsætte?
             throw "Phase 1a stoppet før ændringer: $account mangler Entra rollen $roles. Microsoft Graph kræver en af disse roller for at oprette Temporary Access Pass på andre brugere. Tildel rollen, log ud/ind i konfiguratoren, og kør Phase 1a igen."
         }
 
-        Write-EbgLog -Message 'Phase 1a step 1/11: Henter tenant og klargør outputmappe...'
-        Write-EbgStatus -Busy -Message 'Phase 1a step 1/11: henter tenant og klargør outputmappe...'
+        Write-EbgLog -Message 'Phase 1a step 1/12: Henter tenant og klargør outputmappe...'
+        Write-EbgStatus -Busy -Message 'Phase 1a step 1/12: henter tenant og klargør outputmappe...'
         [System.Windows.Forms.Application]::DoEvents()
         $tenant = Get-EbgTenantInfo
         $output = if ($sync.State.OutputFolder) { $sync.State.OutputFolder } else { New-EbgOutputFolder -TenantId $tenant.TenantId }
@@ -2761,8 +2918,8 @@ Vil du fortsætte?
         $upn1 = ConvertTo-BreakGlassUpn -Prefix $config.UserPrefix1 -OnMicrosoftDomain $tenant.OnMicrosoftDomain
         $upn2 = ConvertTo-BreakGlassUpn -Prefix $config.UserPrefix2 -OnMicrosoftDomain $tenant.OnMicrosoftDomain
 
-        Write-EbgLog -Message 'Phase 1a step 2/11: Sikrer CA-BreakGlass-Exclude security group...'
-        Write-EbgStatus -Busy -Message 'Phase 1a step 2/11: sikrer CA-BreakGlass-Exclude security group...'
+        Write-EbgLog -Message 'Phase 1a step 2/12: Sikrer CA-BreakGlass-Exclude security group...'
+        Write-EbgStatus -Busy -Message 'Phase 1a step 2/12: sikrer CA-BreakGlass-Exclude security group...'
         [System.Windows.Forms.Application]::DoEvents()
         $group = Ensure-EbgSecurityGroup -DisplayName $config.GroupName -Description $config.GroupDescription -CreateIfMissing ([bool]$config.CreateGroup) -Apply $true
         Write-EbgLog -Level PASS -Message "Gruppe håndteret: $($config.GroupName)"
@@ -2770,8 +2927,8 @@ Vil du fortsætte?
         $groupDisplayName = [string](Get-EbgObjectPropertyValue -InputObject $group -Name 'displayName')
         $groupStatus = [string](Get-EbgObjectPropertyValue -InputObject $group -Name 'EnsureStatus')
 
-        Write-EbgLog -Message 'Phase 1a step 3/11: Sikrer de to break-glass konti...'
-        Write-EbgStatus -Busy -Message 'Phase 1a step 3/11: sikrer de to break-glass konti...'
+        Write-EbgLog -Message 'Phase 1a step 3/12: Sikrer de to break-glass konti...'
+        Write-EbgStatus -Busy -Message 'Phase 1a step 3/12: sikrer de to break-glass konti...'
         [System.Windows.Forms.Application]::DoEvents()
         $createdPasswords = @()
         $users = [System.Collections.Generic.List[object]]::new()
@@ -2800,8 +2957,18 @@ Vil du fortsætte?
 
         $roleAssignments = @()
 
-        Write-EbgLog -Message 'Phase 1a step 4/11: Håndterer administrator-SSPR...'
-        Write-EbgStatus -Busy -Message 'Phase 1a step 4/11: håndterer administrator-SSPR...'
+        Write-EbgLog -Message 'Phase 1a step 4/12: Opretter/opdaterer regular SSPR scope-gruppe...'
+        Write-EbgStatus -Busy -Message 'Phase 1a step 4/12: opretter/opdaterer regular SSPR scope-gruppe...'
+        [System.Windows.Forms.Application]::DoEvents()
+        $regularSSPRGroup = Ensure-EbgRegularSSPRScopeGroup -DisplayName $config.RegularSSPRGroupName -Description $config.RegularSSPRGroupDescription -BreakGlassUsers $users -CreateOrUpdate ([bool]$config.CreateRegularSSPRScopeGroup) -Apply $true
+        if ($sync.WPFRegularSSPRRulePreview) { $sync.WPFRegularSSPRRulePreview.Text = [string](Get-EbgObjectPropertyValue -InputObject $regularSSPRGroup -Name 'MembershipRule') }
+        Write-EbgLog -Level PASS -Message "Regular SSPR scope-gruppe håndteret: $($regularSSPRGroup.Status)"
+        if ($config.CreateRegularSSPRScopeGroup) {
+            Write-EbgLog -Level WARN -Message "Manuelt step: Sæt regular SSPR til Selected og vælg gruppen $($config.RegularSSPRGroupName)."
+        }
+
+        Write-EbgLog -Message 'Phase 1a step 5/12: Håndterer administrator-SSPR...'
+        Write-EbgStatus -Busy -Message 'Phase 1a step 5/12: håndterer administrator-SSPR...'
         [System.Windows.Forms.Application]::DoEvents()
         $adminSSPRResult = if ($config.DisableAdminSSPR) {
             $result = Set-EbgAdminSSPRDisabled -Apply $true
@@ -2819,24 +2986,24 @@ Vil du fortsætte?
             }
         }
 
-        Write-EbgLog -Message 'Phase 1a step 5/11: Opretter Temporary Access Pass for begge konti før Global Administrator rollen tildeles...'
-        Write-EbgStatus -Busy -Message 'Phase 1a step 5/11: opretter Temporary Access Pass for begge konti...'
+        Write-EbgLog -Message 'Phase 1a step 6/12: Opretter Temporary Access Pass for begge konti før Global Administrator rollen tildeles...'
+        Write-EbgStatus -Busy -Message 'Phase 1a step 6/12: opretter Temporary Access Pass for begge konti...'
         [System.Windows.Forms.Application]::DoEvents()
         $temporaryAccessPasses = @()
         foreach ($user in $users | Where-Object { Get-EbgObjectPropertyValue -InputObject $_ -Name 'id' }) {
             $temporaryAccessPasses += New-EbgTemporaryAccessPass -User $user -LifetimeInMinutes 120 -IsUsableOnce $false -Apply $true
         }
 
-        Write-EbgLog -Message 'Phase 1a step 6/11: Tildeler direkte Global Administrator rolle...'
-        Write-EbgStatus -Busy -Message 'Phase 1a step 6/11: tildeler direkte Global Administrator rolle...'
+        Write-EbgLog -Message 'Phase 1a step 7/12: Tildeler direkte Global Administrator rolle...'
+        Write-EbgStatus -Busy -Message 'Phase 1a step 7/12: tildeler direkte Global Administrator rolle...'
         [System.Windows.Forms.Application]::DoEvents()
         $roleDefinition = Get-EbgGlobalAdministratorRoleDefinition
         foreach ($user in $users | Where-Object { Get-EbgObjectPropertyValue -InputObject $_ -Name 'id' }) {
             $roleAssignments += Ensure-EbgGlobalAdministratorAssignment -User $user -RoleDefinition $roleDefinition -Apply $true
         }
 
-        Write-EbgLog -Message 'Phase 1a step 7/11: Sikrer gruppemedlemskab...'
-        Write-EbgStatus -Busy -Message 'Phase 1a step 7/11: sikrer gruppemedlemskab...'
+        Write-EbgLog -Message 'Phase 1a step 8/12: Sikrer gruppemedlemskab...'
+        Write-EbgStatus -Busy -Message 'Phase 1a step 8/12: sikrer gruppemedlemskab...'
         [System.Windows.Forms.Application]::DoEvents()
         $membership = @()
         if ($config.AddUsersToGroup) {
@@ -2848,16 +3015,16 @@ Vil du fortsætte?
             $membership += [pscustomobject]@{ Status='Skipped'; Detail='Gruppemedlemskab er fravalgt.' }
         }
 
-        Write-EbgLog -Message 'Phase 1a step 8/11: Sikrer FIDO2/passkey policy og registration campaign exclusion for exclude-gruppen...'
-        Write-EbgStatus -Busy -Message 'Phase 1a step 8/11: aktiverer FIDO2/passkey og fjerner registration nudge...'
+        Write-EbgLog -Message 'Phase 1a step 9/12: Sikrer FIDO2/passkey policy og registration campaign exclusion for exclude-gruppen...'
+        Write-EbgStatus -Busy -Message 'Phase 1a step 9/12: aktiverer FIDO2/passkey og fjerner registration nudge...'
         [System.Windows.Forms.Application]::DoEvents()
         $fido2MethodPolicy = Ensure-EbgFido2AuthenticationMethodPolicy -Group $group -Apply $true
         Write-EbgLog -Level PASS -Message "FIDO2/passkey policy håndteret: $($fido2MethodPolicy.Status)"
         $registrationCampaign = Ensure-EbgRegistrationCampaignExclusion -Group $group -Apply $true
         Write-EbgLog -Level PASS -Message "Registration campaign håndteret: $($registrationCampaign.Status)"
 
-        Write-EbgLog -Message 'Phase 1a step 9/11: Henter eksisterende Conditional Access policies...'
-        Write-EbgStatus -Busy -Message 'Phase 1a step 9/11: henter eksisterende Conditional Access policies...'
+        Write-EbgLog -Message 'Phase 1a step 10/12: Henter eksisterende Conditional Access policies...'
+        Write-EbgStatus -Busy -Message 'Phase 1a step 10/12: henter eksisterende Conditional Access policies...'
         [System.Windows.Forms.Application]::DoEvents()
         $policies = @(Get-EbgConditionalAccessPolicies)
         $backupPath = ''
@@ -2877,22 +3044,22 @@ Vil du fortsætte?
         }
 
         if ($config.PatchCAPolicies -and $group -and $groupId) {
-            Write-EbgLog -Message 'Phase 1a step 10/11: Backupper og ekskluderer CA-BreakGlass-Exclude fra eksisterende CA policies...'
-            Write-EbgStatus -Busy -Message "Phase 1a step 10/11: backupper $(@($policies).Count) CA policies..."
+            Write-EbgLog -Message 'Phase 1a step 11/12: Backupper og ekskluderer CA-BreakGlass-Exclude fra eksisterende CA policies...'
+            Write-EbgStatus -Busy -Message "Phase 1a step 11/12: backupper $(@($policies).Count) CA policies..."
             [System.Windows.Forms.Application]::DoEvents()
             $backupPath = Backup-EbgConditionalAccessPolicies -Policies $policies -OutputFolder $output
-            Write-EbgStatus -Busy -Message "Phase 1a step 10/11: ekskluderer gruppen fra $(@($policies).Count) CA policies..."
+            Write-EbgStatus -Busy -Message "Phase 1a step 11/12: ekskluderer gruppen fra $(@($policies).Count) CA policies..."
             [System.Windows.Forms.Application]::DoEvents()
             $caResults = Add-EbgGroupExclusionToCAPolicies -Policies $policies -GroupId $groupId -Apply $true
         }
         else {
-            Write-EbgLog -Message 'Phase 1a step 10/11: Conditional Access patching er fravalgt.'
-            Write-EbgStatus -Busy -Message 'Phase 1a step 10/11: Conditional Access patching er fravalgt.'
+            Write-EbgLog -Message 'Phase 1a step 11/12: Conditional Access patching er fravalgt.'
+            Write-EbgStatus -Busy -Message 'Phase 1a step 11/12: Conditional Access patching er fravalgt.'
             [System.Windows.Forms.Application]::DoEvents()
         }
 
-        Write-EbgLog -Message 'Phase 1a step 11/11: Gemmer Phase 1-resultat og genererer handoff...'
-        Write-EbgStatus -Busy -Message 'Phase 1a step 11/11: gemmer resultat og genererer handoff...'
+        Write-EbgLog -Message 'Phase 1a step 12/12: Gemmer Phase 1-resultat og genererer handoff...'
+        Write-EbgStatus -Busy -Message 'Phase 1a step 12/12: gemmer resultat og genererer handoff...'
         [System.Windows.Forms.Application]::DoEvents()
         $changed = @($caResults | Where-Object Status -eq 'Patched')
         $failed = @($caResults | Where-Object Status -eq 'Failed')
@@ -2921,6 +3088,7 @@ Vil du fortsætte?
             GroupMembership = $membership
             Fido2AuthenticationMethodPolicy = $fido2MethodPolicy
             RegistrationCampaign = $registrationCampaign
+            RegularSSPR = $regularSSPRGroup
             RoleAssignments = $roleAssignments
             AdminSSPR = $adminSSPRResult
             TemporaryAccessPassSummary = @($temporaryAccessPasses | ForEach-Object {
@@ -2943,6 +3111,7 @@ Vil du fortsætte?
                 'Phase 1b: Log ind på begge break-glass konti med TAP og registrer to FIDO2 security keys pr. konto.'
                 'FIDO2/passkey Authentication Method policy er enabled for CA-BreakGlass-Exclude, så kontiene kan registrere security keys.'
                 'CA-BreakGlass-Exclude er ekskluderet fra Authentication Methods registration campaign, så kontiene ikke nudges til ekstra metoder.'
+                'Hvis regular SSPR scope-gruppe blev oprettet, skal den vælges manuelt under Entra Password reset > Properties > Selected.'
                 'Admin SSPR ændringer kan tage op til 60 minutter før de slår igennem.'
             )
         }
@@ -3140,6 +3309,9 @@ Administrator-SSPR plan: $($plan.PlannedAdminSSPRStatus)
 Temporary Access Pass: $($plan.TemporaryAccessPassStatus)
 FIDO2/passkey method policy: $($plan.Fido2AuthenticationMethodPolicyStatus)
 Registration campaign: $($plan.RegistrationCampaignStatus)
+Regular SSPR group: $($plan.RegularSSPRGroupName) / $($plan.RegularSSPRGroupStatus)
+Regular SSPR rule: $($plan.RegularSSPRGroupRule)
+Regular SSPR manual step: $($plan.RegularSSPRManualAction)
 
 Authentication strength: $($plan.AuthenticationStrengthName) / $($plan.AuthenticationStrengthStatus)
 AAGUIDs: $(@($plan.AuthenticationStrengthAAGUIDs) -join ', ')
@@ -3691,10 +3863,12 @@ function Stop-EbgCurrentTask {
 $sync.configs.appsettings = @'
 {
   "name": "Entra Break Glass Configurator",
-  "version": "2.4.23",
+  "version": "2.4.24",
   "outputRoot": ".\\Output",
   "groupName": "CA-BreakGlass-Exclude",
   "groupDescription": "Security group used to exclude dedicated break-glass accounts from existing Conditional Access policies.",
+  "regularSSPRGroupName": "SG-SSPR-AllUsers-Except-BreakGlass",
+  "regularSSPRGroupDescription": "Dynamic security group for regular SSPR targeting. Includes enabled member users except the two dedicated break-glass accounts.",
   "authenticationStrengthName": "BreakGlass-FIDO2",
   "authenticationStrengthDescription": "Requires passkeys (FIDO2) from approved attested security key AAGUIDs for break-glass accounts.",
   "breakGlassCAPolicyName": "[CA999] IdentityProtection-AnyApp-AnyPlatform-BreakGlass-FIDO2"
@@ -3715,6 +3889,7 @@ $sync.configs.defaults = @'
   "addUsersToGroup": true,
   "disableAdminSSPR": true,
   "patchCAPolicies": true,
+  "createRegularSSPRScopeGroup": true,
   "createAuthenticationStrength": false,
   "createBreakGlassCAPolicy": false,
   "enableBreakGlassCAPolicy": false,
@@ -3746,6 +3921,7 @@ $sync.configs.defaults = @'
     { "account1": "Project North", "account2": "Project South" }
   ]
 }
+
 '@ | ConvertFrom-Json
 $sync.configs.graphScopes = @'
 [
@@ -4159,7 +4335,7 @@ $inputXML = @'
                             <StackPanel>
                                 <TextBlock Text="Hvor vil du starte?" FontSize="17" FontWeight="SemiBold" Margin="0,0,0,12"/>
                                 <RadioButton x:Name="WPFStartPhase1" GroupName="StartMode" Content="Start fra Phase 1" FontSize="14" FontWeight="SemiBold" IsChecked="True"/>
-                                <TextBlock Text="Opret konti, gruppe, TAP og CA exclusions fra start." Foreground="{StaticResource TextSecondary}" Margin="24,4,0,14"/>
+                                <TextBlock Text="Opret konti, grupper, TAP, SSPR-scope og CA exclusions fra start." Foreground="{StaticResource TextSecondary}" Margin="24,4,0,14"/>
                                 <RadioButton x:Name="WPFResumePhase2" GroupName="StartMode" Content="Fortsæt fra Phase 2" FontSize="14" FontWeight="SemiBold"/>
                                 <TextBlock Text="Brug hvis Phase 1 allerede er kørt, og FIDO2 keys er registreret manuelt." Foreground="{StaticResource TextSecondary}" Margin="24,4,0,0"/>
                             </StackPanel>
@@ -4284,9 +4460,17 @@ $inputXML = @'
                                 <CheckBox x:Name="WPFAddUsersToGroup" Content="Tilføj break-glass konti til CA-BreakGlass-Exclude"/>
                                 <CheckBox x:Name="WPFDisableAdminSSPR" Content="Deaktivér administrator-SSPR tenant-wide"/>
                                 <TextBlock Foreground="#FBBF24" Text="Admin SSPR kan ikke slås fra kun for de to konti. Hvis valgt, deaktiveres administrator-SSPR for alle administratorroller i tenant'en."/>
+                                <CheckBox x:Name="WPFCreateRegularSSPRScopeGroup" Content="Opret/opdatér regular SSPR scope-gruppe: alle brugere undtagen break-glass konti"/>
+                                <TextBlock Foreground="#FBBF24" Text="Configuratoren opretter gruppen og reglen. Vælg derefter gruppen manuelt under Entra Password reset &gt; Properties &gt; Selected." TextWrapping="Wrap"/>
                                 <CheckBox x:Name="WPFPatchCAPolicies" Content="Phase 1: Ekskludér CA-BreakGlass-Exclude fra alle eksisterende Conditional Access-politikker"/>
                                 <TextBlock Foreground="#FBBF24" Text="Dette ændrer eksisterende Conditional Access-politikker. Der oprettes backup før ændringerne udføres."/>
                             </StackPanel>
+                            <TextBlock Grid.Row="9" Grid.Column="0" Text="Regular SSPR group"/>
+                            <TextBox x:Name="WPFRegularSSPRGroupName" Grid.Row="9" Grid.Column="1" Grid.ColumnSpan="3"/>
+                            <TextBlock Grid.Row="10" Grid.Column="0" Text="Regular SSPR description"/>
+                            <TextBox x:Name="WPFRegularSSPRGroupDescription" Grid.Row="10" Grid.Column="1" Grid.ColumnSpan="3" TextWrapping="Wrap" Height="58"/>
+                            <TextBlock Grid.Row="11" Grid.Column="0" Text="Dynamic rule preview"/>
+                            <TextBox x:Name="WPFRegularSSPRRulePreview" Grid.Row="11" Grid.Column="1" Grid.ColumnSpan="3" IsReadOnly="True" TextWrapping="Wrap" Height="74" FontFamily="Consolas"/>
                         </Grid>
                     </ScrollViewer>
                 </Grid>
@@ -4305,7 +4489,7 @@ $inputXML = @'
                     <DockPanel>
                         <StackPanel DockPanel.Dock="Top">
                             <TextBlock Text="Phase 1a - Grundopsætning" FontSize="22" FontWeight="SemiBold" Margin="0,0,0,12"/>
-                            <TextBlock Text="Dette trin opretter/genbruger CA-BreakGlass-Exclude, de to konti, Global Administrator assignments, Admin SSPR, TAP, gruppemedlemskab, FIDO2/passkey method policy, registration campaign exclusion og CA exclusions."/>
+                            <TextBlock Text="Dette trin opretter/genbruger CA-BreakGlass-Exclude, de to konti, regular SSPR scope-gruppe, Global Administrator assignments, Admin SSPR, TAP, gruppemedlemskab, FIDO2/passkey method policy, registration campaign exclusion og CA exclusions."/>
                             <TextBlock Foreground="#FBBF24" Margin="0,8,0,0" Text="Admin SSPR kan tage op til 60 minutter før ændringen slår igennem. TAP oprettes som genanvendelig i 2 timer."/>
                             <Button x:Name="WPFApplyConfiguration" Content="Kør Phase 1a" Width="180" HorizontalAlignment="Left" Margin="0,14,0,8"/>
                         </StackPanel>

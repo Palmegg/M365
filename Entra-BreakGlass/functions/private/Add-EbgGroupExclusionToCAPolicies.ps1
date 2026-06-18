@@ -14,7 +14,7 @@ function Add-EbgGroupExclusionToCAPolicies {
         $index++
         $policyId = [string](Get-EbgObjectPropertyValue -InputObject $policy -Name 'id')
         $policyName = [string](Get-EbgObjectPropertyValue -InputObject $policy -Name 'displayName')
-        Write-EbgStatus -Busy -Message "Phase 1a step 9/10: CA policy $index/$total - $policyName"
+        Write-EbgStatus -Busy -Message "Phase 1a step 11/12: CA policy $index/$total - $policyName"
         Write-EbgLog -Message "CA exclusion $index/${total}: $policyName ($policyId)"
         [System.Windows.Forms.Application]::DoEvents()
 

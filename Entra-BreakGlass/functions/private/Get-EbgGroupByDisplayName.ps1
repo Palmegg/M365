@@ -9,5 +9,5 @@ function Get-EbgGroupByDisplayName {
         return $null
     }
     $filter = [uri]::EscapeDataString("displayName eq '$($DisplayName.Replace("'", "''"))'")
-    return Get-EbgGraphCollection -Uri "https://graph.microsoft.com/v1.0/groups?`$filter=$filter&`$select=id,displayName,description,mailNickname,securityEnabled,mailEnabled,groupTypes" | Select-Object -First 1
+    return Get-EbgGraphCollection -Uri "https://graph.microsoft.com/v1.0/groups?`$filter=$filter&`$select=id,displayName,description,mailNickname,securityEnabled,mailEnabled,groupTypes,membershipRule,membershipRuleProcessingState" | Select-Object -First 1
 }
