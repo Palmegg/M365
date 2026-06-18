@@ -64,6 +64,7 @@ function Invoke-EbgConnectTenant {
         Get-EbgTenantInfo | Out-Null
         Write-EbgStatus -Message 'Microsoft Graph er forbundet.'
         Update-EbgUIState | Out-Null
+        Set-EbgMainWindowForeground
     }
     catch {
         $message = ConvertTo-EbgRedactedError -ErrorRecord $_
@@ -76,5 +77,6 @@ function Invoke-EbgConnectTenant {
         if ($sync.WPFProgressBar) { $sync.WPFProgressBar.IsIndeterminate = $false }
         if ($sync.WPFConnectTenant) { $sync.WPFConnectTenant.IsEnabled = $true }
         Update-EbgUIState | Out-Null
+        if ($sync.State.GraphConnected) { Set-EbgMainWindowForeground }
     }
 }
