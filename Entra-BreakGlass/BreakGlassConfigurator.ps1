@@ -69,6 +69,7 @@ $sync.State = [Hashtable]::Synchronized(@{
     OutputFolder       = ''
     HandoffPath        = ''
     CreatedPasswords   = @()
+    ActiveGlobalAdministrators = @()
     Warnings           = @()
     Errors             = @()
     Language           = 'da-DK'
@@ -1050,6 +1051,15 @@ function Get-EbgActiveGlobalAdministrators {
                 userPrincipalName = 'mock.globaladmin@contoso.onmicrosoft.com'
                 accountEnabled = $true
                 assignmentType = 'Direct Global Administrator assignment'
+                label = 'Mock Global Admin <mock.globaladmin@contoso.onmicrosoft.com>'
+            },
+            [pscustomobject]@{
+                id = 'mock-ga-2'
+                displayName = 'Mock Emergency Admin'
+                userPrincipalName = 'mock.emergencyadmin@contoso.onmicrosoft.com'
+                accountEnabled = $true
+                assignmentType = 'Direct Global Administrator assignment'
+                label = 'Mock Emergency Admin <mock.emergencyadmin@contoso.onmicrosoft.com>'
             }
         )
     }
@@ -1079,6 +1089,7 @@ function Get-EbgActiveGlobalAdministrators {
                 userPrincipalName = [string](Get-EbgObjectPropertyValue -InputObject $user -Name 'userPrincipalName')
                 accountEnabled = $enabled
                 assignmentType = 'Direct Global Administrator assignment'
+                label = ('{0} <{1}>' -f [string](Get-EbgObjectPropertyValue -InputObject $user -Name 'displayName'), [string](Get-EbgObjectPropertyValue -InputObject $user -Name 'userPrincipalName'))
             })
         }
         catch {
@@ -1088,6 +1099,7 @@ function Get-EbgActiveGlobalAdministrators {
 
     return @($admins | Sort-Object userPrincipalName -Unique)
 }
+
 function Get-EbgAuthenticationMethodsPolicy {
     [CmdletBinding()]
     param()
@@ -1170,6 +1182,8 @@ function Get-EbgConfigFromUI {
         $resumePhase2 = [string]$sync.State.StartMode -eq 'Phase2'
         $userPrefix1 = if ($resumePhase2 -and $sync.WPFPhase2UserPrefix1 -and -not [string]::IsNullOrWhiteSpace($sync.WPFPhase2UserPrefix1.Text)) { $sync.WPFPhase2UserPrefix1.Text.Trim() } else { $sync.WPFUserPrefix1.Text.Trim() }
         $userPrefix2 = if ($resumePhase2 -and $sync.WPFPhase2UserPrefix2 -and -not [string]::IsNullOrWhiteSpace($sync.WPFPhase2UserPrefix2.Text)) { $sync.WPFPhase2UserPrefix2.Text.Trim() } else { $sync.WPFUserPrefix2.Text.Trim() }
+        $regularSSPRAccount1 = if ($sync.WPFRegularSSPRAdmin1) { $sync.WPFRegularSSPRAdmin1.SelectedItem } else { $null }
+        $regularSSPRAccount2 = if ($sync.WPFRegularSSPRAdmin2) { $sync.WPFRegularSSPRAdmin2.SelectedItem } else { $null }
         @{
             DisplayName1     = $sync.WPFDisplayName1.Text.Trim()
             UserPrefix1      = $userPrefix1
@@ -1188,6 +1202,8 @@ function Get-EbgConfigFromUI {
             PatchCAPolicies  = [bool]$sync.WPFPatchCAPolicies.IsChecked
             CreateRegularSSPRScopeGroup = ([bool]$sync.WPFCreateRegularSSPRScopeGroup.IsChecked -or [bool]$sync.WPFRegularSSPROnly.IsChecked)
             RegularSSPROnly = [bool]$sync.WPFRegularSSPROnly.IsChecked
+            RegularSSPRAccount1 = $regularSSPRAccount1
+            RegularSSPRAccount2 = $regularSSPRAccount2
             RegularSSPRGroupName = $sync.WPFRegularSSPRGroupName.Text.Trim()
             RegularSSPRGroupDescription = $sync.WPFRegularSSPRGroupDescription.Text.Trim()
             CreateAuthenticationStrength = $true
@@ -1324,6 +1340,27 @@ function Get-EbgOnMicrosoftDomain {
     if ($any) { return [string] $any.name }
     throw 'Kunne ikke finde tenantens .onmicrosoft.com domæne.'
 }
+function Get-EbgSelectedRegularSSPRUsers {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][hashtable] $Config)
+
+    $users = @(
+        Get-EbgObjectPropertyValue -InputObject $Config -Name 'RegularSSPRAccount1'
+        Get-EbgObjectPropertyValue -InputObject $Config -Name 'RegularSSPRAccount2'
+    ) | Where-Object {
+        -not [string]::IsNullOrWhiteSpace([string](Get-EbgObjectPropertyValue -InputObject $_ -Name 'id'))
+    }
+
+    if ($users.Count -gt 1) {
+        $ids = @($users | ForEach-Object { [string](Get-EbgObjectPropertyValue -InputObject $_ -Name 'id') })
+        if (($ids | Select-Object -Unique).Count -ne $ids.Count) {
+            throw 'Vælg to forskellige Global Administrator-konti til regular SSPR exclusion.'
+        }
+    }
+
+    return @($users)
+}
+
 function Get-EbgTemporaryAccessPassMethods {
     [CmdletBinding()]
     param([Parameter(Mandatory)] $User)
@@ -1773,6 +1810,16 @@ function New-EbgPlanObject {
     $user2 = if ($Discovery) { $Discovery.User2 } else { Get-EbgUserByUpn -UserPrincipalName $upn2 }
     $group = if ($Discovery) { $Discovery.Group } else { Get-EbgGroupByDisplayName -DisplayName $Config.GroupName }
     $regularSSPROnly = [bool]$Config.RegularSSPROnly
+    $selectedRegularSSPRUsers = @(Get-EbgSelectedRegularSSPRUsers -Config $Config)
+    if ($regularSSPROnly -and $selectedRegularSSPRUsers.Count -eq 1) {
+        throw 'Regular SSPR-only kræver enten to valgte Global Administrator-konti eller ingen valgte konti, så UPN-felterne bruges.'
+    }
+    if ($regularSSPROnly -and $selectedRegularSSPRUsers.Count -ge 2) {
+        $user1 = $selectedRegularSSPRUsers[0]
+        $user2 = $selectedRegularSSPRUsers[1]
+        $upn1 = [string](Get-EbgObjectPropertyValue -InputObject $user1 -Name 'userPrincipalName')
+        $upn2 = [string](Get-EbgObjectPropertyValue -InputObject $user2 -Name 'userPrincipalName')
+    }
     $policies = if ($regularSSPROnly) { @() } elseif ($Discovery) { @($Discovery.CAPolicies) } else { @(Get-EbgConditionalAccessPolicies) }
     $authorizationPolicy = Get-EbgAuthorizationPolicy
     $adminSSPREnabled = [bool](Get-EbgObjectPropertyValue -InputObject $authorizationPolicy -Name 'allowedToUseSSPR')
@@ -1819,10 +1866,10 @@ function New-EbgPlanObject {
         TenantId                  = $tenant.TenantId
         TenantDisplayName         = $tenant.TenantDisplayName
         OnMicrosoftDomain         = $tenant.OnMicrosoftDomain
-        Account1DisplayName       = $Config.DisplayName1
+        Account1DisplayName       = if ($regularSSPROnly -and $user1) { [string](Get-EbgObjectPropertyValue -InputObject $user1 -Name 'displayName') } else { $Config.DisplayName1 }
         Account1UPN               = $upn1
         Account1Status            = if ($user1) { 'Eksisterer allerede' } elseif ($regularSSPROnly) { 'Mangler - kræves for SSPR-only' } elseif ($Config.CreateUsers) { 'Oprettes' } else { 'Springes over' }
-        Account2DisplayName       = $Config.DisplayName2
+        Account2DisplayName       = if ($regularSSPROnly -and $user2) { [string](Get-EbgObjectPropertyValue -InputObject $user2 -Name 'displayName') } else { $Config.DisplayName2 }
         Account2UPN               = $upn2
         Account2Status            = if ($user2) { 'Eksisterer allerede' } elseif ($regularSSPROnly) { 'Mangler - kræves for SSPR-only' } elseif ($Config.CreateUsers) { 'Oprettes' } else { 'Springes over' }
         GroupName                 = $Config.GroupName
@@ -2452,6 +2499,46 @@ function Test-EbgTemporaryAccessPassPrerequisite {
     }
 }
 
+function Update-EbgRegularSSPRAdminOptions {
+    [CmdletBinding()]
+    param()
+
+    if (-not $sync.Form) { return }
+    if (-not $sync.Form.Dispatcher.CheckAccess()) {
+        [void]$sync.Form.Dispatcher.Invoke([System.Action]{ Update-EbgRegularSSPRAdminOptions | Out-Null })
+        return
+    }
+
+    $admins = @($sync.State.ActiveGlobalAdministrators)
+    if ($admins.Count -lt 1 -and $sync.State.Discovery) {
+        $admins = @(Get-EbgObjectPropertyValue -InputObject $sync.State.Discovery -Name 'ActiveGlobalAdministrators')
+    }
+
+    foreach ($comboName in @('WPFRegularSSPRAdmin1','WPFRegularSSPRAdmin2')) {
+        $combo = $sync[$comboName]
+        if (-not $combo) { continue }
+
+        $previousId = if ($combo.SelectedItem) { [string](Get-EbgObjectPropertyValue -InputObject $combo.SelectedItem -Name 'id') } else { '' }
+        $combo.ItemsSource = $null
+        $combo.ItemsSource = @($admins)
+        $combo.DisplayMemberPath = 'label'
+
+        if (-not [string]::IsNullOrWhiteSpace($previousId)) {
+            $match = @($admins | Where-Object { [string](Get-EbgObjectPropertyValue -InputObject $_ -Name 'id') -eq $previousId } | Select-Object -First 1)
+            if ($match.Count -gt 0) { $combo.SelectedItem = $match[0] }
+        }
+    }
+
+    if ($sync.WPFRegularSSPRAdminHint) {
+        $sync.WPFRegularSSPRAdminHint.Text = if ($admins.Count -gt 0) {
+            "$($admins.Count) aktive direkte Global Administrator-konti hentet. Vælg de to konti der skal ekskluderes fra regular SSPR-gruppen."
+        }
+        else {
+            'Ingen Global Administrator-konti er hentet endnu. Brug knappen eller kør Discovery.'
+        }
+    }
+}
+
 function Update-EbgUIState {
     [CmdletBinding()]
     param()
@@ -2574,6 +2661,16 @@ function Update-EbgUIState {
 
     if ($sync.WPFCreateRegularSSPRScopeGroup -and $regularSSPROnly) {
         $sync.WPFCreateRegularSSPRScopeGroup.IsChecked = $true
+    }
+    if ($sync.WPFRegularSSPRRulePreview -and $sync.WPFRegularSSPRAdmin1 -and $sync.WPFRegularSSPRAdmin2) {
+        $selectedId1 = if ($sync.WPFRegularSSPRAdmin1.SelectedItem) { [string](Get-EbgObjectPropertyValue -InputObject $sync.WPFRegularSSPRAdmin1.SelectedItem -Name 'id') } else { '' }
+        $selectedId2 = if ($sync.WPFRegularSSPRAdmin2.SelectedItem) { [string](Get-EbgObjectPropertyValue -InputObject $sync.WPFRegularSSPRAdmin2.SelectedItem -Name 'id') } else { '' }
+        if (-not [string]::IsNullOrWhiteSpace($selectedId1) -and -not [string]::IsNullOrWhiteSpace($selectedId2) -and $selectedId1 -ne $selectedId2) {
+            $sync.WPFRegularSSPRRulePreview.Text = New-EbgRegularSSPRMembershipRule -Account1ObjectId $selectedId1 -Account2ObjectId $selectedId2
+        }
+        elseif ([string]::IsNullOrWhiteSpace($sync.WPFRegularSSPRRulePreview.Text) -or $sync.WPFRegularSSPRRulePreview.Text -match '<Account') {
+            $sync.WPFRegularSSPRRulePreview.Text = '(user.accountEnabled -eq true) -and (user.userType -eq "Member") -and (user.objectId -notIn ["<Account 1 objectId>","<Account 2 objectId>"])'
+        }
     }
     foreach ($phase1Option in @('WPFCreateUsers','WPFCreateGroup','WPFAddUsersToGroup','WPFDisableAdminSSPR','WPFPatchCAPolicies')) {
         if ($sync[$phase1Option]) { $sync[$phase1Option].IsEnabled = -not $regularSSPROnly }
@@ -2722,6 +2819,9 @@ function Update-EbgUIState {
     if ($sync.WPFRunDiscovery) {
         $sync.WPFRunDiscovery.IsEnabled = -not [bool]$sync.UI.ProcessRunning
     }
+    if ($sync.WPFRefreshRegularSSPRAdmins) {
+        $sync.WPFRefreshRegularSSPRAdmins.IsEnabled = (-not [bool]$sync.UI.ProcessRunning) -and ($hasGraph -or [bool]$sync.App.Mock)
+    }
     if ($sync.WPFBuildPlan) {
         $sync.WPFBuildPlan.IsEnabled = (-not [bool]$sync.UI.ProcessRunning) -and (-not $resumePhase2) -and $hasDiscovery -and $hasVisitedConfig
     }
@@ -2867,6 +2967,7 @@ function Initialize-EbgWPFUI {
     if ($sync['WPFStartPhase1']) { $sync['WPFStartPhase1'].IsChecked = $true }
     if ($sync['WPFResumePhase2']) { $sync['WPFResumePhase2'].IsChecked = $false }
     if ($sync.WPFLanguageSelector) { $sync.WPFLanguageSelector.SelectedIndex = 0 }
+    Update-EbgRegularSSPRAdminOptions
     Set-EbgNeutralAccountNamePair -Random
     Set-EbgLanguage -Language $sync.State.Language
 
@@ -2968,8 +3069,20 @@ Vil du fortsætte?
 
             $upn1 = ConvertTo-BreakGlassUpn -Prefix $config.UserPrefix1 -OnMicrosoftDomain $tenant.OnMicrosoftDomain
             $upn2 = ConvertTo-BreakGlassUpn -Prefix $config.UserPrefix2 -OnMicrosoftDomain $tenant.OnMicrosoftDomain
-            $user1 = Get-EbgUserByUpn -UserPrincipalName $upn1
-            $user2 = Get-EbgUserByUpn -UserPrincipalName $upn2
+            $selectedRegularSSPRUsers = @(Get-EbgSelectedRegularSSPRUsers -Config $config)
+            if ($selectedRegularSSPRUsers.Count -eq 1) {
+                throw 'Regular SSPR only kræver to valgte Global Administrator-konti. Vælg konto 1 og konto 2, eller ryd begge valg og brug UPN-felterne.'
+            }
+            if ($selectedRegularSSPRUsers.Count -ge 2) {
+                $user1 = $selectedRegularSSPRUsers[0]
+                $user2 = $selectedRegularSSPRUsers[1]
+                $upn1 = [string](Get-EbgObjectPropertyValue -InputObject $user1 -Name 'userPrincipalName')
+                $upn2 = [string](Get-EbgObjectPropertyValue -InputObject $user2 -Name 'userPrincipalName')
+            }
+            else {
+                $user1 = Get-EbgUserByUpn -UserPrincipalName $upn1
+                $user2 = Get-EbgUserByUpn -UserPrincipalName $upn2
+            }
             if (-not $user1 -or -not $user2) {
                 throw "Regular SSPR only kræver at begge konti findes. Fundet: $upn1=$([bool]$user1), $upn2=$([bool]$user2). Ret UPN-prefixes eller opret kontiene først."
             }
@@ -3646,6 +3759,7 @@ function Invoke-EbgDiscovery {
         Write-EbgStatus -Busy -Message 'Discovery: henter aktive Global Administrator assignments...'
         [System.Windows.Forms.Application]::DoEvents()
         $activeGlobalAdmins = @(Get-EbgActiveGlobalAdministrators)
+        $sync.State.ActiveGlobalAdministrators = $activeGlobalAdmins
 
         Write-EbgStatus -Busy -Message 'Discovery: analyserer CA exclusions...'
         [System.Windows.Forms.Application]::DoEvents()
@@ -3671,6 +3785,7 @@ function Invoke-EbgDiscovery {
             Timestamp = (Get-Date).ToString('o')
         }
         $sync.State.Discovery = $discovery
+        Update-EbgRegularSSPRAdminOptions
         $summary = "Aktive Global Admins: $($activeGlobalAdmins.Count); Target user1: $(if($user1){'findes'}else{'mangler'}); Target user2: $(if($user2){'findes'}else{'mangler'}); Gruppe: $(if($group){'findes'}else{'mangler'}); CA policies: $($policies.Count)"
         $userMissingSeverity = if ($config.CreateUsers) { 'Info' } else { 'Bad' }
         $groupMissingSeverity = if ($config.CreateGroup) { 'Warning' } else { 'Bad' }
@@ -3834,6 +3949,49 @@ function Invoke-EbgFetchAAGUIDs {
     }
 }
 
+function Invoke-EbgLoadGlobalAdministrators {
+    [CmdletBinding()]
+    param()
+
+    if (-not $sync.State.GraphConnected -and -not $sync.App.Mock) {
+        [System.Windows.MessageBox]::Show("Du skal først forbinde til Microsoft Graph under trinnet 'Forbind'.", $sync.App.Name, 'OK', 'Warning') | Out-Null
+        return
+    }
+    if ($sync.UI.ProcessRunning) {
+        [System.Windows.MessageBox]::Show('Der kører allerede en opgave. Vent til den er færdig.', $sync.App.Name, 'OK', 'Information') | Out-Null
+        return
+    }
+
+    $sync.UI.ProcessRunning = $true
+    if ($sync.WPFRefreshRegularSSPRAdmins) { $sync.WPFRefreshRegularSSPRAdmins.IsEnabled = $false }
+    if ($sync.WPFProgressBar) { $sync.WPFProgressBar.IsIndeterminate = $true }
+
+    try {
+        Write-EbgStatus -Busy -Message 'Henter aktive Global Administrator-konti...'
+        [System.Windows.Forms.Application]::DoEvents()
+        Ensure-EbgGraphContext
+        $admins = @(Get-EbgActiveGlobalAdministrators)
+        $sync.State.ActiveGlobalAdministrators = $admins
+        if ($sync.State.Discovery) {
+            $sync.State.Discovery | Add-Member -MemberType NoteProperty -Name ActiveGlobalAdministrators -Value $admins -Force
+        }
+        Update-EbgRegularSSPRAdminOptions
+        Write-EbgStatus -Message "Hentede $($admins.Count) aktive direkte Global Administrator-konti."
+    }
+    catch {
+        $message = ConvertTo-EbgRedactedError -ErrorRecord $_
+        Write-EbgLog -Level ERROR -Message $message
+        Write-EbgStatus -Message 'Kunne ikke hente Global Administrator-konti.'
+        [System.Windows.MessageBox]::Show($message, $sync.App.Name, 'OK', 'Error') | Out-Null
+    }
+    finally {
+        $sync.UI.ProcessRunning = $false
+        if ($sync.WPFProgressBar) { $sync.WPFProgressBar.IsIndeterminate = $false }
+        if ($sync.WPFRefreshRegularSSPRAdmins) { $sync.WPFRefreshRegularSSPRAdmins.IsEnabled = $true }
+        Update-EbgUIState | Out-Null
+    }
+}
+
 function Invoke-EbgOpenOutputFolder {
     [CmdletBinding()]
     param()
@@ -3891,6 +4049,7 @@ function Invoke-EbgWPFButton {
         'WPFConnectTenant' { Invoke-EbgConnectTenant }
         'WPFRunDiscovery' { Invoke-EbgDiscovery }
         'WPFStopDiscovery' { Stop-EbgCurrentTask }
+        'WPFRefreshRegularSSPRAdmins' { Invoke-EbgLoadGlobalAdministrators }
         'WPFBuildPlan' { Invoke-EbgBuildPlan }
         'WPFApplyConfiguration' { Invoke-EbgApplyConfiguration }
         'WPFApplyPhase2' { Invoke-EbgApplyPhase2 }
@@ -4007,7 +4166,7 @@ function Stop-EbgCurrentTask {
 $sync.configs.appsettings = @'
 {
   "name": "Entra Break Glass Configurator",
-  "version": "2.4.25",
+  "version": "2.4.26",
   "outputRoot": ".\\Output",
   "groupName": "CA-BreakGlass-Exclude",
   "groupDescription": "Security group used to exclude dedicated break-glass accounts from existing Conditional Access policies.",
@@ -4607,6 +4766,32 @@ $inputXML = @'
                                 <TextBlock Foreground="#FBBF24" Text="Admin SSPR kan ikke slås fra kun for de to konti. Hvis valgt, deaktiveres administrator-SSPR for alle administratorroller i tenant'en."/>
                                 <CheckBox x:Name="WPFCreateRegularSSPRScopeGroup" Content="Opret/opdatér regular SSPR scope-gruppe: alle brugere undtagen break-glass konti"/>
                                 <CheckBox x:Name="WPFRegularSSPROnly" Content="Kør kun regular SSPR scope-gruppe for eksisterende break-glass konti"/>
+                                <Border Background="{StaticResource PanelRaised}" BorderBrush="{StaticResource BorderSoft}" BorderThickness="1" CornerRadius="8" Padding="14" Margin="0,4,0,10">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="180"/>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="18"/>
+                                            <ColumnDefinition Width="*"/>
+                                        </Grid.ColumnDefinitions>
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto"/>
+                                            <RowDefinition Height="Auto"/>
+                                            <RowDefinition Height="Auto"/>
+                                        </Grid.RowDefinitions>
+                                        <TextBlock Grid.Row="0" Grid.ColumnSpan="4" Text="Eksisterende break-glass konti til regular SSPR exclusion" FontWeight="SemiBold" Margin="0,0,0,8"/>
+                                        <Button x:Name="WPFRefreshRegularSSPRAdmins" Grid.Row="1" Grid.Column="0" Content="Hent Global Admins" Width="160" HorizontalAlignment="Left"/>
+                                        <TextBlock x:Name="WPFRegularSSPRAdminHint" Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="3" Text="Kør Discovery eller hent Global Admins, og vælg de to konti der skal holdes ude af regular SSPR." Foreground="{StaticResource TextSecondary}" TextWrapping="Wrap" VerticalAlignment="Center"/>
+                                        <StackPanel Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="2" Margin="0,8,9,0">
+                                            <TextBlock Text="Break-glass konto 1"/>
+                                            <ComboBox x:Name="WPFRegularSSPRAdmin1"/>
+                                        </StackPanel>
+                                        <StackPanel Grid.Row="2" Grid.Column="3" Margin="9,8,0,0">
+                                            <TextBlock Text="Break-glass konto 2"/>
+                                            <ComboBox x:Name="WPFRegularSSPRAdmin2"/>
+                                        </StackPanel>
+                                    </Grid>
+                                </Border>
                                 <TextBlock Foreground="#FBBF24" Text="Configuratoren opretter gruppen og reglen. Vælg derefter gruppen manuelt under Entra Password reset &gt; Properties &gt; Selected." TextWrapping="Wrap"/>
                                 <CheckBox x:Name="WPFPatchCAPolicies" Content="Phase 1: Ekskludér CA-BreakGlass-Exclude fra alle eksisterende Conditional Access-politikker"/>
                                 <TextBlock Foreground="#FBBF24" Text="Dette ændrer eksisterende Conditional Access-politikker. Der oprettes backup før ændringerne udføres."/>
@@ -4834,6 +5019,11 @@ $sync.WPFWelcomeRiskAccepted.Add_Unchecked({ Update-EbgUIState | Out-Null })
 if ($sync.WPFRegularSSPROnly) {
     $sync.WPFRegularSSPROnly.Add_Checked({ Update-EbgUIState | Out-Null })
     $sync.WPFRegularSSPROnly.Add_Unchecked({ Update-EbgUIState | Out-Null })
+}
+foreach ($box in @('WPFRegularSSPRAdmin1','WPFRegularSSPRAdmin2')) {
+    if ($sync[$box]) {
+        $sync[$box].Add_SelectionChanged({ Update-EbgUIState | Out-Null })
+    }
 }
 if ($sync.WPFStartPhase1) {
     $sync.WPFStartPhase1.Add_Checked({

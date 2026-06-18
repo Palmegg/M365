@@ -519,6 +519,32 @@
                                 <TextBlock Foreground="#FBBF24" Text="Admin SSPR kan ikke slås fra kun for de to konti. Hvis valgt, deaktiveres administrator-SSPR for alle administratorroller i tenant'en."/>
                                 <CheckBox x:Name="WPFCreateRegularSSPRScopeGroup" Content="Opret/opdatér regular SSPR scope-gruppe: alle brugere undtagen break-glass konti"/>
                                 <CheckBox x:Name="WPFRegularSSPROnly" Content="Kør kun regular SSPR scope-gruppe for eksisterende break-glass konti"/>
+                                <Border Background="{StaticResource PanelRaised}" BorderBrush="{StaticResource BorderSoft}" BorderThickness="1" CornerRadius="8" Padding="14" Margin="0,4,0,10">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="180"/>
+                                            <ColumnDefinition Width="*"/>
+                                            <ColumnDefinition Width="18"/>
+                                            <ColumnDefinition Width="*"/>
+                                        </Grid.ColumnDefinitions>
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto"/>
+                                            <RowDefinition Height="Auto"/>
+                                            <RowDefinition Height="Auto"/>
+                                        </Grid.RowDefinitions>
+                                        <TextBlock Grid.Row="0" Grid.ColumnSpan="4" Text="Eksisterende break-glass konti til regular SSPR exclusion" FontWeight="SemiBold" Margin="0,0,0,8"/>
+                                        <Button x:Name="WPFRefreshRegularSSPRAdmins" Grid.Row="1" Grid.Column="0" Content="Hent Global Admins" Width="160" HorizontalAlignment="Left"/>
+                                        <TextBlock x:Name="WPFRegularSSPRAdminHint" Grid.Row="1" Grid.Column="1" Grid.ColumnSpan="3" Text="Kør Discovery eller hent Global Admins, og vælg de to konti der skal holdes ude af regular SSPR." Foreground="{StaticResource TextSecondary}" TextWrapping="Wrap" VerticalAlignment="Center"/>
+                                        <StackPanel Grid.Row="2" Grid.Column="0" Grid.ColumnSpan="2" Margin="0,8,9,0">
+                                            <TextBlock Text="Break-glass konto 1"/>
+                                            <ComboBox x:Name="WPFRegularSSPRAdmin1"/>
+                                        </StackPanel>
+                                        <StackPanel Grid.Row="2" Grid.Column="3" Margin="9,8,0,0">
+                                            <TextBlock Text="Break-glass konto 2"/>
+                                            <ComboBox x:Name="WPFRegularSSPRAdmin2"/>
+                                        </StackPanel>
+                                    </Grid>
+                                </Border>
                                 <TextBlock Foreground="#FBBF24" Text="Configuratoren opretter gruppen og reglen. Vælg derefter gruppen manuelt under Entra Password reset &gt; Properties &gt; Selected." TextWrapping="Wrap"/>
                                 <CheckBox x:Name="WPFPatchCAPolicies" Content="Phase 1: Ekskludér CA-BreakGlass-Exclude fra alle eksisterende Conditional Access-politikker"/>
                                 <TextBlock Foreground="#FBBF24" Text="Dette ændrer eksisterende Conditional Access-politikker. Der oprettes backup før ændringerne udføres."/>

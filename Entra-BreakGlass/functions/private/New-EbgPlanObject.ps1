@@ -12,6 +12,16 @@ function New-EbgPlanObject {
     $user2 = if ($Discovery) { $Discovery.User2 } else { Get-EbgUserByUpn -UserPrincipalName $upn2 }
     $group = if ($Discovery) { $Discovery.Group } else { Get-EbgGroupByDisplayName -DisplayName $Config.GroupName }
     $regularSSPROnly = [bool]$Config.RegularSSPROnly
+    $selectedRegularSSPRUsers = @(Get-EbgSelectedRegularSSPRUsers -Config $Config)
+    if ($regularSSPROnly -and $selectedRegularSSPRUsers.Count -eq 1) {
+        throw 'Regular SSPR-only kræver enten to valgte Global Administrator-konti eller ingen valgte konti, så UPN-felterne bruges.'
+    }
+    if ($regularSSPROnly -and $selectedRegularSSPRUsers.Count -ge 2) {
+        $user1 = $selectedRegularSSPRUsers[0]
+        $user2 = $selectedRegularSSPRUsers[1]
+        $upn1 = [string](Get-EbgObjectPropertyValue -InputObject $user1 -Name 'userPrincipalName')
+        $upn2 = [string](Get-EbgObjectPropertyValue -InputObject $user2 -Name 'userPrincipalName')
+    }
     $policies = if ($regularSSPROnly) { @() } elseif ($Discovery) { @($Discovery.CAPolicies) } else { @(Get-EbgConditionalAccessPolicies) }
     $authorizationPolicy = Get-EbgAuthorizationPolicy
     $adminSSPREnabled = [bool](Get-EbgObjectPropertyValue -InputObject $authorizationPolicy -Name 'allowedToUseSSPR')
@@ -58,10 +68,10 @@ function New-EbgPlanObject {
         TenantId                  = $tenant.TenantId
         TenantDisplayName         = $tenant.TenantDisplayName
         OnMicrosoftDomain         = $tenant.OnMicrosoftDomain
-        Account1DisplayName       = $Config.DisplayName1
+        Account1DisplayName       = if ($regularSSPROnly -and $user1) { [string](Get-EbgObjectPropertyValue -InputObject $user1 -Name 'displayName') } else { $Config.DisplayName1 }
         Account1UPN               = $upn1
         Account1Status            = if ($user1) { 'Eksisterer allerede' } elseif ($regularSSPROnly) { 'Mangler - kræves for SSPR-only' } elseif ($Config.CreateUsers) { 'Oprettes' } else { 'Springes over' }
-        Account2DisplayName       = $Config.DisplayName2
+        Account2DisplayName       = if ($regularSSPROnly -and $user2) { [string](Get-EbgObjectPropertyValue -InputObject $user2 -Name 'displayName') } else { $Config.DisplayName2 }
         Account2UPN               = $upn2
         Account2Status            = if ($user2) { 'Eksisterer allerede' } elseif ($regularSSPROnly) { 'Mangler - kræves for SSPR-only' } elseif ($Config.CreateUsers) { 'Oprettes' } else { 'Springes over' }
         GroupName                 = $Config.GroupName

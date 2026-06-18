@@ -37,6 +37,7 @@ function Initialize-EbgWPFUI {
     if ($sync['WPFStartPhase1']) { $sync['WPFStartPhase1'].IsChecked = $true }
     if ($sync['WPFResumePhase2']) { $sync['WPFResumePhase2'].IsChecked = $false }
     if ($sync.WPFLanguageSelector) { $sync.WPFLanguageSelector.SelectedIndex = 0 }
+    Update-EbgRegularSSPRAdminOptions
     Set-EbgNeutralAccountNamePair -Random
     Set-EbgLanguage -Language $sync.State.Language
 

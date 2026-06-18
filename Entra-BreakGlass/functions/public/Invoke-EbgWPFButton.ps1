@@ -17,6 +17,7 @@ function Invoke-EbgWPFButton {
         'WPFConnectTenant' { Invoke-EbgConnectTenant }
         'WPFRunDiscovery' { Invoke-EbgDiscovery }
         'WPFStopDiscovery' { Stop-EbgCurrentTask }
+        'WPFRefreshRegularSSPRAdmins' { Invoke-EbgLoadGlobalAdministrators }
         'WPFBuildPlan' { Invoke-EbgBuildPlan }
         'WPFApplyConfiguration' { Invoke-EbgApplyConfiguration }
         'WPFApplyPhase2' { Invoke-EbgApplyPhase2 }

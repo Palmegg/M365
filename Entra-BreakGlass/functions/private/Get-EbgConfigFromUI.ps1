@@ -6,6 +6,8 @@ function Get-EbgConfigFromUI {
         $resumePhase2 = [string]$sync.State.StartMode -eq 'Phase2'
         $userPrefix1 = if ($resumePhase2 -and $sync.WPFPhase2UserPrefix1 -and -not [string]::IsNullOrWhiteSpace($sync.WPFPhase2UserPrefix1.Text)) { $sync.WPFPhase2UserPrefix1.Text.Trim() } else { $sync.WPFUserPrefix1.Text.Trim() }
         $userPrefix2 = if ($resumePhase2 -and $sync.WPFPhase2UserPrefix2 -and -not [string]::IsNullOrWhiteSpace($sync.WPFPhase2UserPrefix2.Text)) { $sync.WPFPhase2UserPrefix2.Text.Trim() } else { $sync.WPFUserPrefix2.Text.Trim() }
+        $regularSSPRAccount1 = if ($sync.WPFRegularSSPRAdmin1) { $sync.WPFRegularSSPRAdmin1.SelectedItem } else { $null }
+        $regularSSPRAccount2 = if ($sync.WPFRegularSSPRAdmin2) { $sync.WPFRegularSSPRAdmin2.SelectedItem } else { $null }
         @{
             DisplayName1     = $sync.WPFDisplayName1.Text.Trim()
             UserPrefix1      = $userPrefix1
@@ -24,6 +26,8 @@ function Get-EbgConfigFromUI {
             PatchCAPolicies  = [bool]$sync.WPFPatchCAPolicies.IsChecked
             CreateRegularSSPRScopeGroup = ([bool]$sync.WPFCreateRegularSSPRScopeGroup.IsChecked -or [bool]$sync.WPFRegularSSPROnly.IsChecked)
             RegularSSPROnly = [bool]$sync.WPFRegularSSPROnly.IsChecked
+            RegularSSPRAccount1 = $regularSSPRAccount1
+            RegularSSPRAccount2 = $regularSSPRAccount2
             RegularSSPRGroupName = $sync.WPFRegularSSPRGroupName.Text.Trim()
             RegularSSPRGroupDescription = $sync.WPFRegularSSPRGroupDescription.Text.Trim()
             CreateAuthenticationStrength = $true

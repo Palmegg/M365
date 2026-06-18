@@ -92,6 +92,24 @@ Describe 'Ebg-BreakGlass basic functions' {
         if ($plan.PatchConditionalAccess) { throw 'Regular SSPR-only should not patch Conditional Access.' }
     }
 
+    It 'uses selected Global Administrators for regular SSPR-only planning' {
+        $config = @{
+            UserPrefix1 = 'does.not.exist.1'; UserPrefix2 = 'does.not.exist.2'
+            DisplayName1 = 'Fallback 1'; DisplayName2 = 'Fallback 2'
+            GroupName = 'CA-BreakGlass-Exclude'; CreateUsers = $false; CreateGroup = $false
+            AddUsersToGroup = $false; DisableAdminSSPR = $false; PatchCAPolicies = $false
+            CreateRegularSSPRScopeGroup = $true; RegularSSPROnly = $true; RegularSSPRGroupName = 'SG-SSPR-AllUsers-Except-BreakGlass'; RegularSSPRGroupDescription = 'Test'
+            RegularSSPRAccount1 = [pscustomobject]@{ id = 'selected-ga-1'; displayName = 'Selected One'; userPrincipalName = 'selected.one@contoso.onmicrosoft.com'; accountEnabled = $true }
+            RegularSSPRAccount2 = [pscustomobject]@{ id = 'selected-ga-2'; displayName = 'Selected Two'; userPrincipalName = 'selected.two@contoso.onmicrosoft.com'; accountEnabled = $true }
+            CreateAuthenticationStrength = $false; CreateBreakGlassCAPolicy = $false; EnableBreakGlassCAPolicy = $false
+            AuthenticationStrengthName = 'BreakGlass-FIDO2'; BreakGlassCAPolicyName = '[CA999] IdentityProtection-AnyApp-AnyPlatform-BreakGlass-FIDO2'
+            AAGUIDs = @()
+        }
+        $plan = New-EbgPlanObject -Config $config
+        if ($plan.Account1UPN -ne 'selected.one@contoso.onmicrosoft.com') { throw "Unexpected selected account 1: $($plan.Account1UPN)" }
+        if ($plan.Account2UPN -ne 'selected.two@contoso.onmicrosoft.com') { throw "Unexpected selected account 2: $($plan.Account2UPN)" }
+    }
+
     It 'preserves existing CA exclusions in mock patch plan' {
         $policies = @(Get-EbgConditionalAccessPolicies)
         $result = Add-EbgGroupExclusionToCAPolicies -Policies $policies -GroupId 'mock-ca-exclude-group' -Apply $false

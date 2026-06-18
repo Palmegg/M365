@@ -10,6 +10,15 @@ function Get-EbgActiveGlobalAdministrators {
                 userPrincipalName = 'mock.globaladmin@contoso.onmicrosoft.com'
                 accountEnabled = $true
                 assignmentType = 'Direct Global Administrator assignment'
+                label = 'Mock Global Admin <mock.globaladmin@contoso.onmicrosoft.com>'
+            },
+            [pscustomobject]@{
+                id = 'mock-ga-2'
+                displayName = 'Mock Emergency Admin'
+                userPrincipalName = 'mock.emergencyadmin@contoso.onmicrosoft.com'
+                accountEnabled = $true
+                assignmentType = 'Direct Global Administrator assignment'
+                label = 'Mock Emergency Admin <mock.emergencyadmin@contoso.onmicrosoft.com>'
             }
         )
     }
@@ -39,6 +48,7 @@ function Get-EbgActiveGlobalAdministrators {
                 userPrincipalName = [string](Get-EbgObjectPropertyValue -InputObject $user -Name 'userPrincipalName')
                 accountEnabled = $enabled
                 assignmentType = 'Direct Global Administrator assignment'
+                label = ('{0} <{1}>' -f [string](Get-EbgObjectPropertyValue -InputObject $user -Name 'displayName'), [string](Get-EbgObjectPropertyValue -InputObject $user -Name 'userPrincipalName'))
             })
         }
         catch {

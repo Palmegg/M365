@@ -58,6 +58,11 @@ if ($sync.WPFRegularSSPROnly) {
     $sync.WPFRegularSSPROnly.Add_Checked({ Update-EbgUIState | Out-Null })
     $sync.WPFRegularSSPROnly.Add_Unchecked({ Update-EbgUIState | Out-Null })
 }
+foreach ($box in @('WPFRegularSSPRAdmin1','WPFRegularSSPRAdmin2')) {
+    if ($sync[$box]) {
+        $sync[$box].Add_SelectionChanged({ Update-EbgUIState | Out-Null })
+    }
+}
 if ($sync.WPFStartPhase1) {
     $sync.WPFStartPhase1.Add_Checked({
         $sync.State.StartMode = 'Phase1'

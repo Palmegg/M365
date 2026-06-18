@@ -65,6 +65,7 @@ $sync.State = [Hashtable]::Synchronized(@{
     OutputFolder       = ''
     HandoffPath        = ''
     CreatedPasswords   = @()
+    ActiveGlobalAdministrators = @()
     Warnings           = @()
     Errors             = @()
     Language           = 'da-DK'

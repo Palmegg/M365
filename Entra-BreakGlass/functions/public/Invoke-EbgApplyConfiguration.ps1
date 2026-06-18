@@ -83,8 +83,20 @@ Vil du fortsætte?
 
             $upn1 = ConvertTo-BreakGlassUpn -Prefix $config.UserPrefix1 -OnMicrosoftDomain $tenant.OnMicrosoftDomain
             $upn2 = ConvertTo-BreakGlassUpn -Prefix $config.UserPrefix2 -OnMicrosoftDomain $tenant.OnMicrosoftDomain
-            $user1 = Get-EbgUserByUpn -UserPrincipalName $upn1
-            $user2 = Get-EbgUserByUpn -UserPrincipalName $upn2
+            $selectedRegularSSPRUsers = @(Get-EbgSelectedRegularSSPRUsers -Config $config)
+            if ($selectedRegularSSPRUsers.Count -eq 1) {
+                throw 'Regular SSPR only kræver to valgte Global Administrator-konti. Vælg konto 1 og konto 2, eller ryd begge valg og brug UPN-felterne.'
+            }
+            if ($selectedRegularSSPRUsers.Count -ge 2) {
+                $user1 = $selectedRegularSSPRUsers[0]
+                $user2 = $selectedRegularSSPRUsers[1]
+                $upn1 = [string](Get-EbgObjectPropertyValue -InputObject $user1 -Name 'userPrincipalName')
+                $upn2 = [string](Get-EbgObjectPropertyValue -InputObject $user2 -Name 'userPrincipalName')
+            }
+            else {
+                $user1 = Get-EbgUserByUpn -UserPrincipalName $upn1
+                $user2 = Get-EbgUserByUpn -UserPrincipalName $upn2
+            }
             if (-not $user1 -or -not $user2) {
                 throw "Regular SSPR only kræver at begge konti findes. Fundet: $upn1=$([bool]$user1), $upn2=$([bool]$user2). Ret UPN-prefixes eller opret kontiene først."
             }

@@ -121,6 +121,16 @@ function Update-EbgUIState {
     if ($sync.WPFCreateRegularSSPRScopeGroup -and $regularSSPROnly) {
         $sync.WPFCreateRegularSSPRScopeGroup.IsChecked = $true
     }
+    if ($sync.WPFRegularSSPRRulePreview -and $sync.WPFRegularSSPRAdmin1 -and $sync.WPFRegularSSPRAdmin2) {
+        $selectedId1 = if ($sync.WPFRegularSSPRAdmin1.SelectedItem) { [string](Get-EbgObjectPropertyValue -InputObject $sync.WPFRegularSSPRAdmin1.SelectedItem -Name 'id') } else { '' }
+        $selectedId2 = if ($sync.WPFRegularSSPRAdmin2.SelectedItem) { [string](Get-EbgObjectPropertyValue -InputObject $sync.WPFRegularSSPRAdmin2.SelectedItem -Name 'id') } else { '' }
+        if (-not [string]::IsNullOrWhiteSpace($selectedId1) -and -not [string]::IsNullOrWhiteSpace($selectedId2) -and $selectedId1 -ne $selectedId2) {
+            $sync.WPFRegularSSPRRulePreview.Text = New-EbgRegularSSPRMembershipRule -Account1ObjectId $selectedId1 -Account2ObjectId $selectedId2
+        }
+        elseif ([string]::IsNullOrWhiteSpace($sync.WPFRegularSSPRRulePreview.Text) -or $sync.WPFRegularSSPRRulePreview.Text -match '<Account') {
+            $sync.WPFRegularSSPRRulePreview.Text = '(user.accountEnabled -eq true) -and (user.userType -eq "Member") -and (user.objectId -notIn ["<Account 1 objectId>","<Account 2 objectId>"])'
+        }
+    }
     foreach ($phase1Option in @('WPFCreateUsers','WPFCreateGroup','WPFAddUsersToGroup','WPFDisableAdminSSPR','WPFPatchCAPolicies')) {
         if ($sync[$phase1Option]) { $sync[$phase1Option].IsEnabled = -not $regularSSPROnly }
     }
@@ -267,6 +277,9 @@ function Update-EbgUIState {
     }
     if ($sync.WPFRunDiscovery) {
         $sync.WPFRunDiscovery.IsEnabled = -not [bool]$sync.UI.ProcessRunning
+    }
+    if ($sync.WPFRefreshRegularSSPRAdmins) {
+        $sync.WPFRefreshRegularSSPRAdmins.IsEnabled = (-not [bool]$sync.UI.ProcessRunning) -and ($hasGraph -or [bool]$sync.App.Mock)
     }
     if ($sync.WPFBuildPlan) {
         $sync.WPFBuildPlan.IsEnabled = (-not [bool]$sync.UI.ProcessRunning) -and (-not $resumePhase2) -and $hasDiscovery -and $hasVisitedConfig

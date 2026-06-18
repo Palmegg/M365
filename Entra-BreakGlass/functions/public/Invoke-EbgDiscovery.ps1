@@ -51,6 +51,7 @@ function Invoke-EbgDiscovery {
         Write-EbgStatus -Busy -Message 'Discovery: henter aktive Global Administrator assignments...'
         [System.Windows.Forms.Application]::DoEvents()
         $activeGlobalAdmins = @(Get-EbgActiveGlobalAdministrators)
+        $sync.State.ActiveGlobalAdministrators = $activeGlobalAdmins
 
         Write-EbgStatus -Busy -Message 'Discovery: analyserer CA exclusions...'
         [System.Windows.Forms.Application]::DoEvents()
@@ -76,6 +77,7 @@ function Invoke-EbgDiscovery {
             Timestamp = (Get-Date).ToString('o')
         }
         $sync.State.Discovery = $discovery
+        Update-EbgRegularSSPRAdminOptions
         $summary = "Aktive Global Admins: $($activeGlobalAdmins.Count); Target user1: $(if($user1){'findes'}else{'mangler'}); Target user2: $(if($user2){'findes'}else{'mangler'}); Gruppe: $(if($group){'findes'}else{'mangler'}); CA policies: $($policies.Count)"
         $userMissingSeverity = if ($config.CreateUsers) { 'Info' } else { 'Bad' }
         $groupMissingSeverity = if ($config.CreateGroup) { 'Warning' } else { 'Bad' }
