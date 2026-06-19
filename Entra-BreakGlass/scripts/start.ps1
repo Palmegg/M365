@@ -103,6 +103,8 @@ $sync.UI = [Hashtable]::Synchronized(@{
     CurrentPowerShell = $null
     CurrentAsync      = $null
     StopRequested     = $false
+    AllowForcedClose   = $false
+    CloseInProgress    = $false
 })
 
 $sync.Paths = @{

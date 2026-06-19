@@ -34,6 +34,7 @@ function Invoke-EbgWPFButton {
         'WPFOpenPreProvisionMfaSetup' { Invoke-EbgOpenUrl -Url 'https://aka.ms/mfasetup' }
         'WPFOpenOutputFolder' { Invoke-EbgOpenOutputFolder }
         'WPFOpenHandoff' { Invoke-EbgOpenHandoff }
+        'WPFCloseApplication' { Close-EbgApplication }
         default { Write-EbgLog -Level WARN -Message "Ukendt UI handling: $Name" }
     }
 }

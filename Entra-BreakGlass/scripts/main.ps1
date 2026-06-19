@@ -94,9 +94,66 @@ if ($sync.WPFLanguageSelector) {
 }
 
 $sync.Form.Add_Closing({
+    param($sender, $eventArgs)
+
+    if ([bool]$sync.UI.CloseInProgress) {
+        return
+    }
+
+    if ([bool]$sync.UI.ProcessRunning) {
+        if (-not [bool]$sync.UI.AllowForcedClose) {
+            $answer = [System.Windows.MessageBox]::Show(
+                'Der kører en baggrundsopgave. Vil du stoppe opgaven og lukke configuratoren?',
+                $sync.App.Name,
+                'YesNo',
+                'Warning'
+            )
+            if ($answer -ne 'Yes') {
+                $eventArgs.Cancel = $true
+                return
+            }
+        }
+
+        $eventArgs.Cancel = $true
+        $sync.UI.AllowForcedClose = $true
+        $sync.UI.CloseInProgress = $true
+        $sync.UI.StopRequested = $true
+        Write-EbgStatus -Busy -Message 'Stopper baggrundsopgave og lukker configuratoren...'
+
+        $targetPowerShell = $sync.UI.CurrentPowerShell
+        $targetRunspace = $sync.Runspace
+        [System.Threading.ThreadPool]::QueueUserWorkItem([System.Threading.WaitCallback]{
+            param($state)
+
+            try {
+                if ($state.PowerShell) {
+                    try { $state.PowerShell.Stop() } catch {}
+                    try { $state.PowerShell.Dispose() } catch {}
+                }
+                if ($state.Runspace) {
+                    try { $state.Runspace.Dispose() } catch {}
+                }
+            }
+            finally {
+                $sync.UI.ProcessRunning = $false
+                $sync.UI.CurrentPowerShell = $null
+                $sync.UI.CurrentAsync = $null
+                if ($sync.Form) {
+                    [void]$sync.Form.Dispatcher.BeginInvoke([System.Action]{
+                        $sync.UI.CloseInProgress = $false
+                        $sync.Form.Close()
+                    })
+                }
+            }
+        }, [pscustomobject]@{ PowerShell = $targetPowerShell; Runspace = $targetRunspace }) | Out-Null
+        return
+    }
+
+    if ($sync.UI.CurrentPowerShell) {
+        try { $sync.UI.CurrentPowerShell.Dispose() } catch {}
+    }
     if ($sync.Runspace) {
-        $sync.Runspace.Close()
-        $sync.Runspace.Dispose()
+        try { $sync.Runspace.Dispose() } catch {}
     }
 })
 

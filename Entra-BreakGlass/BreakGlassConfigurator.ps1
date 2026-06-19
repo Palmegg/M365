@@ -107,6 +107,8 @@ $sync.UI = [Hashtable]::Synchronized(@{
     CurrentPowerShell = $null
     CurrentAsync      = $null
     StopRequested     = $false
+    AllowForcedClose   = $false
+    CloseInProgress    = $false
 })
 
 $sync.Paths = @{
@@ -3133,6 +3135,30 @@ function Write-EbgStatus {
     }
 }
 
+function Close-EbgApplication {
+    [CmdletBinding()]
+    param()
+
+    if ($sync.UI.ProcessRunning -and -not [bool]$sync.UI.AllowForcedClose) {
+        $answer = [System.Windows.MessageBox]::Show(
+            'Der kører en baggrundsopgave. Vil du stoppe opgaven og lukke configuratoren?',
+            $sync.App.Name,
+            'YesNo',
+            'Warning'
+        )
+        if ($answer -ne 'Yes') {
+            return
+        }
+        $sync.UI.AllowForcedClose = $true
+        $sync.UI.StopRequested = $true
+        Write-EbgStatus -Busy -Message 'Stopper baggrundsopgave og lukker configuratoren...'
+    }
+
+    if ($sync.Form) {
+        $sync.Form.Close()
+    }
+}
+
 function Initialize-EbgWPFUI {
     [CmdletBinding()]
     param()
@@ -3857,34 +3883,36 @@ function Invoke-EbgConnectTenant {
         return
     }
 
-    $sync.UI.ProcessRunning = $true
-    if ($sync.WPFConnectTenant) { $sync.WPFConnectTenant.IsEnabled = $false }
+    if ($sync.App.Mock) {
+        $sync.State.GraphConnected = $true
+        $sync.State.GraphAccount = 'mock.consultant@contoso.onmicrosoft.com'
+        Get-EbgTenantInfo | Out-Null
+        Write-EbgStatus -Message 'Mock tenant er forbundet.'
+        Update-EbgUIState | Out-Null
+        if ([string]$sync.State.StartMode -eq 'Phase2') {
+            Invoke-EbgWPFButton -Name 'WPFStepPhase2'
+        }
+        return
+    }
 
-    try {
-        if ($sync.App.Mock) {
-            $sync.State.GraphConnected = $true
-            $sync.State.GraphAccount = 'mock.consultant@contoso.onmicrosoft.com'
-            Get-EbgTenantInfo | Out-Null
-            Write-EbgStatus -Message 'Mock tenant er forbundet.'
-            Update-EbgUIState | Out-Null
-            if ([string]$sync.State.StartMode -eq 'Phase2') {
-                Invoke-EbgWPFButton -Name 'WPFStepPhase2'
-            }
+    $module = Get-Module -ListAvailable -Name Microsoft.Graph.Authentication | Select-Object -First 1
+    if (-not $module) {
+        $install = [System.Windows.MessageBox]::Show('Microsoft.Graph.Authentication mangler. Vil du installere modulet for CurrentUser fra PSGallery?', $sync.App.Name, 'YesNo', 'Question')
+        if ($install -ne 'Yes') {
+            Write-EbgStatus -Message 'Microsoft Graph modulet mangler, og installation blev ikke godkendt.'
             return
         }
+    }
 
-        Write-EbgStatus -Busy -Message 'Forbinder til Microsoft Graph...'
-        [System.Windows.Forms.Application]::DoEvents()
+    Invoke-EbgRunspace -ArgumentList @([bool](-not $module)) -ScriptBlock {
+        param([bool] $installModule)
 
-        $module = Get-Module -ListAvailable -Name Microsoft.Graph.Authentication | Select-Object -First 1
-        if (-not $module) {
-            $install = [System.Windows.MessageBox]::Show('Microsoft.Graph.Authentication mangler. Vil du installere modulet for CurrentUser fra PSGallery?', $sync.App.Name, 'YesNo', 'Question')
-            if ($install -ne 'Yes') {
-                throw 'Microsoft Graph modulet mangler, og installation blev ikke godkendt.'
-            }
+        if ($installModule) {
+            Write-EbgStatus -Busy -Message 'Installerer Microsoft.Graph.Authentication for CurrentUser...'
             Install-Module -Name Microsoft.Graph.Authentication -Scope CurrentUser -Repository PSGallery -Force -AllowClobber -ErrorAction Stop
         }
 
+        Write-EbgStatus -Busy -Message 'Forbinder til Microsoft Graph...'
         Import-Module Microsoft.Graph.Authentication -ErrorAction Stop
         $scopes = @($sync.configs.graphScopes)
 
@@ -3898,21 +3926,19 @@ function Invoke-EbgConnectTenant {
         $sync.State.TenantDisplayName = ''
         $sync.State.OnMicrosoftDomain = ''
         $sync.State.GraphScopes = @()
-        Update-EbgUIState | Out-Null
-        [System.Windows.Forms.Application]::DoEvents()
+
+        Invoke-EbgUIThread -ScriptBlock {
+            Update-EbgUIState | Out-Null
+            if ($sync.Form) {
+                $sync.UI.PreGraphLoginWindowState = [string]$sync.Form.WindowState
+                $sync.UI.GraphLoginMinimizedWindow = $true
+                $sync.Form.Topmost = $false
+                $sync.Form.WindowState = 'Minimized'
+            }
+        } -Wait
 
         Write-EbgStatus -Busy -Message 'Åbner frisk Microsoft Graph-login. Vælg tenant-konto i Microsoft loginvinduet...'
         Write-Host 'Når login er gennemført, fokuserer BreakGlassConfigurator automatisk igen.' -ForegroundColor Green
-        [System.Windows.Forms.Application]::DoEvents()
-
-        if ($sync.Form) {
-            $sync.UI.PreGraphLoginWindowState = [string]$sync.Form.WindowState
-            $sync.UI.GraphLoginMinimizedWindow = $true
-            $sync.Form.Topmost = $false
-            $sync.Form.WindowState = 'Minimized'
-            [System.Windows.Forms.Application]::DoEvents()
-            Start-Sleep -Milliseconds 300
-        }
 
         Connect-MgGraph -Scopes $scopes -NoWelcome -ErrorAction Stop | Out-Null
 
@@ -3927,24 +3953,14 @@ function Invoke-EbgConnectTenant {
         Get-EbgTenantInfo | Out-Null
         Write-EbgStatus -Message 'Microsoft Graph er forbundet.'
         Write-Host 'Login OK. BreakGlassConfigurator fokuseres nu automatisk.' -ForegroundColor Green
-        Update-EbgUIState | Out-Null
-        if ([string]$sync.State.StartMode -eq 'Phase2') {
-            Invoke-EbgWPFButton -Name 'WPFStepPhase2'
-        }
-        Set-EbgMainWindowForeground
-    }
-    catch {
-        $message = ConvertTo-EbgRedactedError -ErrorRecord $_
-        Write-EbgLog -Level ERROR -Message $message
-        Write-EbgStatus -Message 'Microsoft Graph login fejlede.'
-        [System.Windows.MessageBox]::Show($message, $sync.App.Name, 'OK', 'Error') | Out-Null
-    }
-    finally {
-        $sync.UI.ProcessRunning = $false
-        if ($sync.WPFProgressBar) { $sync.WPFProgressBar.IsIndeterminate = $false }
-        if ($sync.WPFConnectTenant) { $sync.WPFConnectTenant.IsEnabled = $true }
-        Update-EbgUIState | Out-Null
-        if ($sync.State.GraphConnected -or $sync.UI.GraphLoginMinimizedWindow) { Set-EbgMainWindowForeground }
+
+        Invoke-EbgUIThread -ScriptBlock {
+            Update-EbgUIState | Out-Null
+            if ([string]$sync.State.StartMode -eq 'Phase2') {
+                Invoke-EbgWPFButton -Name 'WPFStepPhase2'
+            }
+            Set-EbgMainWindowForeground
+        } -Wait
     }
 }
 
@@ -4333,6 +4349,7 @@ function Invoke-EbgWPFButton {
         'WPFOpenPreProvisionMfaSetup' { Invoke-EbgOpenUrl -Url 'https://aka.ms/mfasetup' }
         'WPFOpenOutputFolder' { Invoke-EbgOpenOutputFolder }
         'WPFOpenHandoff' { Invoke-EbgOpenHandoff }
+        'WPFCloseApplication' { Close-EbgApplication }
         default { Write-EbgLog -Level WARN -Message "Ukendt UI handling: $Name" }
     }
 }
@@ -4444,7 +4461,7 @@ function Stop-EbgCurrentTask {
 $sync.configs.appsettings = @'
 {
   "name": "Entra Break Glass Configurator",
-  "version": "2.4.46",
+  "version": "2.4.47",
   "outputRoot": ".\\Output",
   "groupName": "CA-BreakGlass-Exclude",
   "groupDescription": "Security group used to exclude dedicated break-glass accounts from existing Conditional Access policies.",
@@ -5286,9 +5303,11 @@ $inputXML = @'
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="220"/>
+                    <ColumnDefinition Width="92"/>
                 </Grid.ColumnDefinitions>
                 <TextBlock x:Name="WPFStatusText" Text="Klar" Foreground="{StaticResource TextSecondary}"/>
                 <ProgressBar x:Name="WPFProgressBar" Grid.Column="1" Height="12" IsIndeterminate="False" Foreground="{StaticResource Accent}" Background="#1F2937"/>
+                <Button x:Name="WPFCloseApplication" Grid.Column="2" Content="Luk" Width="78" MinHeight="28" Padding="10,4" HorizontalAlignment="Right" VerticalAlignment="Center"/>
                 </Grid>
             </Grid>
         </Border>
@@ -5392,9 +5411,66 @@ if ($sync.WPFLanguageSelector) {
 }
 
 $sync.Form.Add_Closing({
+    param($sender, $eventArgs)
+
+    if ([bool]$sync.UI.CloseInProgress) {
+        return
+    }
+
+    if ([bool]$sync.UI.ProcessRunning) {
+        if (-not [bool]$sync.UI.AllowForcedClose) {
+            $answer = [System.Windows.MessageBox]::Show(
+                'Der kører en baggrundsopgave. Vil du stoppe opgaven og lukke configuratoren?',
+                $sync.App.Name,
+                'YesNo',
+                'Warning'
+            )
+            if ($answer -ne 'Yes') {
+                $eventArgs.Cancel = $true
+                return
+            }
+        }
+
+        $eventArgs.Cancel = $true
+        $sync.UI.AllowForcedClose = $true
+        $sync.UI.CloseInProgress = $true
+        $sync.UI.StopRequested = $true
+        Write-EbgStatus -Busy -Message 'Stopper baggrundsopgave og lukker configuratoren...'
+
+        $targetPowerShell = $sync.UI.CurrentPowerShell
+        $targetRunspace = $sync.Runspace
+        [System.Threading.ThreadPool]::QueueUserWorkItem([System.Threading.WaitCallback]{
+            param($state)
+
+            try {
+                if ($state.PowerShell) {
+                    try { $state.PowerShell.Stop() } catch {}
+                    try { $state.PowerShell.Dispose() } catch {}
+                }
+                if ($state.Runspace) {
+                    try { $state.Runspace.Dispose() } catch {}
+                }
+            }
+            finally {
+                $sync.UI.ProcessRunning = $false
+                $sync.UI.CurrentPowerShell = $null
+                $sync.UI.CurrentAsync = $null
+                if ($sync.Form) {
+                    [void]$sync.Form.Dispatcher.BeginInvoke([System.Action]{
+                        $sync.UI.CloseInProgress = $false
+                        $sync.Form.Close()
+                    })
+                }
+            }
+        }, [pscustomobject]@{ PowerShell = $targetPowerShell; Runspace = $targetRunspace }) | Out-Null
+        return
+    }
+
+    if ($sync.UI.CurrentPowerShell) {
+        try { $sync.UI.CurrentPowerShell.Dispose() } catch {}
+    }
     if ($sync.Runspace) {
-        $sync.Runspace.Close()
-        $sync.Runspace.Dispose()
+        try { $sync.Runspace.Dispose() } catch {}
     }
 })
 

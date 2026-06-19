@@ -761,9 +761,11 @@
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="220"/>
+                    <ColumnDefinition Width="92"/>
                 </Grid.ColumnDefinitions>
                 <TextBlock x:Name="WPFStatusText" Text="Klar" Foreground="{StaticResource TextSecondary}"/>
                 <ProgressBar x:Name="WPFProgressBar" Grid.Column="1" Height="12" IsIndeterminate="False" Foreground="{StaticResource Accent}" Background="#1F2937"/>
+                <Button x:Name="WPFCloseApplication" Grid.Column="2" Content="Luk" Width="78" MinHeight="28" Padding="10,4" HorizontalAlignment="Right" VerticalAlignment="Center"/>
                 </Grid>
             </Grid>
         </Border>

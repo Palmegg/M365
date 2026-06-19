@@ -7,34 +7,36 @@ function Invoke-EbgConnectTenant {
         return
     }
 
-    $sync.UI.ProcessRunning = $true
-    if ($sync.WPFConnectTenant) { $sync.WPFConnectTenant.IsEnabled = $false }
+    if ($sync.App.Mock) {
+        $sync.State.GraphConnected = $true
+        $sync.State.GraphAccount = 'mock.consultant@contoso.onmicrosoft.com'
+        Get-EbgTenantInfo | Out-Null
+        Write-EbgStatus -Message 'Mock tenant er forbundet.'
+        Update-EbgUIState | Out-Null
+        if ([string]$sync.State.StartMode -eq 'Phase2') {
+            Invoke-EbgWPFButton -Name 'WPFStepPhase2'
+        }
+        return
+    }
 
-    try {
-        if ($sync.App.Mock) {
-            $sync.State.GraphConnected = $true
-            $sync.State.GraphAccount = 'mock.consultant@contoso.onmicrosoft.com'
-            Get-EbgTenantInfo | Out-Null
-            Write-EbgStatus -Message 'Mock tenant er forbundet.'
-            Update-EbgUIState | Out-Null
-            if ([string]$sync.State.StartMode -eq 'Phase2') {
-                Invoke-EbgWPFButton -Name 'WPFStepPhase2'
-            }
+    $module = Get-Module -ListAvailable -Name Microsoft.Graph.Authentication | Select-Object -First 1
+    if (-not $module) {
+        $install = [System.Windows.MessageBox]::Show('Microsoft.Graph.Authentication mangler. Vil du installere modulet for CurrentUser fra PSGallery?', $sync.App.Name, 'YesNo', 'Question')
+        if ($install -ne 'Yes') {
+            Write-EbgStatus -Message 'Microsoft Graph modulet mangler, og installation blev ikke godkendt.'
             return
         }
+    }
 
-        Write-EbgStatus -Busy -Message 'Forbinder til Microsoft Graph...'
-        [System.Windows.Forms.Application]::DoEvents()
+    Invoke-EbgRunspace -ArgumentList @([bool](-not $module)) -ScriptBlock {
+        param([bool] $installModule)
 
-        $module = Get-Module -ListAvailable -Name Microsoft.Graph.Authentication | Select-Object -First 1
-        if (-not $module) {
-            $install = [System.Windows.MessageBox]::Show('Microsoft.Graph.Authentication mangler. Vil du installere modulet for CurrentUser fra PSGallery?', $sync.App.Name, 'YesNo', 'Question')
-            if ($install -ne 'Yes') {
-                throw 'Microsoft Graph modulet mangler, og installation blev ikke godkendt.'
-            }
+        if ($installModule) {
+            Write-EbgStatus -Busy -Message 'Installerer Microsoft.Graph.Authentication for CurrentUser...'
             Install-Module -Name Microsoft.Graph.Authentication -Scope CurrentUser -Repository PSGallery -Force -AllowClobber -ErrorAction Stop
         }
 
+        Write-EbgStatus -Busy -Message 'Forbinder til Microsoft Graph...'
         Import-Module Microsoft.Graph.Authentication -ErrorAction Stop
         $scopes = @($sync.configs.graphScopes)
 
@@ -48,21 +50,19 @@ function Invoke-EbgConnectTenant {
         $sync.State.TenantDisplayName = ''
         $sync.State.OnMicrosoftDomain = ''
         $sync.State.GraphScopes = @()
-        Update-EbgUIState | Out-Null
-        [System.Windows.Forms.Application]::DoEvents()
+
+        Invoke-EbgUIThread -ScriptBlock {
+            Update-EbgUIState | Out-Null
+            if ($sync.Form) {
+                $sync.UI.PreGraphLoginWindowState = [string]$sync.Form.WindowState
+                $sync.UI.GraphLoginMinimizedWindow = $true
+                $sync.Form.Topmost = $false
+                $sync.Form.WindowState = 'Minimized'
+            }
+        } -Wait
 
         Write-EbgStatus -Busy -Message 'Åbner frisk Microsoft Graph-login. Vælg tenant-konto i Microsoft loginvinduet...'
         Write-Host 'Når login er gennemført, fokuserer BreakGlassConfigurator automatisk igen.' -ForegroundColor Green
-        [System.Windows.Forms.Application]::DoEvents()
-
-        if ($sync.Form) {
-            $sync.UI.PreGraphLoginWindowState = [string]$sync.Form.WindowState
-            $sync.UI.GraphLoginMinimizedWindow = $true
-            $sync.Form.Topmost = $false
-            $sync.Form.WindowState = 'Minimized'
-            [System.Windows.Forms.Application]::DoEvents()
-            Start-Sleep -Milliseconds 300
-        }
 
         Connect-MgGraph -Scopes $scopes -NoWelcome -ErrorAction Stop | Out-Null
 
@@ -77,23 +77,13 @@ function Invoke-EbgConnectTenant {
         Get-EbgTenantInfo | Out-Null
         Write-EbgStatus -Message 'Microsoft Graph er forbundet.'
         Write-Host 'Login OK. BreakGlassConfigurator fokuseres nu automatisk.' -ForegroundColor Green
-        Update-EbgUIState | Out-Null
-        if ([string]$sync.State.StartMode -eq 'Phase2') {
-            Invoke-EbgWPFButton -Name 'WPFStepPhase2'
-        }
-        Set-EbgMainWindowForeground
-    }
-    catch {
-        $message = ConvertTo-EbgRedactedError -ErrorRecord $_
-        Write-EbgLog -Level ERROR -Message $message
-        Write-EbgStatus -Message 'Microsoft Graph login fejlede.'
-        [System.Windows.MessageBox]::Show($message, $sync.App.Name, 'OK', 'Error') | Out-Null
-    }
-    finally {
-        $sync.UI.ProcessRunning = $false
-        if ($sync.WPFProgressBar) { $sync.WPFProgressBar.IsIndeterminate = $false }
-        if ($sync.WPFConnectTenant) { $sync.WPFConnectTenant.IsEnabled = $true }
-        Update-EbgUIState | Out-Null
-        if ($sync.State.GraphConnected -or $sync.UI.GraphLoginMinimizedWindow) { Set-EbgMainWindowForeground }
+
+        Invoke-EbgUIThread -ScriptBlock {
+            Update-EbgUIState | Out-Null
+            if ([string]$sync.State.StartMode -eq 'Phase2') {
+                Invoke-EbgWPFButton -Name 'WPFStepPhase2'
+            }
+            Set-EbgMainWindowForeground
+        } -Wait
     }
 }
