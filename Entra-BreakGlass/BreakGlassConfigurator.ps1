@@ -3049,6 +3049,7 @@ function Initialize-EbgWPFUI {
     $sync.WPFRegularSSPRRulePreview.Text = '(user.accountEnabled -eq true) -and (user.userType -eq "Member") -and (user.objectId -notIn ["<Account 1 objectId>","<Account 2 objectId>"])'
     $sync.WPFAuthenticationStrengthName.Text = [string]$settings.authenticationStrengthName
     $sync.WPFBreakGlassCAPolicyName.Text = [string]$settings.breakGlassCAPolicyName
+    if ($sync.WPFFetchedAAGUIDSummary) { $sync.WPFFetchedAAGUIDSummary.Text = 'Ingen AAGUIDs hentet endnu.' }
     $sync.WPFCreateUsers.IsChecked = [bool]$defaults.createUsers
     $sync.WPFCreateGroup.IsChecked = [bool]$defaults.createGroup
     $sync.WPFAddUsersToGroup.IsChecked = [bool]$defaults.addUsersToGroup
@@ -4055,6 +4056,7 @@ function Invoke-EbgFetchAAGUIDs {
             [string](Get-EbgObjectPropertyValue -InputObject $_ -Name 'aaGuid')
         } | Where-Object { $_ -match '^[0-9a-fA-F-]{36}$' } | ForEach-Object { $_.ToLowerInvariant() } | Select-Object -Unique)
 
+        $summaryLines = [System.Collections.Generic.List[string]]::new()
         foreach ($method in $methods) {
             $methodUpn = [string](Get-EbgObjectPropertyValue -InputObject $method -Name 'UserPrincipalName')
             $name = [string](Get-EbgObjectPropertyValue -InputObject $method -Name 'displayName')
@@ -4063,6 +4065,10 @@ function Invoke-EbgFetchAAGUIDs {
             $attestation = [string](Get-EbgObjectPropertyValue -InputObject $method -Name 'attestationLevel')
             $type = [string](Get-EbgObjectPropertyValue -InputObject $method -Name 'passkeyType')
             Write-EbgLog -Level PASS -Message "FIDO2 method fundet: user=$methodUpn; name=$name; model=$model; aaGuid=$guid; attestation=$attestation; type=$type"
+            if ($guid -match '^[0-9a-fA-F-]{36}$') {
+                $label = if (-not [string]::IsNullOrWhiteSpace($model)) { $model } elseif (-not [string]::IsNullOrWhiteSpace($name)) { $name } else { 'FIDO2/passkey method' }
+                $summaryLines.Add(('{0} | {1} | {2}' -f $guid.ToLowerInvariant(), $methodUpn, $label))
+            }
         }
 
         if ($aaGuids.Count -lt 1) {
@@ -4074,6 +4080,21 @@ function Invoke-EbgFetchAAGUIDs {
         $existing = @(ConvertFrom-EbgAAGUIDText -Text $sync.WPFAAGUIDs.Text)
         $merged = @($existing + $aaGuids | Select-Object -Unique)
         $sync.WPFAAGUIDs.Text = ($merged -join [Environment]::NewLine)
+        if ($sync.WPFFetchedAAGUIDSummary) {
+            $sync.WPFFetchedAAGUIDSummary.Text = if ($summaryLines.Count -gt 0) {
+                @(
+                    'AAGUID | Source user | Key/model'
+                    '----------------------------------'
+                    $summaryLines
+                    ''
+                    'Allowed AAGUIDs now:'
+                    ($merged -join [Environment]::NewLine)
+                ) -join [Environment]::NewLine
+            }
+            else {
+                'Ingen AAGUID detaljer kunne vises.'
+            }
+        }
         $sync.State.AAGUIDsFetched = $true
         Write-EbgStatus -Message "AAGUIDs hentet fra $($sourceUpns.Count) kildekonto/konti. Tryk nu 'Kør Phase 2' for at oprette auth strength og disabled CA-policy."
         [System.Windows.MessageBox]::Show("AAGUIDs hentet fra:`n$($sourceUpns -join [Environment]::NewLine)`n`n$($aaGuids -join [Environment]::NewLine)", $sync.App.Name, 'OK', 'Information') | Out-Null
@@ -4318,7 +4339,7 @@ function Stop-EbgCurrentTask {
 $sync.configs.appsettings = @'
 {
   "name": "Entra Break Glass Configurator",
-  "version": "2.4.34",
+  "version": "2.4.35",
   "outputRoot": ".\\Output",
   "groupName": "CA-BreakGlass-Exclude",
   "groupDescription": "Security group used to exclude dedicated break-glass accounts from existing Conditional Access policies.",
@@ -5075,6 +5096,12 @@ $inputXML = @'
                                         <ComboBox x:Name="WPFAAGUIDSourceAdmin2" Width="360" Margin="0,0,8,8"/>
                                     </StackPanel>
                                     <TextBlock x:Name="WPFAAGUIDSourceAdminHint" Foreground="{StaticResource TextMuted}" TextWrapping="Wrap" Text="Kør Discovery eller hent Global Admins, vælg den konto der allerede har FIDO2/passkey registreret, og hent AAGUID."/>
+                                    <Border Background="#0F172A" BorderBrush="{StaticResource BorderSoft}" BorderThickness="1" CornerRadius="8" Padding="10" Margin="0,8,0,0">
+                                        <StackPanel>
+                                            <TextBlock Text="Fetched AAGUIDs" FontWeight="SemiBold" Margin="0,0,0,4"/>
+                                            <TextBox x:Name="WPFFetchedAAGUIDSummary" IsReadOnly="True" AcceptsReturn="True" Height="92" TextWrapping="NoWrap" FontFamily="Consolas" Background="Transparent" BorderThickness="0" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" Text="Ingen AAGUIDs hentet endnu."/>
+                                        </StackPanel>
+                                    </Border>
                                 </StackPanel>
                                 <TextBlock Grid.Row="3" Grid.Column="0" Text="Allowed key AAGUIDs"/>
                                 <StackPanel Grid.Row="3" Grid.Column="1" Grid.ColumnSpan="3">

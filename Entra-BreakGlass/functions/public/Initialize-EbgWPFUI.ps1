@@ -23,6 +23,7 @@ function Initialize-EbgWPFUI {
     $sync.WPFRegularSSPRRulePreview.Text = '(user.accountEnabled -eq true) -and (user.userType -eq "Member") -and (user.objectId -notIn ["<Account 1 objectId>","<Account 2 objectId>"])'
     $sync.WPFAuthenticationStrengthName.Text = [string]$settings.authenticationStrengthName
     $sync.WPFBreakGlassCAPolicyName.Text = [string]$settings.breakGlassCAPolicyName
+    if ($sync.WPFFetchedAAGUIDSummary) { $sync.WPFFetchedAAGUIDSummary.Text = 'Ingen AAGUIDs hentet endnu.' }
     $sync.WPFCreateUsers.IsChecked = [bool]$defaults.createUsers
     $sync.WPFCreateGroup.IsChecked = [bool]$defaults.createGroup
     $sync.WPFAddUsersToGroup.IsChecked = [bool]$defaults.addUsersToGroup

@@ -676,6 +676,12 @@
                                         <ComboBox x:Name="WPFAAGUIDSourceAdmin2" Width="360" Margin="0,0,8,8"/>
                                     </StackPanel>
                                     <TextBlock x:Name="WPFAAGUIDSourceAdminHint" Foreground="{StaticResource TextMuted}" TextWrapping="Wrap" Text="Kør Discovery eller hent Global Admins, vælg den konto der allerede har FIDO2/passkey registreret, og hent AAGUID."/>
+                                    <Border Background="#0F172A" BorderBrush="{StaticResource BorderSoft}" BorderThickness="1" CornerRadius="8" Padding="10" Margin="0,8,0,0">
+                                        <StackPanel>
+                                            <TextBlock Text="Fetched AAGUIDs" FontWeight="SemiBold" Margin="0,0,0,4"/>
+                                            <TextBox x:Name="WPFFetchedAAGUIDSummary" IsReadOnly="True" AcceptsReturn="True" Height="92" TextWrapping="NoWrap" FontFamily="Consolas" Background="Transparent" BorderThickness="0" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" Text="Ingen AAGUIDs hentet endnu."/>
+                                        </StackPanel>
+                                    </Border>
                                 </StackPanel>
                                 <TextBlock Grid.Row="3" Grid.Column="0" Text="Allowed key AAGUIDs"/>
                                 <StackPanel Grid.Row="3" Grid.Column="1" Grid.ColumnSpan="3">

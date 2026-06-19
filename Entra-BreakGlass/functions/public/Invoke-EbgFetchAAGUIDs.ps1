@@ -53,6 +53,7 @@ function Invoke-EbgFetchAAGUIDs {
             [string](Get-EbgObjectPropertyValue -InputObject $_ -Name 'aaGuid')
         } | Where-Object { $_ -match '^[0-9a-fA-F-]{36}$' } | ForEach-Object { $_.ToLowerInvariant() } | Select-Object -Unique)
 
+        $summaryLines = [System.Collections.Generic.List[string]]::new()
         foreach ($method in $methods) {
             $methodUpn = [string](Get-EbgObjectPropertyValue -InputObject $method -Name 'UserPrincipalName')
             $name = [string](Get-EbgObjectPropertyValue -InputObject $method -Name 'displayName')
@@ -61,6 +62,10 @@ function Invoke-EbgFetchAAGUIDs {
             $attestation = [string](Get-EbgObjectPropertyValue -InputObject $method -Name 'attestationLevel')
             $type = [string](Get-EbgObjectPropertyValue -InputObject $method -Name 'passkeyType')
             Write-EbgLog -Level PASS -Message "FIDO2 method fundet: user=$methodUpn; name=$name; model=$model; aaGuid=$guid; attestation=$attestation; type=$type"
+            if ($guid -match '^[0-9a-fA-F-]{36}$') {
+                $label = if (-not [string]::IsNullOrWhiteSpace($model)) { $model } elseif (-not [string]::IsNullOrWhiteSpace($name)) { $name } else { 'FIDO2/passkey method' }
+                $summaryLines.Add(('{0} | {1} | {2}' -f $guid.ToLowerInvariant(), $methodUpn, $label))
+            }
         }
 
         if ($aaGuids.Count -lt 1) {
@@ -72,6 +77,21 @@ function Invoke-EbgFetchAAGUIDs {
         $existing = @(ConvertFrom-EbgAAGUIDText -Text $sync.WPFAAGUIDs.Text)
         $merged = @($existing + $aaGuids | Select-Object -Unique)
         $sync.WPFAAGUIDs.Text = ($merged -join [Environment]::NewLine)
+        if ($sync.WPFFetchedAAGUIDSummary) {
+            $sync.WPFFetchedAAGUIDSummary.Text = if ($summaryLines.Count -gt 0) {
+                @(
+                    'AAGUID | Source user | Key/model'
+                    '----------------------------------'
+                    $summaryLines
+                    ''
+                    'Allowed AAGUIDs now:'
+                    ($merged -join [Environment]::NewLine)
+                ) -join [Environment]::NewLine
+            }
+            else {
+                'Ingen AAGUID detaljer kunne vises.'
+            }
+        }
         $sync.State.AAGUIDsFetched = $true
         Write-EbgStatus -Message "AAGUIDs hentet fra $($sourceUpns.Count) kildekonto/konti. Tryk nu 'Kør Phase 2' for at oprette auth strength og disabled CA-policy."
         [System.Windows.MessageBox]::Show("AAGUIDs hentet fra:`n$($sourceUpns -join [Environment]::NewLine)`n`n$($aaGuids -join [Environment]::NewLine)", $sync.App.Name, 'OK', 'Information') | Out-Null
