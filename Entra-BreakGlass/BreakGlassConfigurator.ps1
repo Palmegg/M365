@@ -4181,7 +4181,7 @@ function Stop-EbgCurrentTask {
 $sync.configs.appsettings = @'
 {
   "name": "Entra Break Glass Configurator",
-  "version": "2.4.30",
+  "version": "2.4.31",
   "outputRoot": ".\\Output",
   "groupName": "CA-BreakGlass-Exclude",
   "groupDescription": "Security group used to exclude dedicated break-glass accounts from existing Conditional Access policies.",
@@ -4263,7 +4263,8 @@ $inputXML = @'
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Entra Break Glass Configurator"
-        Width="1280" Height="820" MinWidth="1080" MinHeight="720"
+        Width="1600" Height="980" MinWidth="1366" MinHeight="860"
+        WindowState="Maximized"
         WindowStartupLocation="CenterScreen"
         Background="#0B0D0F">
     <Window.Resources>
@@ -4734,8 +4735,7 @@ $inputXML = @'
                 </Grid>
 
                 <Grid x:Name="WPFPageConfig" Visibility="Collapsed">
-                    <ScrollViewer VerticalScrollBarVisibility="Auto">
-                        <Grid MaxWidth="980" HorizontalAlignment="Center">
+                        <Grid MaxWidth="1180" HorizontalAlignment="Center" VerticalAlignment="Top">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="220"/>
                                 <ColumnDefinition Width="*"/>
@@ -4819,7 +4819,6 @@ $inputXML = @'
                             <TextBlock Grid.Row="11" Grid.Column="0" Text="Dynamic rule preview"/>
                             <TextBox x:Name="WPFRegularSSPRRulePreview" Grid.Row="11" Grid.Column="1" Grid.ColumnSpan="3" IsReadOnly="True" TextWrapping="Wrap" Height="74" FontFamily="Consolas"/>
                         </Grid>
-                    </ScrollViewer>
                 </Grid>
 
                 <Grid x:Name="WPFPagePlan" Visibility="Collapsed">
@@ -4868,8 +4867,7 @@ $inputXML = @'
                             <TextBlock Text="Phase 2 - FIDO2 og dedikeret CA-policy" FontSize="22" FontWeight="SemiBold" Margin="0,0,0,12"/>
                             <TextBlock Text="Dette trin refresher de to konti, læser de registrerede FIDO2/passkey security keys, udtrækker deres AAGUIDs, kan slette TAP, opretter/opdaterer BreakGlass-FIDO2 authentication strength og opretter den dedikerede CA-policy som disabled." TextWrapping="Wrap"/>
                         </StackPanel>
-                        <ScrollViewer Grid.Row="1" VerticalScrollBarVisibility="Auto" Margin="0,14,0,0">
-                            <StackPanel>
+                        <StackPanel Grid.Row="1" Margin="0,14,0,0">
                             <Border Padding="14" Background="{StaticResource PanelRaised}" BorderBrush="{StaticResource BorderSoft}" BorderThickness="1" CornerRadius="10">
                                 <Grid>
                                     <Grid.ColumnDefinitions>
@@ -4947,7 +4945,6 @@ $inputXML = @'
                             </Border>
                             <TextBox x:Name="WPFPhase2Log" IsReadOnly="True" AcceptsReturn="True" Height="92" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" FontFamily="Consolas"/>
                             </StackPanel>
-                        </ScrollViewer>
                     </Grid>
                 </Grid>
 
