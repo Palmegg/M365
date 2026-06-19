@@ -4339,7 +4339,7 @@ function Stop-EbgCurrentTask {
 $sync.configs.appsettings = @'
 {
   "name": "Entra Break Glass Configurator",
-  "version": "2.4.36",
+  "version": "2.4.37",
   "outputRoot": ".\\Output",
   "groupName": "CA-BreakGlass-Exclude",
   "groupDescription": "Security group used to exclude dedicated break-glass accounts from existing Conditional Access policies.",
@@ -4822,11 +4822,11 @@ $inputXML = @'
                 </Grid>
 
                 <Grid x:Name="WPFPageConnect" Visibility="Collapsed">
-                    <Grid MaxWidth="1060" HorizontalAlignment="Center" VerticalAlignment="Top">
+                    <Grid MaxWidth="1260" HorizontalAlignment="Center" VerticalAlignment="Top">
                         <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="560"/>
+                            <ColumnDefinition Width="700"/>
                             <ColumnDefinition Width="34"/>
-                            <ColumnDefinition Width="420"/>
+                            <ColumnDefinition Width="460"/>
                         </Grid.ColumnDefinitions>
                         <Grid.RowDefinitions>
                             <RowDefinition Height="Auto"/>
@@ -4840,7 +4840,7 @@ $inputXML = @'
                                 <StackPanel>
                                     <TextBlock Text="Graph scopes" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,8"/>
                                     <TextBlock Text="Requested permissions ved Microsoft Graph sign-in." Foreground="{StaticResource TextMuted}" Margin="0,0,0,10"/>
-                                    <TextBox x:Name="WPFGraphScopes" IsReadOnly="True" AcceptsReturn="True" Height="150" FontFamily="Consolas" Background="Transparent" BorderThickness="0" Padding="0" VerticalScrollBarVisibility="Disabled" HorizontalScrollBarVisibility="Disabled"/>
+                                    <TextBox x:Name="WPFGraphScopes" IsReadOnly="True" AcceptsReturn="True" Height="230" FontFamily="Consolas" Background="Transparent" BorderThickness="0" Padding="0" VerticalScrollBarVisibility="Disabled" HorizontalScrollBarVisibility="Disabled"/>
                                 </StackPanel>
                             </Border>
                             <Button x:Name="WPFConnectTenant" Content="Forbind til Microsoft 365 tenant" Width="260" HorizontalAlignment="Left" Margin="0,10,0,0"/>
