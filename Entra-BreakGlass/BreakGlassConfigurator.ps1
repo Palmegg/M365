@@ -4339,7 +4339,7 @@ function Stop-EbgCurrentTask {
 $sync.configs.appsettings = @'
 {
   "name": "Entra Break Glass Configurator",
-  "version": "2.4.37",
+  "version": "2.4.38",
   "outputRoot": ".\\Output",
   "groupName": "CA-BreakGlass-Exclude",
   "groupDescription": "Security group used to exclude dedicated break-glass accounts from existing Conditional Access policies.",
@@ -4785,7 +4785,7 @@ $inputXML = @'
                 </StackPanel>
             </StackPanel>
 
-            <Grid Grid.Row="1" Margin="34,20">
+            <Grid Grid.Row="1" Margin="34,16,34,10">
                 <Grid x:Name="WPFPageWelcome" MaxWidth="1120" HorizontalAlignment="Center" VerticalAlignment="Top">
                     <Grid.ColumnDefinitions>
                         <ColumnDefinition Width="1.25*"/>
@@ -5096,18 +5096,27 @@ $inputXML = @'
                                         <ComboBox x:Name="WPFAAGUIDSourceAdmin2" Width="360" Margin="0,0,8,8"/>
                                     </StackPanel>
                                     <TextBlock x:Name="WPFAAGUIDSourceAdminHint" Foreground="{StaticResource TextMuted}" TextWrapping="Wrap" Text="Kør Discovery eller hent Global Admins, vælg den konto der allerede har FIDO2/passkey registreret, og hent AAGUID."/>
-                                    <Border Background="#0F172A" BorderBrush="{StaticResource BorderSoft}" BorderThickness="1" CornerRadius="8" Padding="10" Margin="0,8,0,0">
+                                </StackPanel>
+                                <Grid Grid.Row="3" Grid.Column="0" Grid.ColumnSpan="4" Margin="0,10,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*"/>
+                                        <ColumnDefinition Width="14"/>
+                                        <ColumnDefinition Width="*"/>
+                                    </Grid.ColumnDefinitions>
+                                    <Border Grid.Column="0" Background="#0F172A" BorderBrush="{StaticResource BorderSoft}" BorderThickness="1" CornerRadius="8" Padding="10">
                                         <StackPanel>
                                             <TextBlock Text="Fetched AAGUIDs" FontWeight="SemiBold" Margin="0,0,0,4"/>
-                                            <TextBox x:Name="WPFFetchedAAGUIDSummary" IsReadOnly="True" AcceptsReturn="True" Height="92" TextWrapping="NoWrap" FontFamily="Consolas" Background="Transparent" BorderThickness="0" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" Text="Ingen AAGUIDs hentet endnu."/>
+                                            <TextBox x:Name="WPFFetchedAAGUIDSummary" IsReadOnly="True" AcceptsReturn="True" Height="86" TextWrapping="NoWrap" FontFamily="Consolas" Background="Transparent" BorderThickness="0" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" Text="Ingen AAGUIDs hentet endnu."/>
                                         </StackPanel>
                                     </Border>
-                                </StackPanel>
-                                <TextBlock Grid.Row="3" Grid.Column="0" Text="Allowed key AAGUIDs"/>
-                                <StackPanel Grid.Row="3" Grid.Column="1" Grid.ColumnSpan="3">
-                                    <TextBlock Text="One AAGUID per line. Use a pre-provision/source user that already has the correct FIDO2/passkey registered, then fetch its AAGUID here." Foreground="{StaticResource TextMuted}" Margin="0,0,0,4" TextWrapping="Wrap"/>
-                                    <TextBox x:Name="WPFAAGUIDs" AcceptsReturn="True" TextWrapping="NoWrap" Height="72" FontFamily="Consolas" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"/>
-                                </StackPanel>
+                                    <Border Grid.Column="2" Background="#0F172A" BorderBrush="{StaticResource BorderSoft}" BorderThickness="1" CornerRadius="8" Padding="10">
+                                        <StackPanel>
+                                            <TextBlock Text="Allowed key AAGUIDs" FontWeight="SemiBold" Margin="0,0,0,4"/>
+                                            <TextBlock Text="One AAGUID per line. These are used for BreakGlass-FIDO2 authentication strength." Foreground="{StaticResource TextMuted}" Margin="0,0,0,4" TextWrapping="Wrap"/>
+                                            <TextBox x:Name="WPFAAGUIDs" AcceptsReturn="True" TextWrapping="NoWrap" Height="66" FontFamily="Consolas" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"/>
+                                        </StackPanel>
+                                    </Border>
+                                </Grid>
                                 <TextBlock x:Name="WPFPhase2ActionHint" Grid.Row="4" Grid.Column="0" Grid.ColumnSpan="3" Foreground="#FBBF24" Text="Hent AAGUID fra en konto med registreret FIDO2/passkey, og tryk derefter 'Kør Phase 2'." TextWrapping="Wrap" Margin="0,12,12,0"/>
                                 <StackPanel Grid.Row="4" Grid.Column="3" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,8,0,0">
                                     <Button x:Name="WPFApplyPhase2" Content="Kør Phase 2" Width="130" Margin="0,0,8,0"/>
@@ -5115,7 +5124,7 @@ $inputXML = @'
                                 </StackPanel>
                             </Grid>
                             </Border>
-                            <TextBox x:Name="WPFPhase2Log" IsReadOnly="True" AcceptsReturn="True" Height="92" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" FontFamily="Consolas"/>
+                            <TextBox x:Name="WPFPhase2Log" IsReadOnly="True" AcceptsReturn="True" Height="70" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" FontFamily="Consolas"/>
                             </StackPanel>
                     </Grid>
                 </Grid>
