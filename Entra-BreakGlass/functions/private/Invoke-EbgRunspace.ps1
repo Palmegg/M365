@@ -11,11 +11,9 @@ function Invoke-EbgRunspace {
     }
     $sync.UI.ProcessRunning = $true
     $sync.UI.StopRequested = $false
-    if ($sync.WPFProgressBar) {
-        [void]$sync.WPFProgressBar.Dispatcher.BeginInvoke([System.Action]{
-            $sync.WPFProgressBar.IsIndeterminate = $true
-            Update-EbgUIState | Out-Null
-        })
+    Invoke-EbgUIThread -ScriptBlock {
+        if ($sync.WPFProgressBar) { $sync.WPFProgressBar.IsIndeterminate = $true }
+        Update-EbgUIState | Out-Null
     }
     $ps = [PowerShell]::Create()
     $ps.RunspacePool = $sync.Runspace
@@ -29,10 +27,11 @@ function Invoke-EbgRunspace {
             Write-EbgLog -Level ERROR -Message (ConvertTo-EbgRedactedError -ErrorRecord $_)
             $sync.State.Errors += $friendly
             if ($sync.Form) {
-                [void]$sync.Form.Dispatcher.BeginInvoke([System.Action]{
-                    $sync.WPFStatusText.Text = $friendly
-                    [System.Windows.MessageBox]::Show($friendly, $sync.App.Name, 'OK', 'Error') | Out-Null
-                })
+                Invoke-EbgUIThread -ScriptBlock {
+                    param([string] $message)
+                    if ($sync.WPFStatusText) { $sync.WPFStatusText.Text = $message }
+                    [System.Windows.MessageBox]::Show($message, $sync.App.Name, 'OK', 'Error') | Out-Null
+                } -ArgumentList @($friendly)
             }
         }
         finally {
@@ -40,10 +39,10 @@ function Invoke-EbgRunspace {
             $sync.UI.CurrentPowerShell = $null
             $sync.UI.CurrentAsync = $null
             if ($sync.Form) {
-                [void]$sync.Form.Dispatcher.BeginInvoke([System.Action]{
-                    $sync.WPFProgressBar.IsIndeterminate = $false
+                Invoke-EbgUIThread -ScriptBlock {
+                    if ($sync.WPFProgressBar) { $sync.WPFProgressBar.IsIndeterminate = $false }
                     Update-EbgUIState | Out-Null
-                })
+                }
             }
         }
     }).AddArgument($ScriptBlock).AddArgument($ArgumentList) | Out-Null

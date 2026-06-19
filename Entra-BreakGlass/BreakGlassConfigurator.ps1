@@ -118,7 +118,7 @@ function Add-EbgGroupExclusionToCAPolicies {
         $policyName = [string](Get-EbgObjectPropertyValue -InputObject $policy -Name 'displayName')
         Write-EbgStatus -Busy -Message "Phase 1a step 11/12: CA policy $index/$total - $policyName"
         Write-EbgLog -Message "CA exclusion $index/${total}: $policyName ($policyId)"
-        [System.Windows.Forms.Application]::DoEvents()
+        Invoke-EbgDoEvents
 
         $conditions = Get-EbgObjectPropertyValue -InputObject $policy -Name 'conditions'
         $users = Get-EbgObjectPropertyValue -InputObject $conditions -Name 'users'
@@ -129,7 +129,7 @@ function Add-EbgGroupExclusionToCAPolicies {
         if ($excludeGroups -contains $GroupId) {
             Write-EbgLog -Level PASS -Message "CA policy springes over, gruppen er allerede ekskluderet: $policyName"
             $results += [pscustomobject]@{ Policy = $policyName; PolicyId = $policyId; Status = 'AlreadyExcluded'; Warning = '' }
-            [System.Windows.Forms.Application]::DoEvents()
+            Invoke-EbgDoEvents
             continue
         }
         $updatedUsers = ConvertTo-EbgConditionalAccessUsersPatch -Users $users -GroupId $GroupId
@@ -138,19 +138,19 @@ function Add-EbgGroupExclusionToCAPolicies {
             $sync.State.Warnings += $warning
             Write-EbgLog -Level WARN -Message $warning
             $results += [pscustomobject]@{ Policy = $policyName; PolicyId = $policyId; Status = 'Failed'; Warning = $warning }
-            [System.Windows.Forms.Application]::DoEvents()
+            Invoke-EbgDoEvents
             continue
         }
         $body = @{ conditions = @{ users = $updatedUsers } }
         if (-not $Apply) {
             $results += [pscustomobject]@{ Policy = $policyName; PolicyId = $policyId; Status = 'PlannedPatch'; Warning = '' }
-            [System.Windows.Forms.Application]::DoEvents()
+            Invoke-EbgDoEvents
             continue
         }
         if ($sync.App.Mock) {
             Write-EbgLog -Level PASS -Message "CA policy patched i mock mode: $policyName"
             $results += [pscustomobject]@{ Policy = $policyName; PolicyId = $policyId; Status = 'Patched'; Warning = '' }
-            [System.Windows.Forms.Application]::DoEvents()
+            Invoke-EbgDoEvents
             continue
         }
         try {
@@ -165,7 +165,7 @@ function Add-EbgGroupExclusionToCAPolicies {
             Write-EbgLog -Level WARN -Message "$warning $errorSummary"
             $results += [pscustomobject]@{ Policy = $policyName; PolicyId = $policyId; Status = 'Failed'; Warning = $warning }
         }
-        [System.Windows.Forms.Application]::DoEvents()
+        Invoke-EbgDoEvents
     }
     return $results
 }
@@ -1491,6 +1491,25 @@ function Get-EbgAAGUIDSourceUserPrincipalName {
     return @(Get-EbgAAGUIDSourceUserPrincipalNames -Config $Config | Select-Object -First 1)[0]
 }
 
+function Invoke-EbgDoEvents {
+    [CmdletBinding()]
+    param()
+
+    try {
+        $applicationType = 'System.Windows.Forms.Application' -as [type]
+        if (-not $applicationType) {
+            Add-Type -AssemblyName System.Windows.Forms -ErrorAction SilentlyContinue
+            $applicationType = 'System.Windows.Forms.Application' -as [type]
+        }
+        if ($applicationType) {
+            [System.Windows.Forms.Application]::DoEvents()
+        }
+    }
+    catch {
+        # DoEvents is only an opportunistic UI refresh; never fail work because of it.
+    }
+}
+
 function Invoke-EbgGraphRequest {
     [CmdletBinding()]
     param(
@@ -1543,11 +1562,9 @@ function Invoke-EbgRunspace {
     }
     $sync.UI.ProcessRunning = $true
     $sync.UI.StopRequested = $false
-    if ($sync.WPFProgressBar) {
-        [void]$sync.WPFProgressBar.Dispatcher.BeginInvoke([System.Action]{
-            $sync.WPFProgressBar.IsIndeterminate = $true
-            Update-EbgUIState | Out-Null
-        })
+    Invoke-EbgUIThread -ScriptBlock {
+        if ($sync.WPFProgressBar) { $sync.WPFProgressBar.IsIndeterminate = $true }
+        Update-EbgUIState | Out-Null
     }
     $ps = [PowerShell]::Create()
     $ps.RunspacePool = $sync.Runspace
@@ -1561,10 +1578,11 @@ function Invoke-EbgRunspace {
             Write-EbgLog -Level ERROR -Message (ConvertTo-EbgRedactedError -ErrorRecord $_)
             $sync.State.Errors += $friendly
             if ($sync.Form) {
-                [void]$sync.Form.Dispatcher.BeginInvoke([System.Action]{
-                    $sync.WPFStatusText.Text = $friendly
-                    [System.Windows.MessageBox]::Show($friendly, $sync.App.Name, 'OK', 'Error') | Out-Null
-                })
+                Invoke-EbgUIThread -ScriptBlock {
+                    param([string] $message)
+                    if ($sync.WPFStatusText) { $sync.WPFStatusText.Text = $message }
+                    [System.Windows.MessageBox]::Show($message, $sync.App.Name, 'OK', 'Error') | Out-Null
+                } -ArgumentList @($friendly)
             }
         }
         finally {
@@ -1572,10 +1590,10 @@ function Invoke-EbgRunspace {
             $sync.UI.CurrentPowerShell = $null
             $sync.UI.CurrentAsync = $null
             if ($sync.Form) {
-                [void]$sync.Form.Dispatcher.BeginInvoke([System.Action]{
-                    $sync.WPFProgressBar.IsIndeterminate = $false
+                Invoke-EbgUIThread -ScriptBlock {
+                    if ($sync.WPFProgressBar) { $sync.WPFProgressBar.IsIndeterminate = $false }
                     Update-EbgUIState | Out-Null
-                })
+                }
             }
         }
     }).AddArgument($ScriptBlock).AddArgument($ArgumentList) | Out-Null
@@ -1583,6 +1601,69 @@ function Invoke-EbgRunspace {
     $sync.UI.CurrentPowerShell = $ps
     $sync.UI.CurrentAsync = $async
     [void]$async
+}
+
+function Invoke-EbgUIThread {
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [scriptblock] $ScriptBlock,
+
+        [object[]] $ArgumentList = @(),
+
+        [switch] $Wait
+    )
+
+    if (-not $sync.Form -or -not $sync.Form.Dispatcher) {
+        return
+    }
+
+    $dispatcher = $sync.Form.Dispatcher
+    $uiScript = $ScriptBlock.GetNewClosure()
+    $uiArguments = @($ArgumentList)
+    $action = [System.Action]{
+        try {
+            & $uiScript @uiArguments
+        }
+        catch {
+            try {
+                $message = ConvertTo-EbgRedactedError -ErrorRecord $_
+                $logFile = Get-EbgObjectPropertyValue -InputObject $sync.Paths -Name 'LogFile'
+                if ($logFile) {
+                    $line = '[{0}] [WARN] UI update failed: {1}' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $message
+                    Add-Content -LiteralPath $logFile -Value $line -Encoding UTF8
+                }
+            }
+            catch {
+                # UI update failures must never crash the WPF shell.
+            }
+        }
+    }.GetNewClosure()
+
+    try {
+        if ($dispatcher.CheckAccess()) {
+            & $action
+        }
+        elseif ($Wait) {
+            [void]$dispatcher.Invoke($action)
+        }
+        else {
+            [void]$dispatcher.BeginInvoke($action)
+        }
+    }
+    catch {
+        try {
+            $message = ConvertTo-EbgRedactedError -ErrorRecord $_
+            $logFile = Get-EbgObjectPropertyValue -InputObject $sync.Paths -Name 'LogFile'
+            if ($logFile) {
+                $line = '[{0}] [WARN] UI dispatch failed: {1}' -f (Get-Date -Format 'yyyy-MM-dd HH:mm:ss'), $message
+                Add-Content -LiteralPath $logFile -Value $line -Encoding UTF8
+            }
+        }
+        catch {
+            # Last-resort guard.
+        }
+    }
 }
 
 function New-BreakGlassUser {
@@ -2983,21 +3064,18 @@ function Write-EbgLog {
         Add-Content -LiteralPath $logFile -Value $line -Encoding UTF8
     }
     if ($sync.WPFExecutionLog -and $sync.Form -and $sync.Form.Dispatcher) {
-        $uiLine = $line
-        $appendLog = {
-            try {
+        Invoke-EbgUIThread -ScriptBlock {
+            param([string] $uiLine)
+
+            if ($sync.WPFExecutionLog) {
                 $sync.WPFExecutionLog.AppendText($uiLine + [Environment]::NewLine)
                 $sync.WPFExecutionLog.ScrollToEnd()
-                if ($sync.WPFPhase2Log) {
-                    $sync.WPFPhase2Log.AppendText($uiLine + [Environment]::NewLine)
-                    $sync.WPFPhase2Log.ScrollToEnd()
-                }
             }
-            catch {
-                # UI log updates must never break the worker operation.
+            if ($sync.WPFPhase2Log) {
+                $sync.WPFPhase2Log.AppendText($uiLine + [Environment]::NewLine)
+                $sync.WPFPhase2Log.ScrollToEnd()
             }
-        }
-        [void]$sync.Form.Dispatcher.BeginInvoke([System.Windows.Threading.DispatcherPriority]::Background, [System.Action]$appendLog.GetNewClosure())
+        } -ArgumentList @($line)
     }
 }
 
@@ -3009,19 +3087,20 @@ function Write-EbgStatus {
     )
 
     Write-EbgLog -Message $Message
-    if ($sync.WPFStatusText -and $sync.Form -and $sync.Form.Dispatcher) {
-        $statusMessage = $Message
-        $isBusy = [bool] $Busy
-        $updateStatus = {
-            try {
+    if ($sync.Form -and $sync.Form.Dispatcher) {
+        Invoke-EbgUIThread -ScriptBlock {
+            param(
+                [string] $statusMessage,
+                [bool] $isBusy
+            )
+
+            if ($sync.WPFStatusText) {
                 $sync.WPFStatusText.Text = $statusMessage
+            }
+            if ($sync.WPFProgressBar) {
                 $sync.WPFProgressBar.IsIndeterminate = $isBusy
             }
-            catch {
-                # UI status updates must never break the worker operation.
-            }
-        }
-        [void]$sync.Form.Dispatcher.BeginInvoke([System.Windows.Threading.DispatcherPriority]::Background, [System.Action]$updateStatus.GetNewClosure())
+        } -ArgumentList @($Message, [bool] $Busy)
     }
 }
 
@@ -3629,12 +3708,18 @@ function Invoke-EbgApplyPhase2 {
         $handoff = New-EbgHandoffHtml -Result $result -OutputFolder $output
         $sync.State.HandoffPath = $handoff
 
-        [void]$sync.Form.Dispatcher.BeginInvoke([System.Action]{
-            $sync.WPFAAGUIDs.Text = ($mergedAAGUIDs -join [Environment]::NewLine)
-            $sync.WPFOutputFolder.Text = $sync.State.OutputFolder
-            $sync.WPFHandoffPath.Text = $sync.State.HandoffPath
+        Invoke-EbgUIThread -ScriptBlock {
+            param(
+                [string] $aaGuidText,
+                [string] $outputFolder,
+                [string] $handoffPath
+            )
+
+            if ($sync.WPFAAGUIDs) { $sync.WPFAAGUIDs.Text = $aaGuidText }
+            if ($sync.WPFOutputFolder) { $sync.WPFOutputFolder.Text = $outputFolder }
+            if ($sync.WPFHandoffPath) { $sync.WPFHandoffPath.Text = $handoffPath }
             Invoke-EbgWPFButton -Name 'WPFStepHandoff'
-        })
+        } -ArgumentList @(($mergedAAGUIDs -join [Environment]::NewLine), [string]$sync.State.OutputFolder, [string]$sync.State.HandoffPath)
         Write-EbgStatus -Message 'Phase 2 er færdig. CA-politikken er oprettet som disabled.'
     }
 }
@@ -4343,7 +4428,7 @@ function Stop-EbgCurrentTask {
 $sync.configs.appsettings = @'
 {
   "name": "Entra Break Glass Configurator",
-  "version": "2.4.44",
+  "version": "2.4.45",
   "outputRoot": ".\\Output",
   "groupName": "CA-BreakGlass-Exclude",
   "groupDescription": "Security group used to exclude dedicated break-glass accounts from existing Conditional Access policies.",

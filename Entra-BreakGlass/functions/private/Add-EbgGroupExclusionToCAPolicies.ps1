@@ -16,7 +16,7 @@ function Add-EbgGroupExclusionToCAPolicies {
         $policyName = [string](Get-EbgObjectPropertyValue -InputObject $policy -Name 'displayName')
         Write-EbgStatus -Busy -Message "Phase 1a step 11/12: CA policy $index/$total - $policyName"
         Write-EbgLog -Message "CA exclusion $index/${total}: $policyName ($policyId)"
-        [System.Windows.Forms.Application]::DoEvents()
+        Invoke-EbgDoEvents
 
         $conditions = Get-EbgObjectPropertyValue -InputObject $policy -Name 'conditions'
         $users = Get-EbgObjectPropertyValue -InputObject $conditions -Name 'users'
@@ -27,7 +27,7 @@ function Add-EbgGroupExclusionToCAPolicies {
         if ($excludeGroups -contains $GroupId) {
             Write-EbgLog -Level PASS -Message "CA policy springes over, gruppen er allerede ekskluderet: $policyName"
             $results += [pscustomobject]@{ Policy = $policyName; PolicyId = $policyId; Status = 'AlreadyExcluded'; Warning = '' }
-            [System.Windows.Forms.Application]::DoEvents()
+            Invoke-EbgDoEvents
             continue
         }
         $updatedUsers = ConvertTo-EbgConditionalAccessUsersPatch -Users $users -GroupId $GroupId
@@ -36,19 +36,19 @@ function Add-EbgGroupExclusionToCAPolicies {
             $sync.State.Warnings += $warning
             Write-EbgLog -Level WARN -Message $warning
             $results += [pscustomobject]@{ Policy = $policyName; PolicyId = $policyId; Status = 'Failed'; Warning = $warning }
-            [System.Windows.Forms.Application]::DoEvents()
+            Invoke-EbgDoEvents
             continue
         }
         $body = @{ conditions = @{ users = $updatedUsers } }
         if (-not $Apply) {
             $results += [pscustomobject]@{ Policy = $policyName; PolicyId = $policyId; Status = 'PlannedPatch'; Warning = '' }
-            [System.Windows.Forms.Application]::DoEvents()
+            Invoke-EbgDoEvents
             continue
         }
         if ($sync.App.Mock) {
             Write-EbgLog -Level PASS -Message "CA policy patched i mock mode: $policyName"
             $results += [pscustomobject]@{ Policy = $policyName; PolicyId = $policyId; Status = 'Patched'; Warning = '' }
-            [System.Windows.Forms.Application]::DoEvents()
+            Invoke-EbgDoEvents
             continue
         }
         try {
@@ -63,7 +63,7 @@ function Add-EbgGroupExclusionToCAPolicies {
             Write-EbgLog -Level WARN -Message "$warning $errorSummary"
             $results += [pscustomobject]@{ Policy = $policyName; PolicyId = $policyId; Status = 'Failed'; Warning = $warning }
         }
-        [System.Windows.Forms.Application]::DoEvents()
+        Invoke-EbgDoEvents
     }
     return $results
 }

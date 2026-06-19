@@ -543,12 +543,18 @@ function Invoke-EbgApplyPhase2 {
         $handoff = New-EbgHandoffHtml -Result $result -OutputFolder $output
         $sync.State.HandoffPath = $handoff
 
-        [void]$sync.Form.Dispatcher.BeginInvoke([System.Action]{
-            $sync.WPFAAGUIDs.Text = ($mergedAAGUIDs -join [Environment]::NewLine)
-            $sync.WPFOutputFolder.Text = $sync.State.OutputFolder
-            $sync.WPFHandoffPath.Text = $sync.State.HandoffPath
+        Invoke-EbgUIThread -ScriptBlock {
+            param(
+                [string] $aaGuidText,
+                [string] $outputFolder,
+                [string] $handoffPath
+            )
+
+            if ($sync.WPFAAGUIDs) { $sync.WPFAAGUIDs.Text = $aaGuidText }
+            if ($sync.WPFOutputFolder) { $sync.WPFOutputFolder.Text = $outputFolder }
+            if ($sync.WPFHandoffPath) { $sync.WPFHandoffPath.Text = $handoffPath }
             Invoke-EbgWPFButton -Name 'WPFStepHandoff'
-        })
+        } -ArgumentList @(($mergedAAGUIDs -join [Environment]::NewLine), [string]$sync.State.OutputFolder, [string]$sync.State.HandoffPath)
         Write-EbgStatus -Message 'Phase 2 er færdig. CA-politikken er oprettet som disabled.'
     }
 }

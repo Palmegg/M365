@@ -6,18 +6,19 @@ function Write-EbgStatus {
     )
 
     Write-EbgLog -Message $Message
-    if ($sync.WPFStatusText -and $sync.Form -and $sync.Form.Dispatcher) {
-        $statusMessage = $Message
-        $isBusy = [bool] $Busy
-        $updateStatus = {
-            try {
+    if ($sync.Form -and $sync.Form.Dispatcher) {
+        Invoke-EbgUIThread -ScriptBlock {
+            param(
+                [string] $statusMessage,
+                [bool] $isBusy
+            )
+
+            if ($sync.WPFStatusText) {
                 $sync.WPFStatusText.Text = $statusMessage
+            }
+            if ($sync.WPFProgressBar) {
                 $sync.WPFProgressBar.IsIndeterminate = $isBusy
             }
-            catch {
-                # UI status updates must never break the worker operation.
-            }
-        }
-        [void]$sync.Form.Dispatcher.BeginInvoke([System.Windows.Threading.DispatcherPriority]::Background, [System.Action]$updateStatus.GetNewClosure())
+        } -ArgumentList @($Message, [bool] $Busy)
     }
 }
