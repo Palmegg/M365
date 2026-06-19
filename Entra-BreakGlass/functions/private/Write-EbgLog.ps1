@@ -12,21 +12,21 @@ function Write-EbgLog {
     if ($logFile) {
         Add-Content -LiteralPath $logFile -Value $line -Encoding UTF8
     }
-    if ($sync.WPFExecutionLog) {
+    if ($sync.WPFExecutionLog -and $sync.Form -and $sync.Form.Dispatcher) {
+        $uiLine = $line
         $appendLog = {
-            $sync.WPFExecutionLog.AppendText($message + [Environment]::NewLine)
-            $sync.WPFExecutionLog.ScrollToEnd()
-            if ($sync.WPFPhase2Log) {
-                $sync.WPFPhase2Log.AppendText($message + [Environment]::NewLine)
-                $sync.WPFPhase2Log.ScrollToEnd()
+            try {
+                $sync.WPFExecutionLog.AppendText($uiLine + [Environment]::NewLine)
+                $sync.WPFExecutionLog.ScrollToEnd()
+                if ($sync.WPFPhase2Log) {
+                    $sync.WPFPhase2Log.AppendText($uiLine + [Environment]::NewLine)
+                    $sync.WPFPhase2Log.ScrollToEnd()
+                }
+            }
+            catch {
+                # UI log updates must never break the worker operation.
             }
         }
-        $message = $line
-        if ($sync.WPFExecutionLog.Dispatcher.CheckAccess()) {
-            & $appendLog | Out-Null
-        }
-        else {
-            [void]$sync.WPFExecutionLog.Dispatcher.BeginInvoke([System.Action]$appendLog)
-        }
+        [void]$sync.Form.Dispatcher.BeginInvoke([System.Windows.Threading.DispatcherPriority]::Background, [System.Action]$appendLog.GetNewClosure())
     }
 }
