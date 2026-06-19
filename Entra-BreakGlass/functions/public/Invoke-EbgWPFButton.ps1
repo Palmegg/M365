@@ -23,6 +23,12 @@ function Invoke-EbgWPFButton {
         'WPFApplyPhase2' { Invoke-EbgApplyPhase2 }
         'WPFStopPhase2' { Stop-EbgCurrentTask }
         'WPFCycleNeutralNames' { Set-EbgNeutralAccountNamePair }
+        'WPFRefreshAAGUIDAdmins' { Invoke-EbgLoadGlobalAdministrators }
+        'WPFAddAAGUIDSourceAdmin' {
+            $sync.State.AAGUIDSource2Visible = $true
+            Update-EbgAAGUIDSourceOptions | Out-Null
+            Update-EbgUIState | Out-Null
+        }
         'WPFFetchAAGUIDs' { Invoke-EbgFetchAAGUIDs }
         'WPFOpenMfaSetup' { Invoke-EbgOpenUrl -Url 'https://aka.ms/mfasetup' }
         'WPFOpenPreProvisionMfaSetup' { Invoke-EbgOpenUrl -Url 'https://aka.ms/mfasetup' }

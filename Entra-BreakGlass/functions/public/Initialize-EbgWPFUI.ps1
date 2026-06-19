@@ -34,10 +34,12 @@ function Initialize-EbgWPFUI {
     if ($sync['WPFCreateBreakGlassCAPolicy']) { $sync['WPFCreateBreakGlassCAPolicy'].IsChecked = [bool]$defaults.createBreakGlassCAPolicy }
     if ($sync['WPFEnableBreakGlassCAPolicy']) { $sync['WPFEnableBreakGlassCAPolicy'].IsChecked = [bool]$defaults.enableBreakGlassCAPolicy }
     $sync.State.StartMode = 'Phase1'
+    $sync.State.AAGUIDSource2Visible = $false
     if ($sync['WPFStartPhase1']) { $sync['WPFStartPhase1'].IsChecked = $true }
     if ($sync['WPFResumePhase2']) { $sync['WPFResumePhase2'].IsChecked = $false }
     if ($sync.WPFLanguageSelector) { $sync.WPFLanguageSelector.SelectedIndex = 0 }
     Update-EbgRegularSSPRAdminOptions
+    Update-EbgAAGUIDSourceOptions
     Set-EbgNeutralAccountNamePair -Random
     Set-EbgLanguage -Language $sync.State.Language
 

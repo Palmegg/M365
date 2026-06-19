@@ -24,14 +24,28 @@ function Invoke-EbgFetchAAGUIDs {
         Ensure-EbgGraphContext
         [System.Windows.Forms.Application]::DoEvents()
 
-        $sourceUpn = Get-EbgAAGUIDSourceUserPrincipalName -Config $config
-        Write-EbgLog -Message "Henter registrerede FIDO2/passkey methods fra: $sourceUpn"
-        [System.Windows.Forms.Application]::DoEvents()
+        $sourceUpns = @(Get-EbgAAGUIDSourceUserPrincipalNames -Config $config)
+        $methods = @()
+        foreach ($sourceUpn in $sourceUpns) {
+            Write-EbgStatus -Busy -Message "Henter FIDO2 AAGUIDs fra $sourceUpn..."
+            Write-EbgLog -Message "Henter registrerede FIDO2/passkey methods fra: $sourceUpn"
+            [System.Windows.Forms.Application]::DoEvents()
 
-        $methods = @(Get-EbgFido2MethodsForUser -UserPrincipalName $sourceUpn)
+            $sourceMethods = @(Get-EbgFido2MethodsForUser -UserPrincipalName $sourceUpn)
+            if ($sourceMethods.Count -lt 1) {
+                Write-EbgLog -Level WARN -Message "Ingen FIDO2/passkey methods fundet på $sourceUpn."
+                continue
+            }
+            foreach ($method in $sourceMethods) {
+                $method | Add-Member -MemberType NoteProperty -Name UserPrincipalName -Value $sourceUpn -Force
+                $methods += $method
+            }
+        }
+
         if ($methods.Count -lt 1) {
-            Write-EbgStatus -Message "Ingen FIDO2/passkey methods fundet på $sourceUpn."
-            [System.Windows.MessageBox]::Show("Der blev ikke fundet registrerede FIDO2/passkey methods på $sourceUpn. Log ind på kontoen via https://aka.ms/mfasetup og registrer security keys først.", $sync.App.Name, 'OK', 'Warning') | Out-Null
+            $sourceList = $sourceUpns -join ', '
+            Write-EbgStatus -Message "Ingen FIDO2/passkey methods fundet på valgte kildekonti."
+            [System.Windows.MessageBox]::Show("Der blev ikke fundet registrerede FIDO2/passkey methods på de valgte kildekonti:`n`n$sourceList`n`nLog ind via https://aka.ms/mfasetup og registrer security keys først.", $sync.App.Name, 'OK', 'Warning') | Out-Null
             return
         }
 
@@ -40,17 +54,18 @@ function Invoke-EbgFetchAAGUIDs {
         } | Where-Object { $_ -match '^[0-9a-fA-F-]{36}$' } | ForEach-Object { $_.ToLowerInvariant() } | Select-Object -Unique)
 
         foreach ($method in $methods) {
+            $methodUpn = [string](Get-EbgObjectPropertyValue -InputObject $method -Name 'UserPrincipalName')
             $name = [string](Get-EbgObjectPropertyValue -InputObject $method -Name 'displayName')
             $model = [string](Get-EbgObjectPropertyValue -InputObject $method -Name 'model')
             $guid = [string](Get-EbgObjectPropertyValue -InputObject $method -Name 'aaGuid')
             $attestation = [string](Get-EbgObjectPropertyValue -InputObject $method -Name 'attestationLevel')
             $type = [string](Get-EbgObjectPropertyValue -InputObject $method -Name 'passkeyType')
-            Write-EbgLog -Level PASS -Message "FIDO2 method fundet: user=$sourceUpn; name=$name; model=$model; aaGuid=$guid; attestation=$attestation; type=$type"
+            Write-EbgLog -Level PASS -Message "FIDO2 method fundet: user=$methodUpn; name=$name; model=$model; aaGuid=$guid; attestation=$attestation; type=$type"
         }
 
         if ($aaGuids.Count -lt 1) {
             Write-EbgStatus -Message 'FIDO2 methods fundet, men ingen gyldige AAGUIDs kunne læses.'
-            [System.Windows.MessageBox]::Show("FIDO2/passkey methods blev fundet på $sourceUpn, men Microsoft Graph returnerede ingen gyldige AAGUIDs.", $sync.App.Name, 'OK', 'Warning') | Out-Null
+            [System.Windows.MessageBox]::Show("FIDO2/passkey methods blev fundet, men Microsoft Graph returnerede ingen gyldige AAGUIDs.", $sync.App.Name, 'OK', 'Warning') | Out-Null
             return
         }
 
@@ -58,8 +73,8 @@ function Invoke-EbgFetchAAGUIDs {
         $merged = @($existing + $aaGuids | Select-Object -Unique)
         $sync.WPFAAGUIDs.Text = ($merged -join [Environment]::NewLine)
         $sync.State.AAGUIDsFetched = $true
-        Write-EbgStatus -Message "AAGUIDs hentet fra $sourceUpn. Tryk nu 'Kør Phase 2' for at oprette auth strength og disabled CA-policy."
-        [System.Windows.MessageBox]::Show("AAGUIDs hentet fra ${sourceUpn}:`n`n$($aaGuids -join [Environment]::NewLine)", $sync.App.Name, 'OK', 'Information') | Out-Null
+        Write-EbgStatus -Message "AAGUIDs hentet fra $($sourceUpns.Count) kildekonto/konti. Tryk nu 'Kør Phase 2' for at oprette auth strength og disabled CA-policy."
+        [System.Windows.MessageBox]::Show("AAGUIDs hentet fra:`n$($sourceUpns -join [Environment]::NewLine)`n`n$($aaGuids -join [Environment]::NewLine)", $sync.App.Name, 'OK', 'Information') | Out-Null
     }
     catch {
         $message = ConvertTo-EbgRedactedError -ErrorRecord $_

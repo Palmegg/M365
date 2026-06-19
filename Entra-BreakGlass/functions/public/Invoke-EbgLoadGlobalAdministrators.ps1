@@ -25,6 +25,7 @@ function Invoke-EbgLoadGlobalAdministrators {
             $sync.State.Discovery | Add-Member -MemberType NoteProperty -Name ActiveGlobalAdministrators -Value $admins -Force
         }
         Update-EbgRegularSSPRAdminOptions
+        Update-EbgAAGUIDSourceOptions
         Write-EbgStatus -Message "Hentede $($admins.Count) aktive direkte Global Administrator-konti."
     }
     catch {

@@ -664,10 +664,19 @@
                                         <Button x:Name="WPFOpenPreProvisionMfaSetup" Grid.Column="1" Content="Åbn MFA setup" Width="160" HorizontalAlignment="Right" VerticalAlignment="Center"/>
                                     </Grid>
                                 </Border>
-                                <TextBlock Grid.Row="2" Grid.Column="0" Text="AAGUID source UPN"/>
-                                <StackPanel Grid.Row="2" Grid.Column="1" Grid.ColumnSpan="3" Orientation="Horizontal">
-                                    <TextBox x:Name="WPFAAGUIDCustomUser" Width="520" Margin="0,2,8,8" ToolTip="Enter the UPN for the pre-provision/source user that already has the FIDO2/passkey registered."/>
-                                    <Button x:Name="WPFFetchAAGUIDs" Content="Fetch FIDO2 AAGUIDs" Width="170" Margin="0,0,0,8"/>
+                                <TextBlock Grid.Row="2" Grid.Column="0" Text="AAGUID source users"/>
+                                <StackPanel Grid.Row="2" Grid.Column="1" Grid.ColumnSpan="3">
+                                    <StackPanel Orientation="Horizontal">
+                                        <Button x:Name="WPFRefreshAAGUIDAdmins" Content="Hent Global Admins" Width="160" Margin="0,0,8,8"/>
+                                        <ComboBox x:Name="WPFAAGUIDSourceAdmin1" Width="360" Margin="0,0,8,8"/>
+                                        <Button x:Name="WPFAddAAGUIDSourceAdmin" Content="+ konto" Width="100" Margin="0,0,8,8"/>
+                                        <Button x:Name="WPFFetchAAGUIDs" Content="Fetch FIDO2 AAGUIDs" Width="170" Margin="0,0,0,8"/>
+                                    </StackPanel>
+                                    <StackPanel x:Name="WPFAAGUIDSourceAdmin2Row" Orientation="Horizontal" Visibility="Collapsed">
+                                        <TextBlock Text="Source user 2" Width="160" VerticalAlignment="Center" Foreground="{StaticResource TextSecondary}"/>
+                                        <ComboBox x:Name="WPFAAGUIDSourceAdmin2" Width="360" Margin="0,0,8,8"/>
+                                    </StackPanel>
+                                    <TextBlock x:Name="WPFAAGUIDSourceAdminHint" Foreground="{StaticResource TextMuted}" TextWrapping="Wrap" Text="Kør Discovery eller hent Global Admins, vælg den konto der allerede har FIDO2/passkey registreret, og hent AAGUID."/>
                                 </StackPanel>
                                 <TextBlock Grid.Row="3" Grid.Column="0" Text="Allowed key AAGUIDs"/>
                                 <StackPanel Grid.Row="3" Grid.Column="1" Grid.ColumnSpan="3">

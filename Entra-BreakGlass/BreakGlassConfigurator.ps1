@@ -1450,20 +1450,42 @@ function Get-EbgWorkflowSteps {
     return @('Welcome','Connect','Discovery','Config','Plan','Apply','ManualFido','Phase2','Handoff')
 }
 
+function Get-EbgAAGUIDSourceUserPrincipalNames {
+    [CmdletBinding()]
+    param([Parameter(Mandatory)][hashtable] $Config)
+
+    return @($sync.Form.Dispatcher.Invoke([func[object[]]]{
+        $sources = [System.Collections.Generic.List[string]]::new()
+        foreach ($comboName in @('WPFAAGUIDSourceAdmin1','WPFAAGUIDSourceAdmin2')) {
+            $combo = $sync[$comboName]
+            if (-not $combo -or -not $combo.SelectedItem) { continue }
+            if ($comboName -eq 'WPFAAGUIDSourceAdmin2' -and -not [bool]$sync.State.AAGUIDSource2Visible) { continue }
+            $upn = [string](Get-EbgObjectPropertyValue -InputObject $combo.SelectedItem -Name 'userPrincipalName')
+            if (-not [string]::IsNullOrWhiteSpace($upn)) {
+                $sources.Add($upn)
+            }
+        }
+
+        $unique = @($sources | Select-Object -Unique)
+        if ($unique.Count -lt 1) {
+            throw 'Vælg mindst én Global Administrator-konto som AAGUID-kilde. Kør Discovery eller Hent Global Admins først.'
+        }
+
+        foreach ($upn in $unique) {
+            if ($upn -notmatch '^[^@\s]+@[^@\s]+\.[^@\s]+$') {
+                throw "AAGUID kildebrugeren skal være et fuldt UPN. Værdi: $upn"
+            }
+        }
+
+        return [object[]]$unique
+    }))
+}
+
 function Get-EbgAAGUIDSourceUserPrincipalName {
     [CmdletBinding()]
     param([Parameter(Mandatory)][hashtable] $Config)
 
-    return $sync.Form.Dispatcher.Invoke([func[string]]{
-        $custom = if ($sync.WPFAAGUIDCustomUser) { $sync.WPFAAGUIDCustomUser.Text.Trim() } else { '' }
-        if ([string]::IsNullOrWhiteSpace($custom)) {
-            throw 'Angiv UPN på den bruger der har den registrerede FIDO2/passkey, som AAGUID skal hentes fra.'
-        }
-        if ($custom -notmatch '^[^@\s]+@[^@\s]+\.[^@\s]+$') {
-            throw "AAGUID kildebrugeren skal angives som fuldt UPN, fx user@tenant.onmicrosoft.com. Værdi: $custom"
-        }
-        $custom
-    })
+    return @(Get-EbgAAGUIDSourceUserPrincipalNames -Config $Config | Select-Object -First 1)[0]
 }
 
 function Invoke-EbgGraphRequest {
@@ -2823,6 +2845,12 @@ function Update-EbgUIState {
     if ($sync.WPFRefreshRegularSSPRAdmins) {
         $sync.WPFRefreshRegularSSPRAdmins.IsEnabled = (-not [bool]$sync.UI.ProcessRunning) -and ($hasGraph -or [bool]$sync.App.Mock)
     }
+    if ($sync.WPFRefreshAAGUIDAdmins) {
+        $sync.WPFRefreshAAGUIDAdmins.IsEnabled = (-not [bool]$sync.UI.ProcessRunning) -and ($hasGraph -or [bool]$sync.App.Mock)
+    }
+    if ($sync.WPFAddAAGUIDSourceAdmin) {
+        $sync.WPFAddAAGUIDSourceAdmin.IsEnabled = (-not [bool]$sync.UI.ProcessRunning) -and (-not [bool]$sync.State.AAGUIDSource2Visible)
+    }
     if ($sync.WPFBuildPlan) {
         $sync.WPFBuildPlan.IsEnabled = (-not [bool]$sync.UI.ProcessRunning) -and (-not $resumePhase2) -and $hasDiscovery -and $hasVisitedConfig
     }
@@ -2858,8 +2886,65 @@ function Update-EbgAAGUIDSourceOptions {
     [CmdletBinding()]
     param()
 
-    if ($sync.WPFAAGUIDCustomUser -and [string]::IsNullOrWhiteSpace($sync.WPFAAGUIDCustomUser.Text) -and $sync.State.GraphAccount) {
-        $sync.WPFAAGUIDCustomUser.Text = [string]$sync.State.GraphAccount
+    if (-not $sync.Form) { return }
+    if (-not $sync.Form.Dispatcher.CheckAccess()) {
+        [void]$sync.Form.Dispatcher.Invoke([System.Action]{ Update-EbgAAGUIDSourceOptions | Out-Null })
+        return
+    }
+
+    $admins = @($sync.State.ActiveGlobalAdministrators)
+    if ($admins.Count -lt 1 -and $sync.State.Discovery) {
+        $admins = @(Get-EbgObjectPropertyValue -InputObject $sync.State.Discovery -Name 'ActiveGlobalAdministrators')
+    }
+
+    if ($sync.WPFAAGUIDSourceAdmin2Row) {
+        $sync.WPFAAGUIDSourceAdmin2Row.Visibility = if ([bool]$sync.State.AAGUIDSource2Visible) { 'Visible' } else { 'Collapsed' }
+    }
+
+    $combo1 = $sync.WPFAAGUIDSourceAdmin1
+    $combo2 = $sync.WPFAAGUIDSourceAdmin2
+    $previousId1 = if ($combo1 -and $combo1.SelectedItem) { [string](Get-EbgObjectPropertyValue -InputObject $combo1.SelectedItem -Name 'id') } else { '' }
+    $previousId2 = if ($combo2 -and $combo2.SelectedItem) { [string](Get-EbgObjectPropertyValue -InputObject $combo2.SelectedItem -Name 'id') } else { '' }
+
+    $sync.UI.SuppressAAGUIDSourceChange = $true
+    try {
+        if ($combo1) {
+            $options1 = @($admins | Where-Object { [string](Get-EbgObjectPropertyValue -InputObject $_ -Name 'id') -ne $previousId2 })
+            $combo1.ItemsSource = $null
+            $combo1.ItemsSource = $options1
+            $combo1.DisplayMemberPath = 'label'
+            if (-not [string]::IsNullOrWhiteSpace($previousId1)) {
+                $match1 = @($options1 | Where-Object { [string](Get-EbgObjectPropertyValue -InputObject $_ -Name 'id') -eq $previousId1 } | Select-Object -First 1)
+                if ($match1.Count -gt 0) { $combo1.SelectedItem = $match1[0] }
+            }
+        }
+
+        if ($combo2) {
+            $options2 = @($admins | Where-Object { [string](Get-EbgObjectPropertyValue -InputObject $_ -Name 'id') -ne $previousId1 })
+            $combo2.ItemsSource = $null
+            $combo2.ItemsSource = $options2
+            $combo2.DisplayMemberPath = 'label'
+            if (-not [string]::IsNullOrWhiteSpace($previousId2)) {
+                $match2 = @($options2 | Where-Object { [string](Get-EbgObjectPropertyValue -InputObject $_ -Name 'id') -eq $previousId2 } | Select-Object -First 1)
+                if ($match2.Count -gt 0) { $combo2.SelectedItem = $match2[0] }
+            }
+        }
+    }
+    finally {
+        $sync.UI.SuppressAAGUIDSourceChange = $false
+    }
+
+    if ($sync.WPFAAGUIDSourceAdminHint) {
+        $selectedCount = @(
+            if ($combo1 -and $combo1.SelectedItem) { $combo1.SelectedItem }
+            if ([bool]$sync.State.AAGUIDSource2Visible -and $combo2 -and $combo2.SelectedItem) { $combo2.SelectedItem }
+        ).Count
+        $sync.WPFAAGUIDSourceAdminHint.Text = if ($admins.Count -gt 0) {
+            "$($admins.Count) aktive direkte Global Administrator-konti hentet. $selectedCount AAGUID-kildekonto/konti valgt."
+        }
+        else {
+            'Ingen Global Administrator-konti er hentet endnu. Kør Discovery eller brug Hent Global Admins.'
+        }
     }
 }
 
@@ -2954,10 +3039,12 @@ function Initialize-EbgWPFUI {
     if ($sync['WPFCreateBreakGlassCAPolicy']) { $sync['WPFCreateBreakGlassCAPolicy'].IsChecked = [bool]$defaults.createBreakGlassCAPolicy }
     if ($sync['WPFEnableBreakGlassCAPolicy']) { $sync['WPFEnableBreakGlassCAPolicy'].IsChecked = [bool]$defaults.enableBreakGlassCAPolicy }
     $sync.State.StartMode = 'Phase1'
+    $sync.State.AAGUIDSource2Visible = $false
     if ($sync['WPFStartPhase1']) { $sync['WPFStartPhase1'].IsChecked = $true }
     if ($sync['WPFResumePhase2']) { $sync['WPFResumePhase2'].IsChecked = $false }
     if ($sync.WPFLanguageSelector) { $sync.WPFLanguageSelector.SelectedIndex = 0 }
     Update-EbgRegularSSPRAdminOptions
+    Update-EbgAAGUIDSourceOptions
     Set-EbgNeutralAccountNamePair -Random
     Set-EbgLanguage -Language $sync.State.Language
 
@@ -3798,6 +3885,7 @@ function Invoke-EbgDiscovery {
         }
         $sync.State.Discovery = $discovery
         Update-EbgRegularSSPRAdminOptions
+        Update-EbgAAGUIDSourceOptions
         $summary = "Aktive Global Admins: $($activeGlobalAdmins.Count); Target user1: $(if($user1){'findes'}else{'mangler'}); Target user2: $(if($user2){'findes'}else{'mangler'}); Gruppe: $(if($group){'findes'}else{'mangler'}); CA policies: $($policies.Count)"
         $userMissingSeverity = if ($config.CreateUsers) { 'Info' } else { 'Bad' }
         $groupMissingSeverity = if ($config.CreateGroup) { 'Warning' } else { 'Bad' }
@@ -3911,14 +3999,28 @@ function Invoke-EbgFetchAAGUIDs {
         Ensure-EbgGraphContext
         [System.Windows.Forms.Application]::DoEvents()
 
-        $sourceUpn = Get-EbgAAGUIDSourceUserPrincipalName -Config $config
-        Write-EbgLog -Message "Henter registrerede FIDO2/passkey methods fra: $sourceUpn"
-        [System.Windows.Forms.Application]::DoEvents()
+        $sourceUpns = @(Get-EbgAAGUIDSourceUserPrincipalNames -Config $config)
+        $methods = @()
+        foreach ($sourceUpn in $sourceUpns) {
+            Write-EbgStatus -Busy -Message "Henter FIDO2 AAGUIDs fra $sourceUpn..."
+            Write-EbgLog -Message "Henter registrerede FIDO2/passkey methods fra: $sourceUpn"
+            [System.Windows.Forms.Application]::DoEvents()
 
-        $methods = @(Get-EbgFido2MethodsForUser -UserPrincipalName $sourceUpn)
+            $sourceMethods = @(Get-EbgFido2MethodsForUser -UserPrincipalName $sourceUpn)
+            if ($sourceMethods.Count -lt 1) {
+                Write-EbgLog -Level WARN -Message "Ingen FIDO2/passkey methods fundet på $sourceUpn."
+                continue
+            }
+            foreach ($method in $sourceMethods) {
+                $method | Add-Member -MemberType NoteProperty -Name UserPrincipalName -Value $sourceUpn -Force
+                $methods += $method
+            }
+        }
+
         if ($methods.Count -lt 1) {
-            Write-EbgStatus -Message "Ingen FIDO2/passkey methods fundet på $sourceUpn."
-            [System.Windows.MessageBox]::Show("Der blev ikke fundet registrerede FIDO2/passkey methods på $sourceUpn. Log ind på kontoen via https://aka.ms/mfasetup og registrer security keys først.", $sync.App.Name, 'OK', 'Warning') | Out-Null
+            $sourceList = $sourceUpns -join ', '
+            Write-EbgStatus -Message "Ingen FIDO2/passkey methods fundet på valgte kildekonti."
+            [System.Windows.MessageBox]::Show("Der blev ikke fundet registrerede FIDO2/passkey methods på de valgte kildekonti:`n`n$sourceList`n`nLog ind via https://aka.ms/mfasetup og registrer security keys først.", $sync.App.Name, 'OK', 'Warning') | Out-Null
             return
         }
 
@@ -3927,17 +4029,18 @@ function Invoke-EbgFetchAAGUIDs {
         } | Where-Object { $_ -match '^[0-9a-fA-F-]{36}$' } | ForEach-Object { $_.ToLowerInvariant() } | Select-Object -Unique)
 
         foreach ($method in $methods) {
+            $methodUpn = [string](Get-EbgObjectPropertyValue -InputObject $method -Name 'UserPrincipalName')
             $name = [string](Get-EbgObjectPropertyValue -InputObject $method -Name 'displayName')
             $model = [string](Get-EbgObjectPropertyValue -InputObject $method -Name 'model')
             $guid = [string](Get-EbgObjectPropertyValue -InputObject $method -Name 'aaGuid')
             $attestation = [string](Get-EbgObjectPropertyValue -InputObject $method -Name 'attestationLevel')
             $type = [string](Get-EbgObjectPropertyValue -InputObject $method -Name 'passkeyType')
-            Write-EbgLog -Level PASS -Message "FIDO2 method fundet: user=$sourceUpn; name=$name; model=$model; aaGuid=$guid; attestation=$attestation; type=$type"
+            Write-EbgLog -Level PASS -Message "FIDO2 method fundet: user=$methodUpn; name=$name; model=$model; aaGuid=$guid; attestation=$attestation; type=$type"
         }
 
         if ($aaGuids.Count -lt 1) {
             Write-EbgStatus -Message 'FIDO2 methods fundet, men ingen gyldige AAGUIDs kunne læses.'
-            [System.Windows.MessageBox]::Show("FIDO2/passkey methods blev fundet på $sourceUpn, men Microsoft Graph returnerede ingen gyldige AAGUIDs.", $sync.App.Name, 'OK', 'Warning') | Out-Null
+            [System.Windows.MessageBox]::Show("FIDO2/passkey methods blev fundet, men Microsoft Graph returnerede ingen gyldige AAGUIDs.", $sync.App.Name, 'OK', 'Warning') | Out-Null
             return
         }
 
@@ -3945,8 +4048,8 @@ function Invoke-EbgFetchAAGUIDs {
         $merged = @($existing + $aaGuids | Select-Object -Unique)
         $sync.WPFAAGUIDs.Text = ($merged -join [Environment]::NewLine)
         $sync.State.AAGUIDsFetched = $true
-        Write-EbgStatus -Message "AAGUIDs hentet fra $sourceUpn. Tryk nu 'Kør Phase 2' for at oprette auth strength og disabled CA-policy."
-        [System.Windows.MessageBox]::Show("AAGUIDs hentet fra ${sourceUpn}:`n`n$($aaGuids -join [Environment]::NewLine)", $sync.App.Name, 'OK', 'Information') | Out-Null
+        Write-EbgStatus -Message "AAGUIDs hentet fra $($sourceUpns.Count) kildekonto/konti. Tryk nu 'Kør Phase 2' for at oprette auth strength og disabled CA-policy."
+        [System.Windows.MessageBox]::Show("AAGUIDs hentet fra:`n$($sourceUpns -join [Environment]::NewLine)`n`n$($aaGuids -join [Environment]::NewLine)", $sync.App.Name, 'OK', 'Information') | Out-Null
     }
     catch {
         $message = ConvertTo-EbgRedactedError -ErrorRecord $_
@@ -3989,6 +4092,7 @@ function Invoke-EbgLoadGlobalAdministrators {
             $sync.State.Discovery | Add-Member -MemberType NoteProperty -Name ActiveGlobalAdministrators -Value $admins -Force
         }
         Update-EbgRegularSSPRAdminOptions
+        Update-EbgAAGUIDSourceOptions
         Write-EbgStatus -Message "Hentede $($admins.Count) aktive direkte Global Administrator-konti."
     }
     catch {
@@ -4068,6 +4172,12 @@ function Invoke-EbgWPFButton {
         'WPFApplyPhase2' { Invoke-EbgApplyPhase2 }
         'WPFStopPhase2' { Stop-EbgCurrentTask }
         'WPFCycleNeutralNames' { Set-EbgNeutralAccountNamePair }
+        'WPFRefreshAAGUIDAdmins' { Invoke-EbgLoadGlobalAdministrators }
+        'WPFAddAAGUIDSourceAdmin' {
+            $sync.State.AAGUIDSource2Visible = $true
+            Update-EbgAAGUIDSourceOptions | Out-Null
+            Update-EbgUIState | Out-Null
+        }
         'WPFFetchAAGUIDs' { Invoke-EbgFetchAAGUIDs }
         'WPFOpenMfaSetup' { Invoke-EbgOpenUrl -Url 'https://aka.ms/mfasetup' }
         'WPFOpenPreProvisionMfaSetup' { Invoke-EbgOpenUrl -Url 'https://aka.ms/mfasetup' }
@@ -4181,7 +4291,7 @@ function Stop-EbgCurrentTask {
 $sync.configs.appsettings = @'
 {
   "name": "Entra Break Glass Configurator",
-  "version": "2.4.31",
+  "version": "2.4.32",
   "outputRoot": ".\\Output",
   "groupName": "CA-BreakGlass-Exclude",
   "groupDescription": "Security group used to exclude dedicated break-glass accounts from existing Conditional Access policies.",
@@ -4926,10 +5036,19 @@ $inputXML = @'
                                         <Button x:Name="WPFOpenPreProvisionMfaSetup" Grid.Column="1" Content="Åbn MFA setup" Width="160" HorizontalAlignment="Right" VerticalAlignment="Center"/>
                                     </Grid>
                                 </Border>
-                                <TextBlock Grid.Row="2" Grid.Column="0" Text="AAGUID source UPN"/>
-                                <StackPanel Grid.Row="2" Grid.Column="1" Grid.ColumnSpan="3" Orientation="Horizontal">
-                                    <TextBox x:Name="WPFAAGUIDCustomUser" Width="520" Margin="0,2,8,8" ToolTip="Enter the UPN for the pre-provision/source user that already has the FIDO2/passkey registered."/>
-                                    <Button x:Name="WPFFetchAAGUIDs" Content="Fetch FIDO2 AAGUIDs" Width="170" Margin="0,0,0,8"/>
+                                <TextBlock Grid.Row="2" Grid.Column="0" Text="AAGUID source users"/>
+                                <StackPanel Grid.Row="2" Grid.Column="1" Grid.ColumnSpan="3">
+                                    <StackPanel Orientation="Horizontal">
+                                        <Button x:Name="WPFRefreshAAGUIDAdmins" Content="Hent Global Admins" Width="160" Margin="0,0,8,8"/>
+                                        <ComboBox x:Name="WPFAAGUIDSourceAdmin1" Width="360" Margin="0,0,8,8"/>
+                                        <Button x:Name="WPFAddAAGUIDSourceAdmin" Content="+ konto" Width="100" Margin="0,0,8,8"/>
+                                        <Button x:Name="WPFFetchAAGUIDs" Content="Fetch FIDO2 AAGUIDs" Width="170" Margin="0,0,0,8"/>
+                                    </StackPanel>
+                                    <StackPanel x:Name="WPFAAGUIDSourceAdmin2Row" Orientation="Horizontal" Visibility="Collapsed">
+                                        <TextBlock Text="Source user 2" Width="160" VerticalAlignment="Center" Foreground="{StaticResource TextSecondary}"/>
+                                        <ComboBox x:Name="WPFAAGUIDSourceAdmin2" Width="360" Margin="0,0,8,8"/>
+                                    </StackPanel>
+                                    <TextBlock x:Name="WPFAAGUIDSourceAdminHint" Foreground="{StaticResource TextMuted}" TextWrapping="Wrap" Text="Kør Discovery eller hent Global Admins, vælg den konto der allerede har FIDO2/passkey registreret, og hent AAGUID."/>
                                 </StackPanel>
                                 <TextBlock Grid.Row="3" Grid.Column="0" Text="Allowed key AAGUIDs"/>
                                 <StackPanel Grid.Row="3" Grid.Column="1" Grid.ColumnSpan="3">
@@ -5058,6 +5177,15 @@ if ($sync.WPFRegularSSPROnly) {
 foreach ($box in @('WPFRegularSSPRAdmin1','WPFRegularSSPRAdmin2')) {
     if ($sync[$box]) {
         $sync[$box].Add_SelectionChanged({ Update-EbgUIState | Out-Null })
+    }
+}
+foreach ($box in @('WPFAAGUIDSourceAdmin1','WPFAAGUIDSourceAdmin2')) {
+    if ($sync[$box]) {
+        $sync[$box].Add_SelectionChanged({
+            if ([bool]$sync.UI.SuppressAAGUIDSourceChange) { return }
+            Update-EbgAAGUIDSourceOptions | Out-Null
+            Update-EbgUIState | Out-Null
+        })
     }
 }
 if ($sync.WPFStartPhase1) {

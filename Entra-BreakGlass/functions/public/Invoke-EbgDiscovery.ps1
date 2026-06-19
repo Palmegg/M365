@@ -78,6 +78,7 @@ function Invoke-EbgDiscovery {
         }
         $sync.State.Discovery = $discovery
         Update-EbgRegularSSPRAdminOptions
+        Update-EbgAAGUIDSourceOptions
         $summary = "Aktive Global Admins: $($activeGlobalAdmins.Count); Target user1: $(if($user1){'findes'}else{'mangler'}); Target user2: $(if($user2){'findes'}else{'mangler'}); Gruppe: $(if($group){'findes'}else{'mangler'}); CA policies: $($policies.Count)"
         $userMissingSeverity = if ($config.CreateUsers) { 'Info' } else { 'Bad' }
         $groupMissingSeverity = if ($config.CreateGroup) { 'Warning' } else { 'Bad' }

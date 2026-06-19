@@ -281,6 +281,12 @@ function Update-EbgUIState {
     if ($sync.WPFRefreshRegularSSPRAdmins) {
         $sync.WPFRefreshRegularSSPRAdmins.IsEnabled = (-not [bool]$sync.UI.ProcessRunning) -and ($hasGraph -or [bool]$sync.App.Mock)
     }
+    if ($sync.WPFRefreshAAGUIDAdmins) {
+        $sync.WPFRefreshAAGUIDAdmins.IsEnabled = (-not [bool]$sync.UI.ProcessRunning) -and ($hasGraph -or [bool]$sync.App.Mock)
+    }
+    if ($sync.WPFAddAAGUIDSourceAdmin) {
+        $sync.WPFAddAAGUIDSourceAdmin.IsEnabled = (-not [bool]$sync.UI.ProcessRunning) -and (-not [bool]$sync.State.AAGUIDSource2Visible)
+    }
     if ($sync.WPFBuildPlan) {
         $sync.WPFBuildPlan.IsEnabled = (-not [bool]$sync.UI.ProcessRunning) -and (-not $resumePhase2) -and $hasDiscovery -and $hasVisitedConfig
     }
