@@ -12,7 +12,7 @@ function Invoke-EbgRunspace {
     $sync.UI.ProcessRunning = $true
     $sync.UI.StopRequested = $false
     if ($sync.WPFProgressBar) {
-        [void]$sync.WPFProgressBar.Dispatcher.Invoke([System.Action]{
+        [void]$sync.WPFProgressBar.Dispatcher.BeginInvoke([System.Action]{
             $sync.WPFProgressBar.IsIndeterminate = $true
             Update-EbgUIState | Out-Null
         })
@@ -29,7 +29,7 @@ function Invoke-EbgRunspace {
             Write-EbgLog -Level ERROR -Message (ConvertTo-EbgRedactedError -ErrorRecord $_)
             $sync.State.Errors += $friendly
             if ($sync.Form) {
-                [void]$sync.Form.Dispatcher.Invoke([System.Action]{
+                [void]$sync.Form.Dispatcher.BeginInvoke([System.Action]{
                     $sync.WPFStatusText.Text = $friendly
                     [System.Windows.MessageBox]::Show($friendly, $sync.App.Name, 'OK', 'Error') | Out-Null
                 })
@@ -40,7 +40,7 @@ function Invoke-EbgRunspace {
             $sync.UI.CurrentPowerShell = $null
             $sync.UI.CurrentAsync = $null
             if ($sync.Form) {
-                [void]$sync.Form.Dispatcher.Invoke([System.Action]{
+                [void]$sync.Form.Dispatcher.BeginInvoke([System.Action]{
                     $sync.WPFProgressBar.IsIndeterminate = $false
                     Update-EbgUIState | Out-Null
                 })

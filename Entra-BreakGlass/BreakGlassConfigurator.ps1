@@ -1544,7 +1544,7 @@ function Invoke-EbgRunspace {
     $sync.UI.ProcessRunning = $true
     $sync.UI.StopRequested = $false
     if ($sync.WPFProgressBar) {
-        [void]$sync.WPFProgressBar.Dispatcher.Invoke([System.Action]{
+        [void]$sync.WPFProgressBar.Dispatcher.BeginInvoke([System.Action]{
             $sync.WPFProgressBar.IsIndeterminate = $true
             Update-EbgUIState | Out-Null
         })
@@ -1561,7 +1561,7 @@ function Invoke-EbgRunspace {
             Write-EbgLog -Level ERROR -Message (ConvertTo-EbgRedactedError -ErrorRecord $_)
             $sync.State.Errors += $friendly
             if ($sync.Form) {
-                [void]$sync.Form.Dispatcher.Invoke([System.Action]{
+                [void]$sync.Form.Dispatcher.BeginInvoke([System.Action]{
                     $sync.WPFStatusText.Text = $friendly
                     [System.Windows.MessageBox]::Show($friendly, $sync.App.Name, 'OK', 'Error') | Out-Null
                 })
@@ -1572,7 +1572,7 @@ function Invoke-EbgRunspace {
             $sync.UI.CurrentPowerShell = $null
             $sync.UI.CurrentAsync = $null
             if ($sync.Form) {
-                [void]$sync.Form.Dispatcher.Invoke([System.Action]{
+                [void]$sync.Form.Dispatcher.BeginInvoke([System.Action]{
                     $sync.WPFProgressBar.IsIndeterminate = $false
                     Update-EbgUIState | Out-Null
                 })
@@ -2997,10 +2997,11 @@ function Write-EbgLog {
             & $appendLog | Out-Null
         }
         else {
-            [void]$sync.WPFExecutionLog.Dispatcher.Invoke([System.Action]$appendLog)
+            [void]$sync.WPFExecutionLog.Dispatcher.BeginInvoke([System.Action]$appendLog)
         }
     }
 }
+
 function Write-EbgStatus {
     [CmdletBinding()]
     param(
@@ -3020,10 +3021,11 @@ function Write-EbgStatus {
             & $updateStatus | Out-Null
         }
         else {
-            [void]$sync.WPFStatusText.Dispatcher.Invoke([System.Action]$updateStatus)
+            [void]$sync.WPFStatusText.Dispatcher.BeginInvoke([System.Action]$updateStatus)
         }
     }
 }
+
 function Initialize-EbgWPFUI {
     [CmdletBinding()]
     param()
@@ -3628,7 +3630,7 @@ function Invoke-EbgApplyPhase2 {
         $handoff = New-EbgHandoffHtml -Result $result -OutputFolder $output
         $sync.State.HandoffPath = $handoff
 
-        $sync.Form.Dispatcher.Invoke([System.Action]{
+        [void]$sync.Form.Dispatcher.BeginInvoke([System.Action]{
             $sync.WPFAAGUIDs.Text = ($mergedAAGUIDs -join [Environment]::NewLine)
             $sync.WPFOutputFolder.Text = $sync.State.OutputFolder
             $sync.WPFHandoffPath.Text = $sync.State.HandoffPath
@@ -4342,7 +4344,7 @@ function Stop-EbgCurrentTask {
 $sync.configs.appsettings = @'
 {
   "name": "Entra Break Glass Configurator",
-  "version": "2.4.40",
+  "version": "2.4.41",
   "outputRoot": ".\\Output",
   "groupName": "CA-BreakGlass-Exclude",
   "groupDescription": "Security group used to exclude dedicated break-glass accounts from existing Conditional Access policies.",

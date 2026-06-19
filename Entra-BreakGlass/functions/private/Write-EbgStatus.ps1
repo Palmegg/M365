@@ -17,7 +17,7 @@ function Write-EbgStatus {
             & $updateStatus | Out-Null
         }
         else {
-            [void]$sync.WPFStatusText.Dispatcher.Invoke([System.Action]$updateStatus)
+            [void]$sync.WPFStatusText.Dispatcher.BeginInvoke([System.Action]$updateStatus)
         }
     }
 }

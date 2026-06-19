@@ -26,7 +26,7 @@ function Write-EbgLog {
             & $appendLog | Out-Null
         }
         else {
-            [void]$sync.WPFExecutionLog.Dispatcher.Invoke([System.Action]$appendLog)
+            [void]$sync.WPFExecutionLog.Dispatcher.BeginInvoke([System.Action]$appendLog)
         }
     }
 }

@@ -543,7 +543,7 @@ function Invoke-EbgApplyPhase2 {
         $handoff = New-EbgHandoffHtml -Result $result -OutputFolder $output
         $sync.State.HandoffPath = $handoff
 
-        $sync.Form.Dispatcher.Invoke([System.Action]{
+        [void]$sync.Form.Dispatcher.BeginInvoke([System.Action]{
             $sync.WPFAAGUIDs.Text = ($mergedAAGUIDs -join [Environment]::NewLine)
             $sync.WPFOutputFolder.Text = $sync.State.OutputFolder
             $sync.WPFHandoffPath.Text = $sync.State.HandoffPath
