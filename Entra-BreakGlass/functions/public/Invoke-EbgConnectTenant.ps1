@@ -59,7 +59,7 @@ function Invoke-EbgConnectTenant {
                 $sync.Form.Topmost = $false
                 $sync.Form.WindowState = 'Minimized'
             }
-        } -Wait
+        }
 
         Write-EbgStatus -Busy -Message 'Åbner frisk Microsoft Graph-login. Vælg tenant-konto i Microsoft loginvinduet...'
         Write-Host 'Når login er gennemført, fokuserer BreakGlassConfigurator automatisk igen.' -ForegroundColor Green
@@ -74,6 +74,7 @@ function Invoke-EbgConnectTenant {
         $sync.State.GraphConnected = $true
         $sync.State.GraphAccount = [string]$context.Account
         $sync.State.GraphScopes = @($context.Scopes)
+        Write-EbgLog -Message 'Graph login OK. Henter tenant info...'
         Get-EbgTenantInfo | Out-Null
         Write-EbgStatus -Message 'Microsoft Graph er forbundet.'
         Write-Host 'Login OK. BreakGlassConfigurator fokuseres nu automatisk.' -ForegroundColor Green
@@ -84,6 +85,6 @@ function Invoke-EbgConnectTenant {
                 Invoke-EbgWPFButton -Name 'WPFStepPhase2'
             }
             Set-EbgMainWindowForeground
-        } -Wait
+        }
     }
 }

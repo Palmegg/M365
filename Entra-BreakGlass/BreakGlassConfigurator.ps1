@@ -109,6 +109,7 @@ $sync.UI = [Hashtable]::Synchronized(@{
     StopRequested     = $false
     AllowForcedClose   = $false
     CloseInProgress    = $false
+    ProcessStarted    = $null
 })
 
 $sync.Paths = @{
@@ -1309,14 +1310,29 @@ function Get-EbgGraphCollection {
 
     $items = @()
     $next = $Uri
+    $page = 0
+    $visited = @{}
     while ($next) {
+        $page++
+        if ($page -gt 50) {
+            throw "Graph collection pagination stopped after 50 pages for URI: $Uri"
+        }
+        if ($visited.ContainsKey($next)) {
+            throw "Graph collection pagination loop detected for URI: $next"
+        }
+        $visited[$next] = $true
+
         $response = Invoke-EbgGraphRequest -Method GET -Uri $next
         $value = Get-EbgObjectPropertyValue -InputObject $response -Name 'value'
         if ($value) { $items += @($value) }
         $next = Get-EbgObjectPropertyValue -InputObject $response -Name '@odata.nextLink'
+        if ([string]::IsNullOrWhiteSpace([string]$next)) {
+            $next = $null
+        }
     }
     return $items
 }
+
 function Get-EbgGroupByDisplayName {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string] $DisplayName)
@@ -1359,12 +1375,20 @@ function Get-EbgOnMicrosoftDomain {
     param([Parameter(Mandatory)] $Organization)
 
     $domains = @(Get-EbgObjectPropertyValue -InputObject $Organization -Name 'verifiedDomains')
-    $default = $domains | Where-Object { $_.isDefault -eq $true -and $_.name -like '*.onmicrosoft.com' } | Select-Object -First 1
-    if ($default) { return [string] $default.name }
-    $any = $domains | Where-Object { $_.name -like '*.onmicrosoft.com' } | Select-Object -First 1
-    if ($any) { return [string] $any.name }
+    $default = $domains | Where-Object {
+        [bool](Get-EbgObjectPropertyValue -InputObject $_ -Name 'isDefault') -and
+        [string](Get-EbgObjectPropertyValue -InputObject $_ -Name 'name') -like '*.onmicrosoft.com'
+    } | Select-Object -First 1
+    if ($default) { return [string](Get-EbgObjectPropertyValue -InputObject $default -Name 'name') }
+
+    $any = $domains | Where-Object {
+        [string](Get-EbgObjectPropertyValue -InputObject $_ -Name 'name') -like '*.onmicrosoft.com'
+    } | Select-Object -First 1
+    if ($any) { return [string](Get-EbgObjectPropertyValue -InputObject $any -Name 'name') }
+
     throw 'Kunne ikke finde tenantens .onmicrosoft.com domæne.'
 }
+
 function Get-EbgSelectedRegularSSPRUsers {
     [CmdletBinding()]
     param([Parameter(Mandatory)][hashtable] $Config)
@@ -1428,14 +1452,18 @@ function Get-EbgTenantInfo {
         return $info
     }
 
-    $org = Get-EbgGraphCollection -Uri 'https://graph.microsoft.com/v1.0/organization?$select=id,displayName,verifiedDomains' | Select-Object -First 1
+    Write-EbgLog -Message 'Tenant info: henter organization fra Microsoft Graph...'
+    $organizationResponse = Invoke-EbgGraphRequest -Method GET -Uri 'https://graph.microsoft.com/v1.0/organization?$select=id,displayName,verifiedDomains'
+    $org = @(Get-EbgObjectPropertyValue -InputObject $organizationResponse -Name 'value') | Select-Object -First 1
     if (-not $org) { throw 'Kunne ikke læse tenant information fra Microsoft Graph.' }
+    Write-EbgLog -Message 'Tenant info: organization response modtaget, parser verified domains...'
     $info = [pscustomobject]@{
         TenantId          = [string](Get-EbgObjectPropertyValue -InputObject $org -Name 'id')
         TenantDisplayName = [string](Get-EbgObjectPropertyValue -InputObject $org -Name 'displayName')
         OnMicrosoftDomain = Get-EbgOnMicrosoftDomain -Organization $org
         VerifiedDomains   = @((Get-EbgObjectPropertyValue -InputObject $org -Name 'verifiedDomains') | ForEach-Object { [string](Get-EbgObjectPropertyValue -InputObject $_ -Name 'name') } | Where-Object { -not [string]::IsNullOrWhiteSpace($_) })
     }
+    Write-EbgLog -Message "Tenant info: $($info.TenantDisplayName) / $($info.TenantId) / $($info.OnMicrosoftDomain)"
     $sync.State.TenantId = $info.TenantId
     $sync.State.TenantDisplayName = $info.TenantDisplayName
     $sync.State.OnMicrosoftDomain = $info.OnMicrosoftDomain
@@ -1587,6 +1615,7 @@ function Invoke-EbgRunspace {
     }
     $sync.UI.ProcessRunning = $true
     $sync.UI.StopRequested = $false
+    $sync.UI.ProcessStarted = Get-Date
     Invoke-EbgUIThread -ScriptBlock {
         if ($sync.WPFProgressBar) { $sync.WPFProgressBar.IsIndeterminate = $true }
         Update-EbgUIState | Out-Null
@@ -1625,6 +1654,24 @@ function Invoke-EbgRunspace {
     $async = $ps.BeginInvoke()
     $sync.UI.CurrentPowerShell = $ps
     $sync.UI.CurrentAsync = $async
+    $watchPowerShell = $ps
+    $watchAsync = $async
+    [System.Threading.ThreadPool]::QueueUserWorkItem([System.Threading.WaitCallback]{
+        param($state)
+
+        Start-Sleep -Seconds 60
+        try {
+            if ($state.Async -and -not $state.Async.IsCompleted -and $sync.UI.ProcessRunning) {
+                $started = $sync.UI.ProcessStarted
+                $elapsed = if ($started) { [int]((Get-Date) - [datetime]$started).TotalSeconds } else { 60 }
+                Write-EbgLog -Level WARN -Message "Baggrundsopgaven kører stadig efter $elapsed sekunder. Hvis UI ikke går videre, brug Stop/Luk og prøv igen."
+                Write-EbgStatus -Busy -Message "Baggrundsopgaven kører stadig efter $elapsed sekunder..."
+            }
+        }
+        catch {
+            # Watchdog must never affect the worker operation.
+        }
+    }, [pscustomobject]@{ PowerShell = $watchPowerShell; Async = $watchAsync }) | Out-Null
     [void]$async
 }
 
@@ -3935,7 +3982,7 @@ function Invoke-EbgConnectTenant {
                 $sync.Form.Topmost = $false
                 $sync.Form.WindowState = 'Minimized'
             }
-        } -Wait
+        }
 
         Write-EbgStatus -Busy -Message 'Åbner frisk Microsoft Graph-login. Vælg tenant-konto i Microsoft loginvinduet...'
         Write-Host 'Når login er gennemført, fokuserer BreakGlassConfigurator automatisk igen.' -ForegroundColor Green
@@ -3950,6 +3997,7 @@ function Invoke-EbgConnectTenant {
         $sync.State.GraphConnected = $true
         $sync.State.GraphAccount = [string]$context.Account
         $sync.State.GraphScopes = @($context.Scopes)
+        Write-EbgLog -Message 'Graph login OK. Henter tenant info...'
         Get-EbgTenantInfo | Out-Null
         Write-EbgStatus -Message 'Microsoft Graph er forbundet.'
         Write-Host 'Login OK. BreakGlassConfigurator fokuseres nu automatisk.' -ForegroundColor Green
@@ -3960,7 +4008,7 @@ function Invoke-EbgConnectTenant {
                 Invoke-EbgWPFButton -Name 'WPFStepPhase2'
             }
             Set-EbgMainWindowForeground
-        } -Wait
+        }
     }
 }
 
@@ -4461,7 +4509,7 @@ function Stop-EbgCurrentTask {
 $sync.configs.appsettings = @'
 {
   "name": "Entra Break Glass Configurator",
-  "version": "2.4.47",
+  "version": "2.4.48",
   "outputRoot": ".\\Output",
   "groupName": "CA-BreakGlass-Exclude",
   "groupDescription": "Security group used to exclude dedicated break-glass accounts from existing Conditional Access policies.",

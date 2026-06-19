@@ -11,6 +11,7 @@ function Invoke-EbgRunspace {
     }
     $sync.UI.ProcessRunning = $true
     $sync.UI.StopRequested = $false
+    $sync.UI.ProcessStarted = Get-Date
     Invoke-EbgUIThread -ScriptBlock {
         if ($sync.WPFProgressBar) { $sync.WPFProgressBar.IsIndeterminate = $true }
         Update-EbgUIState | Out-Null
@@ -49,5 +50,23 @@ function Invoke-EbgRunspace {
     $async = $ps.BeginInvoke()
     $sync.UI.CurrentPowerShell = $ps
     $sync.UI.CurrentAsync = $async
+    $watchPowerShell = $ps
+    $watchAsync = $async
+    [System.Threading.ThreadPool]::QueueUserWorkItem([System.Threading.WaitCallback]{
+        param($state)
+
+        Start-Sleep -Seconds 60
+        try {
+            if ($state.Async -and -not $state.Async.IsCompleted -and $sync.UI.ProcessRunning) {
+                $started = $sync.UI.ProcessStarted
+                $elapsed = if ($started) { [int]((Get-Date) - [datetime]$started).TotalSeconds } else { 60 }
+                Write-EbgLog -Level WARN -Message "Baggrundsopgaven kører stadig efter $elapsed sekunder. Hvis UI ikke går videre, brug Stop/Luk og prøv igen."
+                Write-EbgStatus -Busy -Message "Baggrundsopgaven kører stadig efter $elapsed sekunder..."
+            }
+        }
+        catch {
+            # Watchdog must never affect the worker operation.
+        }
+    }, [pscustomobject]@{ PowerShell = $watchPowerShell; Async = $watchAsync }) | Out-Null
     [void]$async
 }

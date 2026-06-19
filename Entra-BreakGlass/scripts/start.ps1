@@ -105,6 +105,7 @@ $sync.UI = [Hashtable]::Synchronized(@{
     StopRequested     = $false
     AllowForcedClose   = $false
     CloseInProgress    = $false
+    ProcessStarted    = $null
 })
 
 $sync.Paths = @{
