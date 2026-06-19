@@ -4291,7 +4291,7 @@ function Stop-EbgCurrentTask {
 $sync.configs.appsettings = @'
 {
   "name": "Entra Break Glass Configurator",
-  "version": "2.4.32",
+  "version": "2.4.33",
   "outputRoot": ".\\Output",
   "groupName": "CA-BreakGlass-Exclude",
   "groupDescription": "Security group used to exclude dedicated break-glass accounts from existing Conditional Access policies.",
@@ -4373,8 +4373,7 @@ $inputXML = @'
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Entra Break Glass Configurator"
-        Width="1600" Height="980" MinWidth="1366" MinHeight="860"
-        WindowState="Maximized"
+        Width="1500" Height="920" MinWidth="1280" MinHeight="820"
         WindowStartupLocation="CenterScreen"
         Background="#0B0D0F">
     <Window.Resources>
