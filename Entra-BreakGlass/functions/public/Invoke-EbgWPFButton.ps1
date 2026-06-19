@@ -21,6 +21,7 @@ function Invoke-EbgWPFButton {
         'WPFBuildPlan' { Invoke-EbgBuildPlan }
         'WPFApplyConfiguration' { Invoke-EbgApplyConfiguration }
         'WPFApplyPhase2' { Invoke-EbgApplyPhase2 }
+        'WPFStopPhase2' { Stop-EbgCurrentTask }
         'WPFCycleNeutralNames' { Set-EbgNeutralAccountNamePair }
         'WPFFetchAAGUIDs' { Invoke-EbgFetchAAGUIDs }
         'WPFOpenMfaSetup' { Invoke-EbgOpenUrl -Url 'https://aka.ms/mfasetup' }

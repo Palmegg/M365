@@ -290,6 +290,10 @@ function Update-EbgUIState {
     if ($sync.WPFApplyPhase2) {
         $sync.WPFApplyPhase2.IsEnabled = (-not [bool]$sync.UI.ProcessRunning) -and $canPhase2
     }
+    if ($sync.WPFStopPhase2) {
+        $sync.WPFStopPhase2.Visibility = if ([bool]$sync.UI.ProcessRunning -and [string]$sync.UI.CurrentStep -eq 'Phase2') { 'Visible' } else { 'Collapsed' }
+        $sync.WPFStopPhase2.IsEnabled = [bool]$sync.UI.ProcessRunning -and [string]$sync.UI.CurrentStep -eq 'Phase2'
+    }
     if ($sync.WPFFetchAAGUIDs) {
         $sync.WPFFetchAAGUIDs.IsEnabled = (-not [bool]$sync.UI.ProcessRunning) -and $hasGraph
     }

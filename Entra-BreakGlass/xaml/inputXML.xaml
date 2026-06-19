@@ -677,7 +677,10 @@
                                     <TextBox x:Name="WPFAAGUIDs" AcceptsReturn="True" TextWrapping="NoWrap" Height="72" FontFamily="Consolas" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"/>
                                 </StackPanel>
                                 <TextBlock x:Name="WPFPhase2ActionHint" Grid.Row="4" Grid.Column="0" Grid.ColumnSpan="3" Foreground="#FBBF24" Text="Hent AAGUID fra en konto med registreret FIDO2/passkey, og tryk derefter 'Kør Phase 2'." TextWrapping="Wrap" Margin="0,12,12,0"/>
-                                <Button x:Name="WPFApplyPhase2" Grid.Row="4" Grid.Column="3" Content="Kør Phase 2" Width="160" HorizontalAlignment="Right" Margin="0,8,0,0"/>
+                                <StackPanel Grid.Row="4" Grid.Column="3" Orientation="Horizontal" HorizontalAlignment="Right" Margin="0,8,0,0">
+                                    <Button x:Name="WPFApplyPhase2" Content="Kør Phase 2" Width="130" Margin="0,0,8,0"/>
+                                    <Button x:Name="WPFStopPhase2" Content="Stop" Width="80" IsEnabled="False" Visibility="Collapsed"/>
+                                </StackPanel>
                             </Grid>
                             </Border>
                             <TextBox x:Name="WPFPhase2Log" IsReadOnly="True" AcceptsReturn="True" Height="92" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" FontFamily="Consolas"/>

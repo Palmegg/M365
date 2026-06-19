@@ -436,8 +436,16 @@ function Invoke-EbgApplyPhase2 {
 
     Invoke-EbgRunspace -ArgumentList @($config, $deleteTap) -ScriptBlock {
         param($config, $deleteTap)
-        Write-EbgStatus -Busy -Message 'Phase 2: refresher FIDO2 og opretter disabled CA-policy...'
+        Write-EbgStatus -Busy -Message 'Phase 2: starter og validerer Graph session...'
+        Write-EbgLog -Message 'Phase 2: starter. Hvis den stopper længe på et trin, brug Stop-knappen og prøv igen.'
+        Ensure-EbgGraphContext
+
+        Write-EbgStatus -Busy -Message 'Phase 2: henter tenant information...'
+        Write-EbgLog -Message 'Phase 2: henter tenant information...'
         $tenant = Get-EbgTenantInfo
+        Write-EbgLog -Message "Phase 2: tenant fundet: $($tenant.TenantDisplayName) / $($tenant.TenantId)"
+
+        Write-EbgStatus -Busy -Message 'Phase 2: klargør outputmappe...'
         $output = if ($sync.State.OutputFolder) { $sync.State.OutputFolder } else { New-EbgOutputFolder -TenantId $tenant.TenantId }
         $sync.State.OutputFolder = $output
         New-Item -ItemType Directory -Force -Path $output | Out-Null
@@ -445,6 +453,7 @@ function Invoke-EbgApplyPhase2 {
         $upn1 = ConvertTo-BreakGlassUpn -Prefix $config.UserPrefix1 -OnMicrosoftDomain $tenant.OnMicrosoftDomain
         $upn2 = ConvertTo-BreakGlassUpn -Prefix $config.UserPrefix2 -OnMicrosoftDomain $tenant.OnMicrosoftDomain
 
+        Write-EbgStatus -Busy -Message "Phase 2 step 1/6: refresher $upn1 og $upn2..."
         Write-EbgLog -Message 'Phase 2 step 1/6: Refresher de to break-glass konti...'
         $users = @(
             Get-EbgUserByUpn -UserPrincipalName $upn1
@@ -452,11 +461,14 @@ function Invoke-EbgApplyPhase2 {
         ) | Where-Object { $_ }
         if ($users.Count -ne 2) { throw 'Phase 2 kræver at begge break-glass konti findes i tenant.' }
 
+        Write-EbgStatus -Busy -Message 'Phase 2 step 2/6: henter FIDO2/passkey methods...'
         Write-EbgLog -Message 'Phase 2 step 2/6: Henter FIDO2 methods fra break-glass konti og bruger eventuelle pre-provision AAGUIDs fra feltet...'
         $fidoMethods = @()
         foreach ($user in $users) {
             $upn = [string](Get-EbgObjectPropertyValue -InputObject $user -Name 'userPrincipalName')
             try {
+                Write-EbgStatus -Busy -Message "Phase 2 step 2/6: henter FIDO2 methods for $upn..."
+                Write-EbgLog -Message "Henter FIDO2/passkey methods for $upn..."
                 $methods = @(Get-EbgFido2MethodsForUser -UserPrincipalName $upn)
             }
             catch {
@@ -475,6 +487,7 @@ function Invoke-EbgApplyPhase2 {
         if ($mergedAAGUIDs.Count -lt 1) { throw 'Der er ingen AAGUIDs klar. Hent AAGUID fra en pre-provision/kildebruger med registreret FIDO2/passkey, eller registrer FIDO2 keys på break-glass kontiene først.' }
         foreach ($guid in $mergedAAGUIDs) { Write-EbgLog -Level PASS -Message "AAGUID klar til authentication strength: $guid" }
 
+        Write-EbgStatus -Busy -Message 'Phase 2 step 3/6: håndterer TAP cleanup...'
         Write-EbgLog -Message 'Phase 2 step 3/6: Håndterer TAP cleanup...'
         $tapCleanup = if ($deleteTap) {
             Remove-EbgTemporaryAccessPassMethods -Users $users -Apply $true
@@ -484,14 +497,17 @@ function Invoke-EbgApplyPhase2 {
             @([pscustomobject]@{ Status='Skipped'; Detail='Brugeren valgte ikke at slette TAP.' })
         }
 
+        Write-EbgStatus -Busy -Message 'Phase 2 step 4/6: opretter/opdaterer authentication strength...'
         Write-EbgLog -Message 'Phase 2 step 4/6: Opretter/opdaterer BreakGlass-FIDO2 authentication strength...'
         $authenticationStrengthResult = Ensure-EbgAuthenticationStrength -DisplayName $config.AuthenticationStrengthName -Description $config.AuthenticationStrengthDescription -AllowedAAGUIDs $mergedAAGUIDs -Apply $true
         $strengthId = [string](Get-EbgObjectPropertyValue -InputObject $authenticationStrengthResult -Name 'id')
 
+        Write-EbgStatus -Busy -Message 'Phase 2 step 5/6: opretter disabled CA-policy...'
         Write-EbgLog -Message 'Phase 2 step 5/6: Opretter dedikeret CA-policy som disabled og assigner de to konti direkte...'
         $userIds = @($users | ForEach-Object { [string](Get-EbgObjectPropertyValue -InputObject $_ -Name 'id') })
         $breakGlassCAPolicyResult = Ensure-EbgBreakGlassCAPolicy -DisplayName $config.BreakGlassCAPolicyName -UserIds $userIds -AuthenticationStrengthId $strengthId -Enabled $false -Apply $true
 
+        Write-EbgStatus -Busy -Message 'Phase 2 step 6/6: gemmer resultat og opdaterer handoff...'
         Write-EbgLog -Message 'Phase 2 step 6/6: Gemmer Phase 2-resultat og opdaterer handoff...'
         $base = if ($sync.State.Phase1Result) { $sync.State.Phase1Result } elseif ($sync.State.Result) { $sync.State.Result } else { [pscustomobject]@{} }
         $result = $base | Select-Object *

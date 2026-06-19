@@ -12,7 +12,10 @@ function Invoke-EbgRunspace {
     $sync.UI.ProcessRunning = $true
     $sync.UI.StopRequested = $false
     if ($sync.WPFProgressBar) {
-        [void]$sync.WPFProgressBar.Dispatcher.Invoke([System.Action]{ $sync.WPFProgressBar.IsIndeterminate = $true })
+        [void]$sync.WPFProgressBar.Dispatcher.Invoke([System.Action]{
+            $sync.WPFProgressBar.IsIndeterminate = $true
+            Update-EbgUIState | Out-Null
+        })
     }
     $ps = [PowerShell]::Create()
     $ps.RunspacePool = $sync.Runspace
