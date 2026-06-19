@@ -62,6 +62,9 @@ function Set-EbgWPFStep {
         'Handoff' { 'WPFPageHandoff' }
     }
     $sync[$target].Visibility = 'Visible'
+    if ($sync.WPFPhase2LogPanel) {
+        $sync.WPFPhase2LogPanel.Visibility = if ($Step -eq 'Phase2') { 'Visible' } else { 'Collapsed' }
+    }
     Update-EbgUIState
 }
 

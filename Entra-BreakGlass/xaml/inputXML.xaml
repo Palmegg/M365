@@ -704,7 +704,6 @@
                                 </StackPanel>
                             </Grid>
                             </Border>
-                            <TextBox x:Name="WPFPhase2Log" IsReadOnly="True" AcceptsReturn="True" Height="54" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" FontFamily="Consolas"/>
                             </StackPanel>
                     </Grid>
                 </Grid>
@@ -725,31 +724,47 @@
                 </Grid>
             </Grid>
 
-            <Border x:Name="WPFNavigationBar" Grid.Row="2" Background="#1D1A2E" BorderBrush="#3B3657" BorderThickness="1" CornerRadius="8" Padding="22,16" Margin="34,16,34,0">
+            <Border x:Name="WPFNavigationBar" Grid.Row="2" Background="#1D1A2E" BorderBrush="#3B3657" BorderThickness="1" CornerRadius="8" Padding="14,8" Margin="34,10,34,0">
                 <Grid>
                     <Grid.ColumnDefinitions>
-                        <ColumnDefinition Width="270"/>
+                        <ColumnDefinition Width="250"/>
                         <ColumnDefinition Width="*"/>
-                        <ColumnDefinition Width="270"/>
+                        <ColumnDefinition Width="250"/>
                     </Grid.ColumnDefinitions>
-                    <Button x:Name="WPFBackStep" Grid.Column="0" Content="Tilbage" MinWidth="240" HorizontalAlignment="Left"/>
+                    <Button x:Name="WPFBackStep" Grid.Column="0" Content="Tilbage" MinWidth="220" MinHeight="34" Padding="14,6" HorizontalAlignment="Left"/>
                     <StackPanel Grid.Column="1" HorizontalAlignment="Center" VerticalAlignment="Center">
                         <TextBlock x:Name="WPFCurrentPhaseText" HorizontalAlignment="Center" FontWeight="SemiBold" Foreground="{StaticResource TextPrimary}"/>
                         <TextBlock x:Name="WPFCurrentStepText" HorizontalAlignment="Center" Margin="0,3,0,0" FontWeight="SemiBold" Foreground="{StaticResource TextSecondary}"/>
                     </StackPanel>
-                    <Button x:Name="WPFNextStep" Grid.Column="2" Content="Videre" MinWidth="240" HorizontalAlignment="Right"/>
+                    <Button x:Name="WPFNextStep" Grid.Column="2" Content="Videre" MinWidth="220" MinHeight="34" Padding="14,6" HorizontalAlignment="Right"/>
                 </Grid>
             </Border>
         </Grid>
 
-        <Border x:Name="WPFStatusBar" Grid.Row="2" Background="#161423" BorderBrush="#2F2B45" BorderThickness="0,1,0,0" Padding="14,9">
+        <Border x:Name="WPFStatusBar" Grid.Row="2" Background="#161423" BorderBrush="#2F2B45" BorderThickness="0,1,0,0" Padding="14,10">
             <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+                <Border x:Name="WPFPhase2LogPanel" Grid.Row="0" Visibility="Collapsed" Background="#221F33" BorderBrush="{StaticResource BorderSoft}" BorderThickness="1" CornerRadius="8" Padding="10" Margin="0,0,0,8">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="Auto"/>
+                        </Grid.RowDefinitions>
+                        <TextBlock Text="Phase 2 log" FontWeight="SemiBold" Foreground="{StaticResource TextPrimary}" Margin="0,0,0,6"/>
+                        <TextBox x:Name="WPFPhase2Log" Grid.Row="1" IsReadOnly="True" AcceptsReturn="True" Height="110" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" FontFamily="Consolas"/>
+                    </Grid>
+                </Border>
+                <Grid Grid.Row="1">
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="220"/>
                 </Grid.ColumnDefinitions>
                 <TextBlock x:Name="WPFStatusText" Text="Klar" Foreground="{StaticResource TextSecondary}"/>
                 <ProgressBar x:Name="WPFProgressBar" Grid.Column="1" Height="12" IsIndeterminate="False" Foreground="{StaticResource Accent}" Background="#1F2937"/>
+                </Grid>
             </Grid>
         </Border>
     </Grid>
