@@ -461,29 +461,35 @@ function Invoke-EbgApplyPhase2 {
         ) | Where-Object { $_ }
         if ($users.Count -ne 2) { throw 'Phase 2 kræver at begge break-glass konti findes i tenant.' }
 
-        Write-EbgStatus -Busy -Message 'Phase 2 step 2/6: henter FIDO2/passkey methods...'
-        Write-EbgLog -Message 'Phase 2 step 2/6: Henter FIDO2 methods fra break-glass konti og bruger eventuelle pre-provision AAGUIDs fra feltet...'
+        Write-EbgStatus -Busy -Message 'Phase 2 step 2/6: klargør AAGUIDs...'
+        Write-EbgLog -Message 'Phase 2 step 2/6: Klargør AAGUIDs fra pre-provision feltet og eventuelt fra break-glass konti...'
         $fidoMethods = @()
-        foreach ($user in $users) {
-            $upn = [string](Get-EbgObjectPropertyValue -InputObject $user -Name 'userPrincipalName')
-            try {
-                Write-EbgStatus -Busy -Message "Phase 2 step 2/6: henter FIDO2 methods for $upn..."
-                Write-EbgLog -Message "Henter FIDO2/passkey methods for $upn..."
-                $methods = @(Get-EbgFido2MethodsForUser -UserPrincipalName $upn)
-            }
-            catch {
-                Write-EbgLog -Level WARN -Message "Kunne ikke læse FIDO2 methods for $upn. Fortsætter hvis AAGUID allerede er angivet i feltet."
-                $methods = @()
-            }
-            foreach ($method in $methods) {
-                $method | Add-Member -MemberType NoteProperty -Name UserPrincipalName -Value $upn -Force
-                $fidoMethods += $method
+        $configuredAAGUIDs = @($config.AAGUIDs | Where-Object { $_ } | Select-Object -Unique)
+        if ($configuredAAGUIDs.Count -gt 0) {
+            Write-EbgLog -Message "Phase 2 step 2/6: Bruger $($configuredAAGUIDs.Count) AAGUID(s) fra feltet og skipper FIDO2 method refresh på break-glass konti."
+        }
+        else {
+            foreach ($user in $users) {
+                $upn = [string](Get-EbgObjectPropertyValue -InputObject $user -Name 'userPrincipalName')
+                try {
+                    Write-EbgStatus -Busy -Message "Phase 2 step 2/6: henter FIDO2 methods for $upn..."
+                    Write-EbgLog -Message "Henter FIDO2/passkey methods for $upn..."
+                    $methods = @(Get-EbgFido2MethodsForUser -UserPrincipalName $upn)
+                }
+                catch {
+                    Write-EbgLog -Level WARN -Message "Kunne ikke læse FIDO2 methods for $upn. Fortsætter hvis AAGUID allerede er angivet i feltet."
+                    $methods = @()
+                }
+                foreach ($method in $methods) {
+                    $method | Add-Member -MemberType NoteProperty -Name UserPrincipalName -Value $upn -Force
+                    $fidoMethods += $method
+                }
             }
         }
         $extractedAAGUIDs = @($fidoMethods | ForEach-Object {
             [string](Get-EbgObjectPropertyValue -InputObject $_ -Name 'aaGuid')
         } | Where-Object { $_ -match '^[0-9a-fA-F-]{36}$' } | ForEach-Object { $_.ToLowerInvariant() } | Select-Object -Unique)
-        $mergedAAGUIDs = @(@($config.AAGUIDs) + $extractedAAGUIDs | Where-Object { $_ } | Select-Object -Unique)
+        $mergedAAGUIDs = @($configuredAAGUIDs + $extractedAAGUIDs | Where-Object { $_ } | Select-Object -Unique)
         if ($mergedAAGUIDs.Count -lt 1) { throw 'Der er ingen AAGUIDs klar. Hent AAGUID fra en pre-provision/kildebruger med registreret FIDO2/passkey, eller registrer FIDO2 keys på break-glass kontiene først.' }
         foreach ($guid in $mergedAAGUIDs) { Write-EbgLog -Level PASS -Message "AAGUID klar til authentication strength: $guid" }
 

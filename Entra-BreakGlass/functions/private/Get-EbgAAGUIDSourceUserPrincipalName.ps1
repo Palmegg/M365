@@ -4,11 +4,14 @@ function Get-EbgAAGUIDSourceUserPrincipalNames {
 
     return @($sync.Form.Dispatcher.Invoke([func[object[]]]{
         $sources = [System.Collections.Generic.List[string]]::new()
+        $options = @($sync.State.AAGUIDSourceOptions)
         foreach ($comboName in @('WPFAAGUIDSourceAdmin1','WPFAAGUIDSourceAdmin2')) {
             $combo = $sync[$comboName]
             if (-not $combo -or -not $combo.SelectedItem) { continue }
             if ($comboName -eq 'WPFAAGUIDSourceAdmin2' -and -not [bool]$sync.State.AAGUIDSource2Visible) { continue }
-            $upn = [string](Get-EbgObjectPropertyValue -InputObject $combo.SelectedItem -Name 'userPrincipalName')
+            $selectedLabel = [string]$combo.SelectedItem
+            $selectedOption = $options | Where-Object { [string](Get-EbgObjectPropertyValue -InputObject $_ -Name 'Label') -eq $selectedLabel } | Select-Object -First 1
+            $upn = [string](Get-EbgObjectPropertyValue -InputObject $selectedOption -Name 'UserPrincipalName')
             if (-not [string]::IsNullOrWhiteSpace($upn)) {
                 $sources.Add($upn)
             }

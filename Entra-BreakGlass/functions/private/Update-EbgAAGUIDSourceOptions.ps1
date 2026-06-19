@@ -17,32 +17,50 @@ function Update-EbgAAGUIDSourceOptions {
         $sync.WPFAAGUIDSourceAdmin2Row.Visibility = if ([bool]$sync.State.AAGUIDSource2Visible) { 'Visible' } else { 'Collapsed' }
     }
 
+    $sourceOptions = @($admins | ForEach-Object {
+        $id = [string](Get-EbgObjectPropertyValue -InputObject $_ -Name 'id')
+        $displayName = [string](Get-EbgObjectPropertyValue -InputObject $_ -Name 'displayName')
+        $upn = [string](Get-EbgObjectPropertyValue -InputObject $_ -Name 'userPrincipalName')
+        $label = [string](Get-EbgObjectPropertyValue -InputObject $_ -Name 'label')
+        if ([string]::IsNullOrWhiteSpace($label)) { $label = ('{0} <{1}>' -f $displayName, $upn) }
+        [pscustomobject]@{
+            Id = $id
+            UserPrincipalName = $upn
+            Label = $label
+        }
+    } | Where-Object { -not [string]::IsNullOrWhiteSpace($_.Id) -and -not [string]::IsNullOrWhiteSpace($_.UserPrincipalName) })
+    $sync.State.AAGUIDSourceOptions = $sourceOptions
+
     $combo1 = $sync.WPFAAGUIDSourceAdmin1
     $combo2 = $sync.WPFAAGUIDSourceAdmin2
-    $previousId1 = if ($combo1 -and $combo1.SelectedItem) { [string](Get-EbgObjectPropertyValue -InputObject $combo1.SelectedItem -Name 'id') } else { '' }
-    $previousId2 = if ($combo2 -and $combo2.SelectedItem) { [string](Get-EbgObjectPropertyValue -InputObject $combo2.SelectedItem -Name 'id') } else { '' }
+    $previousLabel1 = if ($combo1 -and $combo1.SelectedItem) { [string]$combo1.SelectedItem } else { '' }
+    $previousLabel2 = if ($combo2 -and $combo2.SelectedItem) { [string]$combo2.SelectedItem } else { '' }
+    $previousOption1 = if ($previousLabel1) { $sourceOptions | Where-Object { $_.Label -eq $previousLabel1 } | Select-Object -First 1 } else { $null }
+    $previousOption2 = if ($previousLabel2) { $sourceOptions | Where-Object { $_.Label -eq $previousLabel2 } | Select-Object -First 1 } else { $null }
+    $previousId1 = if ($previousOption1) { [string](Get-EbgObjectPropertyValue -InputObject $previousOption1 -Name 'Id') } else { '' }
+    $previousId2 = if ($previousOption2) { [string](Get-EbgObjectPropertyValue -InputObject $previousOption2 -Name 'Id') } else { '' }
 
     $sync.UI.SuppressAAGUIDSourceChange = $true
     try {
         if ($combo1) {
-            $options1 = @($admins | Where-Object { [string](Get-EbgObjectPropertyValue -InputObject $_ -Name 'id') -ne $previousId2 })
+            $options1 = @($sourceOptions | Where-Object { [string]$_.Id -ne $previousId2 })
+            $labels1 = @($options1 | ForEach-Object { [string]$_.Label })
             $combo1.ItemsSource = $null
-            $combo1.ItemsSource = $options1
-            $combo1.DisplayMemberPath = 'label'
-            if (-not [string]::IsNullOrWhiteSpace($previousId1)) {
-                $match1 = @($options1 | Where-Object { [string](Get-EbgObjectPropertyValue -InputObject $_ -Name 'id') -eq $previousId1 } | Select-Object -First 1)
-                if ($match1.Count -gt 0) { $combo1.SelectedItem = $match1[0] }
+            $combo1.DisplayMemberPath = ''
+            $combo1.ItemsSource = $labels1
+            if (-not [string]::IsNullOrWhiteSpace($previousLabel1) -and $labels1 -contains $previousLabel1) {
+                $combo1.SelectedItem = $previousLabel1
             }
         }
 
         if ($combo2) {
-            $options2 = @($admins | Where-Object { [string](Get-EbgObjectPropertyValue -InputObject $_ -Name 'id') -ne $previousId1 })
+            $options2 = @($sourceOptions | Where-Object { [string]$_.Id -ne $previousId1 })
+            $labels2 = @($options2 | ForEach-Object { [string]$_.Label })
             $combo2.ItemsSource = $null
-            $combo2.ItemsSource = $options2
-            $combo2.DisplayMemberPath = 'label'
-            if (-not [string]::IsNullOrWhiteSpace($previousId2)) {
-                $match2 = @($options2 | Where-Object { [string](Get-EbgObjectPropertyValue -InputObject $_ -Name 'id') -eq $previousId2 } | Select-Object -First 1)
-                if ($match2.Count -gt 0) { $combo2.SelectedItem = $match2[0] }
+            $combo2.DisplayMemberPath = ''
+            $combo2.ItemsSource = $labels2
+            if (-not [string]::IsNullOrWhiteSpace($previousLabel2) -and $labels2 -contains $previousLabel2) {
+                $combo2.SelectedItem = $previousLabel2
             }
         }
     }
@@ -52,8 +70,8 @@ function Update-EbgAAGUIDSourceOptions {
 
     if ($sync.WPFAAGUIDSourceAdminHint) {
         $selectedCount = @(
-            if ($combo1 -and $combo1.SelectedItem) { $combo1.SelectedItem }
-            if ([bool]$sync.State.AAGUIDSource2Visible -and $combo2 -and $combo2.SelectedItem) { $combo2.SelectedItem }
+            if ($combo1 -and -not [string]::IsNullOrWhiteSpace([string]$combo1.SelectedItem)) { $combo1.SelectedItem }
+            if ([bool]$sync.State.AAGUIDSource2Visible -and $combo2 -and -not [string]::IsNullOrWhiteSpace([string]$combo2.SelectedItem)) { $combo2.SelectedItem }
         ).Count
         $sync.WPFAAGUIDSourceAdminHint.Text = if ($admins.Count -gt 0) {
             "$($admins.Count) aktive direkte Global Administrator-konti hentet. $selectedCount AAGUID-kildekonto/konti valgt."

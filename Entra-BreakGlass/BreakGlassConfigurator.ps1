@@ -1456,11 +1456,14 @@ function Get-EbgAAGUIDSourceUserPrincipalNames {
 
     return @($sync.Form.Dispatcher.Invoke([func[object[]]]{
         $sources = [System.Collections.Generic.List[string]]::new()
+        $options = @($sync.State.AAGUIDSourceOptions)
         foreach ($comboName in @('WPFAAGUIDSourceAdmin1','WPFAAGUIDSourceAdmin2')) {
             $combo = $sync[$comboName]
             if (-not $combo -or -not $combo.SelectedItem) { continue }
             if ($comboName -eq 'WPFAAGUIDSourceAdmin2' -and -not [bool]$sync.State.AAGUIDSource2Visible) { continue }
-            $upn = [string](Get-EbgObjectPropertyValue -InputObject $combo.SelectedItem -Name 'userPrincipalName')
+            $selectedLabel = [string]$combo.SelectedItem
+            $selectedOption = $options | Where-Object { [string](Get-EbgObjectPropertyValue -InputObject $_ -Name 'Label') -eq $selectedLabel } | Select-Object -First 1
+            $upn = [string](Get-EbgObjectPropertyValue -InputObject $selectedOption -Name 'UserPrincipalName')
             if (-not [string]::IsNullOrWhiteSpace($upn)) {
                 $sources.Add($upn)
             }
@@ -2901,32 +2904,50 @@ function Update-EbgAAGUIDSourceOptions {
         $sync.WPFAAGUIDSourceAdmin2Row.Visibility = if ([bool]$sync.State.AAGUIDSource2Visible) { 'Visible' } else { 'Collapsed' }
     }
 
+    $sourceOptions = @($admins | ForEach-Object {
+        $id = [string](Get-EbgObjectPropertyValue -InputObject $_ -Name 'id')
+        $displayName = [string](Get-EbgObjectPropertyValue -InputObject $_ -Name 'displayName')
+        $upn = [string](Get-EbgObjectPropertyValue -InputObject $_ -Name 'userPrincipalName')
+        $label = [string](Get-EbgObjectPropertyValue -InputObject $_ -Name 'label')
+        if ([string]::IsNullOrWhiteSpace($label)) { $label = ('{0} <{1}>' -f $displayName, $upn) }
+        [pscustomobject]@{
+            Id = $id
+            UserPrincipalName = $upn
+            Label = $label
+        }
+    } | Where-Object { -not [string]::IsNullOrWhiteSpace($_.Id) -and -not [string]::IsNullOrWhiteSpace($_.UserPrincipalName) })
+    $sync.State.AAGUIDSourceOptions = $sourceOptions
+
     $combo1 = $sync.WPFAAGUIDSourceAdmin1
     $combo2 = $sync.WPFAAGUIDSourceAdmin2
-    $previousId1 = if ($combo1 -and $combo1.SelectedItem) { [string](Get-EbgObjectPropertyValue -InputObject $combo1.SelectedItem -Name 'id') } else { '' }
-    $previousId2 = if ($combo2 -and $combo2.SelectedItem) { [string](Get-EbgObjectPropertyValue -InputObject $combo2.SelectedItem -Name 'id') } else { '' }
+    $previousLabel1 = if ($combo1 -and $combo1.SelectedItem) { [string]$combo1.SelectedItem } else { '' }
+    $previousLabel2 = if ($combo2 -and $combo2.SelectedItem) { [string]$combo2.SelectedItem } else { '' }
+    $previousOption1 = if ($previousLabel1) { $sourceOptions | Where-Object { $_.Label -eq $previousLabel1 } | Select-Object -First 1 } else { $null }
+    $previousOption2 = if ($previousLabel2) { $sourceOptions | Where-Object { $_.Label -eq $previousLabel2 } | Select-Object -First 1 } else { $null }
+    $previousId1 = if ($previousOption1) { [string](Get-EbgObjectPropertyValue -InputObject $previousOption1 -Name 'Id') } else { '' }
+    $previousId2 = if ($previousOption2) { [string](Get-EbgObjectPropertyValue -InputObject $previousOption2 -Name 'Id') } else { '' }
 
     $sync.UI.SuppressAAGUIDSourceChange = $true
     try {
         if ($combo1) {
-            $options1 = @($admins | Where-Object { [string](Get-EbgObjectPropertyValue -InputObject $_ -Name 'id') -ne $previousId2 })
+            $options1 = @($sourceOptions | Where-Object { [string]$_.Id -ne $previousId2 })
+            $labels1 = @($options1 | ForEach-Object { [string]$_.Label })
             $combo1.ItemsSource = $null
-            $combo1.ItemsSource = $options1
-            $combo1.DisplayMemberPath = 'label'
-            if (-not [string]::IsNullOrWhiteSpace($previousId1)) {
-                $match1 = @($options1 | Where-Object { [string](Get-EbgObjectPropertyValue -InputObject $_ -Name 'id') -eq $previousId1 } | Select-Object -First 1)
-                if ($match1.Count -gt 0) { $combo1.SelectedItem = $match1[0] }
+            $combo1.DisplayMemberPath = ''
+            $combo1.ItemsSource = $labels1
+            if (-not [string]::IsNullOrWhiteSpace($previousLabel1) -and $labels1 -contains $previousLabel1) {
+                $combo1.SelectedItem = $previousLabel1
             }
         }
 
         if ($combo2) {
-            $options2 = @($admins | Where-Object { [string](Get-EbgObjectPropertyValue -InputObject $_ -Name 'id') -ne $previousId1 })
+            $options2 = @($sourceOptions | Where-Object { [string]$_.Id -ne $previousId1 })
+            $labels2 = @($options2 | ForEach-Object { [string]$_.Label })
             $combo2.ItemsSource = $null
-            $combo2.ItemsSource = $options2
-            $combo2.DisplayMemberPath = 'label'
-            if (-not [string]::IsNullOrWhiteSpace($previousId2)) {
-                $match2 = @($options2 | Where-Object { [string](Get-EbgObjectPropertyValue -InputObject $_ -Name 'id') -eq $previousId2 } | Select-Object -First 1)
-                if ($match2.Count -gt 0) { $combo2.SelectedItem = $match2[0] }
+            $combo2.DisplayMemberPath = ''
+            $combo2.ItemsSource = $labels2
+            if (-not [string]::IsNullOrWhiteSpace($previousLabel2) -and $labels2 -contains $previousLabel2) {
+                $combo2.SelectedItem = $previousLabel2
             }
         }
     }
@@ -2936,8 +2957,8 @@ function Update-EbgAAGUIDSourceOptions {
 
     if ($sync.WPFAAGUIDSourceAdminHint) {
         $selectedCount = @(
-            if ($combo1 -and $combo1.SelectedItem) { $combo1.SelectedItem }
-            if ([bool]$sync.State.AAGUIDSource2Visible -and $combo2 -and $combo2.SelectedItem) { $combo2.SelectedItem }
+            if ($combo1 -and -not [string]::IsNullOrWhiteSpace([string]$combo1.SelectedItem)) { $combo1.SelectedItem }
+            if ([bool]$sync.State.AAGUIDSource2Visible -and $combo2 -and -not [string]::IsNullOrWhiteSpace([string]$combo2.SelectedItem)) { $combo2.SelectedItem }
         ).Count
         $sync.WPFAAGUIDSourceAdminHint.Text = if ($admins.Count -gt 0) {
             "$($admins.Count) aktive direkte Global Administrator-konti hentet. $selectedCount AAGUID-kildekonto/konti valgt."
@@ -3524,29 +3545,35 @@ function Invoke-EbgApplyPhase2 {
         ) | Where-Object { $_ }
         if ($users.Count -ne 2) { throw 'Phase 2 kræver at begge break-glass konti findes i tenant.' }
 
-        Write-EbgStatus -Busy -Message 'Phase 2 step 2/6: henter FIDO2/passkey methods...'
-        Write-EbgLog -Message 'Phase 2 step 2/6: Henter FIDO2 methods fra break-glass konti og bruger eventuelle pre-provision AAGUIDs fra feltet...'
+        Write-EbgStatus -Busy -Message 'Phase 2 step 2/6: klargør AAGUIDs...'
+        Write-EbgLog -Message 'Phase 2 step 2/6: Klargør AAGUIDs fra pre-provision feltet og eventuelt fra break-glass konti...'
         $fidoMethods = @()
-        foreach ($user in $users) {
-            $upn = [string](Get-EbgObjectPropertyValue -InputObject $user -Name 'userPrincipalName')
-            try {
-                Write-EbgStatus -Busy -Message "Phase 2 step 2/6: henter FIDO2 methods for $upn..."
-                Write-EbgLog -Message "Henter FIDO2/passkey methods for $upn..."
-                $methods = @(Get-EbgFido2MethodsForUser -UserPrincipalName $upn)
-            }
-            catch {
-                Write-EbgLog -Level WARN -Message "Kunne ikke læse FIDO2 methods for $upn. Fortsætter hvis AAGUID allerede er angivet i feltet."
-                $methods = @()
-            }
-            foreach ($method in $methods) {
-                $method | Add-Member -MemberType NoteProperty -Name UserPrincipalName -Value $upn -Force
-                $fidoMethods += $method
+        $configuredAAGUIDs = @($config.AAGUIDs | Where-Object { $_ } | Select-Object -Unique)
+        if ($configuredAAGUIDs.Count -gt 0) {
+            Write-EbgLog -Message "Phase 2 step 2/6: Bruger $($configuredAAGUIDs.Count) AAGUID(s) fra feltet og skipper FIDO2 method refresh på break-glass konti."
+        }
+        else {
+            foreach ($user in $users) {
+                $upn = [string](Get-EbgObjectPropertyValue -InputObject $user -Name 'userPrincipalName')
+                try {
+                    Write-EbgStatus -Busy -Message "Phase 2 step 2/6: henter FIDO2 methods for $upn..."
+                    Write-EbgLog -Message "Henter FIDO2/passkey methods for $upn..."
+                    $methods = @(Get-EbgFido2MethodsForUser -UserPrincipalName $upn)
+                }
+                catch {
+                    Write-EbgLog -Level WARN -Message "Kunne ikke læse FIDO2 methods for $upn. Fortsætter hvis AAGUID allerede er angivet i feltet."
+                    $methods = @()
+                }
+                foreach ($method in $methods) {
+                    $method | Add-Member -MemberType NoteProperty -Name UserPrincipalName -Value $upn -Force
+                    $fidoMethods += $method
+                }
             }
         }
         $extractedAAGUIDs = @($fidoMethods | ForEach-Object {
             [string](Get-EbgObjectPropertyValue -InputObject $_ -Name 'aaGuid')
         } | Where-Object { $_ -match '^[0-9a-fA-F-]{36}$' } | ForEach-Object { $_.ToLowerInvariant() } | Select-Object -Unique)
-        $mergedAAGUIDs = @(@($config.AAGUIDs) + $extractedAAGUIDs | Where-Object { $_ } | Select-Object -Unique)
+        $mergedAAGUIDs = @($configuredAAGUIDs + $extractedAAGUIDs | Where-Object { $_ } | Select-Object -Unique)
         if ($mergedAAGUIDs.Count -lt 1) { throw 'Der er ingen AAGUIDs klar. Hent AAGUID fra en pre-provision/kildebruger med registreret FIDO2/passkey, eller registrer FIDO2 keys på break-glass kontiene først.' }
         foreach ($guid in $mergedAAGUIDs) { Write-EbgLog -Level PASS -Message "AAGUID klar til authentication strength: $guid" }
 
@@ -4291,7 +4318,7 @@ function Stop-EbgCurrentTask {
 $sync.configs.appsettings = @'
 {
   "name": "Entra Break Glass Configurator",
-  "version": "2.4.33",
+  "version": "2.4.34",
   "outputRoot": ".\\Output",
   "groupName": "CA-BreakGlass-Exclude",
   "groupDescription": "Security group used to exclude dedicated break-glass accounts from existing Conditional Access policies.",
