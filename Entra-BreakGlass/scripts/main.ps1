@@ -63,13 +63,15 @@ foreach ($box in @('WPFRegularSSPRAdmin1','WPFRegularSSPRAdmin2')) {
         $sync[$box].Add_SelectionChanged({ Update-EbgUIState | Out-Null })
     }
 }
+$updateAAGUIDSourceOptionsScript = ${function:Update-EbgAAGUIDSourceOptions}
+$updateUIStateScript = ${function:Update-EbgUIState}
 foreach ($box in @('WPFAAGUIDSourceAdmin1','WPFAAGUIDSourceAdmin2')) {
     if ($sync[$box]) {
         $sync[$box].Add_SelectionChanged({
             if ([bool]$sync.UI.SuppressAAGUIDSourceChange) { return }
-            Update-EbgAAGUIDSourceOptions | Out-Null
-            Update-EbgUIState | Out-Null
-        })
+            & $updateAAGUIDSourceOptionsScript | Out-Null
+            & $updateUIStateScript | Out-Null
+        }.GetNewClosure())
     }
 }
 if ($sync.WPFStartPhase1) {
