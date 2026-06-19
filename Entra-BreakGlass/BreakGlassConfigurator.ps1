@@ -2585,7 +2585,6 @@ function Update-EbgUIState {
         $prefix2 = if ($sync.WPFPhase2UserPrefix2 -and -not [string]::IsNullOrWhiteSpace($sync.WPFPhase2UserPrefix2.Text)) { $sync.WPFPhase2UserPrefix2.Text.Trim() } elseif ($sync.WPFUserPrefix2) { $sync.WPFUserPrefix2.Text.Trim() } else { '' }
         $sync.WPFPhase2UpnPreview.Text = "$prefix1@$domain$([Environment]::NewLine)$prefix2@$domain"
     }
-    Update-EbgAAGUIDSourceOptions
     if ($sync.WPFGraphStatus) {
         $sync.WPFGraphStatus.Text = if ($sync.State.GraphConnected) {
             if ($sync.State.Language -eq 'en-US') { 'Yes' } else { 'Ja' }
@@ -4344,7 +4343,7 @@ function Stop-EbgCurrentTask {
 $sync.configs.appsettings = @'
 {
   "name": "Entra Break Glass Configurator",
-  "version": "2.4.42",
+  "version": "2.4.43",
   "outputRoot": ".\\Output",
   "groupName": "CA-BreakGlass-Exclude",
   "groupDescription": "Security group used to exclude dedicated break-glass accounts from existing Conditional Access policies.",
@@ -5261,13 +5260,11 @@ foreach ($box in @('WPFRegularSSPRAdmin1','WPFRegularSSPRAdmin2')) {
         $sync[$box].Add_SelectionChanged({ Update-EbgUIState | Out-Null })
     }
 }
-$updateAAGUIDSourceOptionsScript = ${function:Update-EbgAAGUIDSourceOptions}
 $updateUIStateScript = ${function:Update-EbgUIState}
 foreach ($box in @('WPFAAGUIDSourceAdmin1','WPFAAGUIDSourceAdmin2')) {
     if ($sync[$box]) {
         $sync[$box].Add_SelectionChanged({
             if ([bool]$sync.UI.SuppressAAGUIDSourceChange) { return }
-            & $updateAAGUIDSourceOptionsScript | Out-Null
             & $updateUIStateScript | Out-Null
         }.GetNewClosure())
     }

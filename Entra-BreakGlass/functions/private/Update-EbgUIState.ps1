@@ -18,7 +18,6 @@ function Update-EbgUIState {
         $prefix2 = if ($sync.WPFPhase2UserPrefix2 -and -not [string]::IsNullOrWhiteSpace($sync.WPFPhase2UserPrefix2.Text)) { $sync.WPFPhase2UserPrefix2.Text.Trim() } elseif ($sync.WPFUserPrefix2) { $sync.WPFUserPrefix2.Text.Trim() } else { '' }
         $sync.WPFPhase2UpnPreview.Text = "$prefix1@$domain$([Environment]::NewLine)$prefix2@$domain"
     }
-    Update-EbgAAGUIDSourceOptions
     if ($sync.WPFGraphStatus) {
         $sync.WPFGraphStatus.Text = if ($sync.State.GraphConnected) {
             if ($sync.State.Language -eq 'en-US') { 'Yes' } else { 'Ja' }
