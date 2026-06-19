@@ -4,7 +4,10 @@ param(
     [switch] $NoCompileBanner
 )
 
-if (($PSVersionTable.PSEdition -ne 'Core') -or ($PSVersionTable.PSVersion.Major -lt 7)) {
+$isPowerShell7 = ($PSVersionTable.PSEdition -eq 'Core') -and ($PSVersionTable.PSVersion.Major -ge 7)
+$isStaThread = [System.Threading.Thread]::CurrentThread.GetApartmentState() -eq [System.Threading.ApartmentState]::STA
+
+if ((-not $isPowerShell7) -or (-not $isStaThread)) {
     $pwshCommand = Get-Command pwsh.exe -ErrorAction SilentlyContinue
     $pwshPath = if ($pwshCommand) {
         $pwshCommand.Source
@@ -19,6 +22,17 @@ if (($PSVersionTable.PSEdition -ne 'Core') -or ($PSVersionTable.PSVersion.Major 
     }
 
     $scriptPath = if ($PSCommandPath) { $PSCommandPath } else { $MyInvocation.MyCommand.Path }
+    $temporaryScriptPath = $null
+    if ([string]::IsNullOrWhiteSpace($scriptPath) -or -not (Test-Path -LiteralPath $scriptPath -PathType Leaf)) {
+        $scriptText = [string]$MyInvocation.MyCommand.Definition
+        if ([string]::IsNullOrWhiteSpace($scriptText)) {
+            throw 'Kunne ikke relaunch konfiguratoren i PowerShell 7 -STA, fordi scriptet ikke har en filsti. Gem BreakGlassConfigurator.ps1 lokalt og kør den med pwsh -STA.'
+        }
+        $temporaryScriptPath = Join-Path -Path ([System.IO.Path]::GetTempPath()) -ChildPath ('BreakGlassConfigurator-{0}.ps1' -f ([guid]::NewGuid().ToString('N')))
+        Set-Content -LiteralPath $temporaryScriptPath -Value $scriptText -Encoding utf8BOM
+        $scriptPath = $temporaryScriptPath
+    }
+
     $arguments = @(
         '-NoProfile',
         '-ExecutionPolicy', 'Bypass',
@@ -29,7 +43,14 @@ if (($PSVersionTable.PSEdition -ne 'Core') -or ($PSVersionTable.PSVersion.Major 
     if ($DebugMode) { $arguments += '-DebugMode' }
     if ($NoCompileBanner) { $arguments += '-NoCompileBanner' }
 
-    & $pwshPath @arguments
+    try {
+        & $pwshPath @arguments
+    }
+    finally {
+        if ($temporaryScriptPath) {
+            Remove-Item -LiteralPath $temporaryScriptPath -Force -ErrorAction SilentlyContinue
+        }
+    }
     return
 }
 
@@ -40,6 +61,8 @@ Add-Type -AssemblyName PresentationFramework
 Add-Type -AssemblyName PresentationCore
 Add-Type -AssemblyName WindowsBase
 Add-Type -AssemblyName System.Windows.Forms
+
+Write-Host 'Entra Break Glass Configurator bruger dette PowerShell-vindue som worker/log-konsol.' -ForegroundColor Green
 
 $sync = [Hashtable]::Synchronized(@{})
 $sync.configs = @{}

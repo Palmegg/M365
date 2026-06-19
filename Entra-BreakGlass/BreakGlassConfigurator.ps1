@@ -8,7 +8,10 @@ param(
     [switch] $NoCompileBanner
 )
 
-if (($PSVersionTable.PSEdition -ne 'Core') -or ($PSVersionTable.PSVersion.Major -lt 7)) {
+$isPowerShell7 = ($PSVersionTable.PSEdition -eq 'Core') -and ($PSVersionTable.PSVersion.Major -ge 7)
+$isStaThread = [System.Threading.Thread]::CurrentThread.GetApartmentState() -eq [System.Threading.ApartmentState]::STA
+
+if ((-not $isPowerShell7) -or (-not $isStaThread)) {
     $pwshCommand = Get-Command pwsh.exe -ErrorAction SilentlyContinue
     $pwshPath = if ($pwshCommand) {
         $pwshCommand.Source
@@ -23,6 +26,17 @@ if (($PSVersionTable.PSEdition -ne 'Core') -or ($PSVersionTable.PSVersion.Major 
     }
 
     $scriptPath = if ($PSCommandPath) { $PSCommandPath } else { $MyInvocation.MyCommand.Path }
+    $temporaryScriptPath = $null
+    if ([string]::IsNullOrWhiteSpace($scriptPath) -or -not (Test-Path -LiteralPath $scriptPath -PathType Leaf)) {
+        $scriptText = [string]$MyInvocation.MyCommand.Definition
+        if ([string]::IsNullOrWhiteSpace($scriptText)) {
+            throw 'Kunne ikke relaunch konfiguratoren i PowerShell 7 -STA, fordi scriptet ikke har en filsti. Gem BreakGlassConfigurator.ps1 lokalt og kør den med pwsh -STA.'
+        }
+        $temporaryScriptPath = Join-Path -Path ([System.IO.Path]::GetTempPath()) -ChildPath ('BreakGlassConfigurator-{0}.ps1' -f ([guid]::NewGuid().ToString('N')))
+        Set-Content -LiteralPath $temporaryScriptPath -Value $scriptText -Encoding utf8BOM
+        $scriptPath = $temporaryScriptPath
+    }
+
     $arguments = @(
         '-NoProfile',
         '-ExecutionPolicy', 'Bypass',
@@ -33,7 +47,14 @@ if (($PSVersionTable.PSEdition -ne 'Core') -or ($PSVersionTable.PSVersion.Major 
     if ($DebugMode) { $arguments += '-DebugMode' }
     if ($NoCompileBanner) { $arguments += '-NoCompileBanner' }
 
-    & $pwshPath @arguments
+    try {
+        & $pwshPath @arguments
+    }
+    finally {
+        if ($temporaryScriptPath) {
+            Remove-Item -LiteralPath $temporaryScriptPath -Force -ErrorAction SilentlyContinue
+        }
+    }
     return
 }
 
@@ -44,6 +65,8 @@ Add-Type -AssemblyName PresentationFramework
 Add-Type -AssemblyName PresentationCore
 Add-Type -AssemblyName WindowsBase
 Add-Type -AssemblyName System.Windows.Forms
+
+Write-Host 'Entra Break Glass Configurator bruger dette PowerShell-vindue som worker/log-konsol.' -ForegroundColor Green
 
 $sync = [Hashtable]::Synchronized(@{})
 $sync.configs = @{}
@@ -3063,6 +3086,12 @@ function Write-EbgLog {
     if ($logFile) {
         Add-Content -LiteralPath $logFile -Value $line -Encoding UTF8
     }
+    try {
+        Write-Host $line
+    }
+    catch {
+        # Console logging is best-effort so GUI/background work is never blocked by host output.
+    }
     if ($sync.WPFExecutionLog -and $sync.Form -and $sync.Form.Dispatcher) {
         Invoke-EbgUIThread -ScriptBlock {
             param([string] $uiLine)
@@ -4212,34 +4241,21 @@ function Invoke-EbgLoadGlobalAdministrators {
         return
     }
 
-    $sync.UI.ProcessRunning = $true
-    if ($sync.WPFRefreshRegularSSPRAdmins) { $sync.WPFRefreshRegularSSPRAdmins.IsEnabled = $false }
-    if ($sync.WPFProgressBar) { $sync.WPFProgressBar.IsIndeterminate = $true }
-
-    try {
+    Invoke-EbgRunspace -ScriptBlock {
         Write-EbgStatus -Busy -Message 'Henter aktive Global Administrator-konti...'
-        [System.Windows.Forms.Application]::DoEvents()
         Ensure-EbgGraphContext
+        Write-EbgLog -Message 'Henter direkte Global Administrator role assignments fra Microsoft Graph...'
         $admins = @(Get-EbgActiveGlobalAdministrators)
         $sync.State.ActiveGlobalAdministrators = $admins
         if ($sync.State.Discovery) {
             $sync.State.Discovery | Add-Member -MemberType NoteProperty -Name ActiveGlobalAdministrators -Value $admins -Force
         }
-        Update-EbgRegularSSPRAdminOptions
-        Update-EbgAAGUIDSourceOptions
+        Invoke-EbgUIThread -ScriptBlock {
+            Update-EbgRegularSSPRAdminOptions
+            Update-EbgAAGUIDSourceOptions
+            Update-EbgUIState | Out-Null
+        } -Wait
         Write-EbgStatus -Message "Hentede $($admins.Count) aktive direkte Global Administrator-konti."
-    }
-    catch {
-        $message = ConvertTo-EbgRedactedError -ErrorRecord $_
-        Write-EbgLog -Level ERROR -Message $message
-        Write-EbgStatus -Message 'Kunne ikke hente Global Administrator-konti.'
-        [System.Windows.MessageBox]::Show($message, $sync.App.Name, 'OK', 'Error') | Out-Null
-    }
-    finally {
-        $sync.UI.ProcessRunning = $false
-        if ($sync.WPFProgressBar) { $sync.WPFProgressBar.IsIndeterminate = $false }
-        if ($sync.WPFRefreshRegularSSPRAdmins) { $sync.WPFRefreshRegularSSPRAdmins.IsEnabled = $true }
-        Update-EbgUIState | Out-Null
     }
 }
 
@@ -4428,7 +4444,7 @@ function Stop-EbgCurrentTask {
 $sync.configs.appsettings = @'
 {
   "name": "Entra Break Glass Configurator",
-  "version": "2.4.45",
+  "version": "2.4.46",
   "outputRoot": ".\\Output",
   "groupName": "CA-BreakGlass-Exclude",
   "groupDescription": "Security group used to exclude dedicated break-glass accounts from existing Conditional Access policies.",

@@ -11,33 +11,20 @@ function Invoke-EbgLoadGlobalAdministrators {
         return
     }
 
-    $sync.UI.ProcessRunning = $true
-    if ($sync.WPFRefreshRegularSSPRAdmins) { $sync.WPFRefreshRegularSSPRAdmins.IsEnabled = $false }
-    if ($sync.WPFProgressBar) { $sync.WPFProgressBar.IsIndeterminate = $true }
-
-    try {
+    Invoke-EbgRunspace -ScriptBlock {
         Write-EbgStatus -Busy -Message 'Henter aktive Global Administrator-konti...'
-        [System.Windows.Forms.Application]::DoEvents()
         Ensure-EbgGraphContext
+        Write-EbgLog -Message 'Henter direkte Global Administrator role assignments fra Microsoft Graph...'
         $admins = @(Get-EbgActiveGlobalAdministrators)
         $sync.State.ActiveGlobalAdministrators = $admins
         if ($sync.State.Discovery) {
             $sync.State.Discovery | Add-Member -MemberType NoteProperty -Name ActiveGlobalAdministrators -Value $admins -Force
         }
-        Update-EbgRegularSSPRAdminOptions
-        Update-EbgAAGUIDSourceOptions
+        Invoke-EbgUIThread -ScriptBlock {
+            Update-EbgRegularSSPRAdminOptions
+            Update-EbgAAGUIDSourceOptions
+            Update-EbgUIState | Out-Null
+        } -Wait
         Write-EbgStatus -Message "Hentede $($admins.Count) aktive direkte Global Administrator-konti."
-    }
-    catch {
-        $message = ConvertTo-EbgRedactedError -ErrorRecord $_
-        Write-EbgLog -Level ERROR -Message $message
-        Write-EbgStatus -Message 'Kunne ikke hente Global Administrator-konti.'
-        [System.Windows.MessageBox]::Show($message, $sync.App.Name, 'OK', 'Error') | Out-Null
-    }
-    finally {
-        $sync.UI.ProcessRunning = $false
-        if ($sync.WPFProgressBar) { $sync.WPFProgressBar.IsIndeterminate = $false }
-        if ($sync.WPFRefreshRegularSSPRAdmins) { $sync.WPFRefreshRegularSSPRAdmins.IsEnabled = $true }
-        Update-EbgUIState | Out-Null
     }
 }

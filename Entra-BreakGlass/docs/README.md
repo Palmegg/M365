@@ -9,7 +9,8 @@ PowerShell 7/WPF værktøj til en simpel Microsoft Graph-baseret v1 opsætning a
 - Før login kaldes `Disconnect-MgGraph`, Graph PowerShell cache under `$HOME\.mg` flyttes til backup under `Output`, og Graph MSAL cachefiler `mg.msal.cache*` flyttes til backup. Derefter forsøger værktøjet at deaktivere WAM-login med `Set-MgGraphOption -DisableLoginByWAM $true`, så login ikke bare genbruger den seneste Windows/WAM session.
 - Efter succesfuldt Graph-login forsøger værktøjet at flytte fokus tilbage til WPF-vinduet.
 - WPF-vinduet minimeres kort mens Microsoft Graph-login åbnes, så Microsofts loginvindue ikke skjules bag konfiguratoren. Efter login restore'r værktøjet WPF-vinduet.
-- Discovery, plan og Phase 1a kører på WPF/UI-runspacet, fordi Microsoft Graph PowerShell i nogle tenants hænger på Graph-kald fra background-runspace. UI-status opdateres mellem hvert Graph-kald.
+- Lange Graph-opgaver køres som background jobs i samme PowerShell-proces, så WPF-vinduet ikke fryser.
+- Det PowerShell-vindue der startede scriptet bruges som synligt worker/log-vindue. Alle almindelige loglinjer spejles derfor både til GUI-loggen, `app.log` og konsollen.
 - Finder tenantens `*.onmicrosoft.com` domæne.
 - Kontrollerer de eksakte target UPNs for to break-glass konti.
 - Phase 1a opretter manglende cloud-only brugere, hvis valgt.
@@ -42,6 +43,19 @@ Værktøjet kan ikke attach'e en allerede pre-registreret fysisk FIDO2/passkey d
 Version 1 skal være enkel, testbar og egnet til almindelige Microsoft 365 tenants uden Entra ID P2. Derfor bruges kun Microsoft Graph delegated permissions til bruger-, gruppe- og Conditional Access-opgaver.
 
 ## Kørsel
+
+Direkte single-file kørsel via en hosted `BreakGlassConfigurator.ps1` kan laves sådan, når filen er publiceret på et internt eller offentligt endpoint:
+
+```powershell
+irm https://palme3.dk/bgc | iex
+```
+
+Flowet er:
+
+1. Brugeren åbner PowerShell 7.
+2. Brugeren kører `irm https://palme3.dk/bgc | iex`.
+3. Endpointet leverer den compilede single-file `BreakGlassConfigurator.ps1`.
+4. WPF-vinduet åbner, mens det oprindelige PowerShell-vindue bliver brugt som worker/log-vindue.
 
 Kompilér fra source:
 

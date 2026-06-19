@@ -12,6 +12,12 @@ function Write-EbgLog {
     if ($logFile) {
         Add-Content -LiteralPath $logFile -Value $line -Encoding UTF8
     }
+    try {
+        Write-Host $line
+    }
+    catch {
+        # Console logging is best-effort so GUI/background work is never blocked by host output.
+    }
     if ($sync.WPFExecutionLog -and $sync.Form -and $sync.Form.Dispatcher) {
         Invoke-EbgUIThread -ScriptBlock {
             param([string] $uiLine)
