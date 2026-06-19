@@ -4339,7 +4339,7 @@ function Stop-EbgCurrentTask {
 $sync.configs.appsettings = @'
 {
   "name": "Entra Break Glass Configurator",
-  "version": "2.4.38",
+  "version": "2.4.39",
   "outputRoot": ".\\Output",
   "groupName": "CA-BreakGlass-Exclude",
   "groupDescription": "Security group used to exclude dedicated break-glass accounts from existing Conditional Access policies.",
@@ -4421,7 +4421,7 @@ $inputXML = @'
 <Window xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Entra Break Glass Configurator"
-        Width="1560" Height="1060" MinWidth="1500" MinHeight="1020"
+        Width="1560" MinWidth="1500" MinHeight="1020" SizeToContent="Height"
         WindowStartupLocation="CenterScreen"
         Background="#0B0D0F">
     <Window.Resources>
@@ -5021,11 +5021,11 @@ $inputXML = @'
                             <RowDefinition Height="*"/>
                         </Grid.RowDefinitions>
                         <StackPanel Grid.Row="0">
-                            <TextBlock Text="Phase 2 - FIDO2 og dedikeret CA-policy" FontSize="22" FontWeight="SemiBold" Margin="0,0,0,12"/>
+                            <TextBlock Text="Phase 2 - FIDO2 og dedikeret CA-policy" FontSize="22" FontWeight="SemiBold" Margin="0,0,0,8"/>
                             <TextBlock Text="Dette trin refresher de to konti, læser de registrerede FIDO2/passkey security keys, udtrækker deres AAGUIDs, kan slette TAP, opretter/opdaterer BreakGlass-FIDO2 authentication strength og opretter den dedikerede CA-policy som disabled." TextWrapping="Wrap"/>
                         </StackPanel>
-                        <StackPanel Grid.Row="1" Margin="0,14,0,0">
-                            <Border Padding="14" Background="{StaticResource PanelRaised}" BorderBrush="{StaticResource BorderSoft}" BorderThickness="1" CornerRadius="10">
+                        <StackPanel Grid.Row="1" Margin="0,10,0,0">
+                            <Border Padding="10" Background="{StaticResource PanelRaised}" BorderBrush="{StaticResource BorderSoft}" BorderThickness="1" CornerRadius="10">
                                 <Grid>
                                     <Grid.ColumnDefinitions>
                                         <ColumnDefinition Width="160"/>
@@ -5040,7 +5040,7 @@ $inputXML = @'
                                         <RowDefinition Height="Auto"/>
                                         <RowDefinition Height="Auto"/>
                                     </Grid.RowDefinitions>
-                                    <TextBlock Grid.Row="0" Grid.Column="0" Grid.ColumnSpan="5" Text="Phase 2 target accounts" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,10"/>
+                                    <TextBlock Grid.Row="0" Grid.Column="0" Grid.ColumnSpan="5" Text="Phase 2 target accounts" FontSize="15" FontWeight="SemiBold" Margin="0,0,0,6"/>
                                     <TextBlock Grid.Row="1" Grid.Column="0" Text="Account 1 UPN prefix"/>
                                     <TextBox x:Name="WPFPhase2UserPrefix1" Grid.Row="1" Grid.Column="1"/>
                                     <TextBlock Grid.Row="1" Grid.Column="3" Text="Account 2 UPN prefix"/>
@@ -5048,10 +5048,10 @@ $inputXML = @'
                                     <TextBlock Grid.Row="2" Grid.Column="0" Text="Domain"/>
                                     <TextBox x:Name="WPFPhase2Domain" Grid.Row="2" Grid.Column="1" Grid.ColumnSpan="4" IsReadOnly="True"/>
                                     <TextBlock Grid.Row="3" Grid.Column="0" Text="Target UPN preview"/>
-                                    <TextBox x:Name="WPFPhase2UpnPreview" Grid.Row="3" Grid.Column="1" Grid.ColumnSpan="4" IsReadOnly="True" AcceptsReturn="True" Height="44" FontFamily="Consolas"/>
+                                    <TextBox x:Name="WPFPhase2UpnPreview" Grid.Row="3" Grid.Column="1" Grid.ColumnSpan="4" IsReadOnly="True" AcceptsReturn="True" Height="38" FontFamily="Consolas"/>
                                 </Grid>
                             </Border>
-                            <Border Margin="0,12,0,8" Padding="14" Background="{StaticResource PanelRaised}" BorderBrush="{StaticResource BorderSoft}" BorderThickness="1" CornerRadius="10">
+                            <Border Margin="0,10,0,6" Padding="10" Background="{StaticResource PanelRaised}" BorderBrush="{StaticResource BorderSoft}" BorderThickness="1" CornerRadius="10">
                             <Grid>
                                 <Grid.ColumnDefinitions>
                                     <ColumnDefinition Width="170"/>
@@ -5070,7 +5070,7 @@ $inputXML = @'
                                 <TextBox x:Name="WPFAuthenticationStrengthName" Grid.Row="0" Grid.Column="1" IsReadOnly="True" Margin="0,2,16,8"/>
                                 <TextBlock Grid.Row="0" Grid.Column="2" Text="BG CA policy navn"/>
                                 <TextBox x:Name="WPFBreakGlassCAPolicyName" Grid.Row="0" Grid.Column="3" IsReadOnly="True"/>
-                                <Border Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="4" Background="#0F172A" BorderBrush="{StaticResource BorderSoft}" BorderThickness="1" CornerRadius="8" Padding="12" Margin="0,4,0,12">
+                                <Border Grid.Row="1" Grid.Column="0" Grid.ColumnSpan="4" Background="#0F172A" BorderBrush="{StaticResource BorderSoft}" BorderThickness="1" CornerRadius="8" Padding="10" Margin="0,2,0,8">
                                     <Grid>
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="*"/>
@@ -5106,14 +5106,14 @@ $inputXML = @'
                                     <Border Grid.Column="0" Background="#0F172A" BorderBrush="{StaticResource BorderSoft}" BorderThickness="1" CornerRadius="8" Padding="10">
                                         <StackPanel>
                                             <TextBlock Text="Fetched AAGUIDs" FontWeight="SemiBold" Margin="0,0,0,4"/>
-                                            <TextBox x:Name="WPFFetchedAAGUIDSummary" IsReadOnly="True" AcceptsReturn="True" Height="86" TextWrapping="NoWrap" FontFamily="Consolas" Background="Transparent" BorderThickness="0" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" Text="Ingen AAGUIDs hentet endnu."/>
+                                            <TextBox x:Name="WPFFetchedAAGUIDSummary" IsReadOnly="True" AcceptsReturn="True" Height="74" TextWrapping="NoWrap" FontFamily="Consolas" Background="Transparent" BorderThickness="0" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" Text="Ingen AAGUIDs hentet endnu."/>
                                         </StackPanel>
                                     </Border>
                                     <Border Grid.Column="2" Background="#0F172A" BorderBrush="{StaticResource BorderSoft}" BorderThickness="1" CornerRadius="8" Padding="10">
                                         <StackPanel>
                                             <TextBlock Text="Allowed key AAGUIDs" FontWeight="SemiBold" Margin="0,0,0,4"/>
                                             <TextBlock Text="One AAGUID per line. These are used for BreakGlass-FIDO2 authentication strength." Foreground="{StaticResource TextMuted}" Margin="0,0,0,4" TextWrapping="Wrap"/>
-                                            <TextBox x:Name="WPFAAGUIDs" AcceptsReturn="True" TextWrapping="NoWrap" Height="66" FontFamily="Consolas" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"/>
+                                            <TextBox x:Name="WPFAAGUIDs" AcceptsReturn="True" TextWrapping="NoWrap" Height="58" FontFamily="Consolas" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto"/>
                                         </StackPanel>
                                     </Border>
                                 </Grid>
@@ -5124,7 +5124,7 @@ $inputXML = @'
                                 </StackPanel>
                             </Grid>
                             </Border>
-                            <TextBox x:Name="WPFPhase2Log" IsReadOnly="True" AcceptsReturn="True" Height="70" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" FontFamily="Consolas"/>
+                            <TextBox x:Name="WPFPhase2Log" IsReadOnly="True" AcceptsReturn="True" Height="54" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Auto" FontFamily="Consolas"/>
                             </StackPanel>
                     </Grid>
                 </Grid>
